@@ -40,7 +40,7 @@ const DIGIT_SUM_TARGET = 23;
 // ---------- Safety ----------
 const BASE_STAKE = 0.35;
 const MARTINGALE = 2.15;
-const VIRTUAL_LOSSES_NEEDED = 1;
+const VIRTUAL_LOSSES_NEEDED = 3; #changevirtuallossto3
 const COOLDOWN_TICKS = 5;
 const DAILY_PROFIT_CAP = 3.00;
 const DAILY_STOP_LOSS = 5.00;
