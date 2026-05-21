@@ -1,5 +1,6 @@
 const express = require('express');
 const http = require('http');
+const https = require('https');
 const WebSocket = require('ws');
 const path = require('path');
 const fs = require('fs');
@@ -32,18 +33,17 @@ function sanitizeState() {
   return rest;
 }
 
-// ---------- Market ----------
+// ---------- Market & Strategy ----------
 const MARKET = { sym: 'R_75', name: 'Volatility 75 Index', dp: 4 };
 const FIXED_BARRIER = 3;
-const DIGIT_SUM_TARGET = 23;
-
-// ---------- Safety ----------
+const DIGIT_SUM_TARGET = 24;           // tighter trigger
 const BASE_STAKE = 0.35;
 const MARTINGALE = 2.15;
-const VIRTUAL_LOSSES_NEEDED = 3; #changevirtuallossto3
-const COOLDOWN_TICKS = 5;
-const DAILY_PROFIT_CAP = 3.00;
+const VIRTUAL_LOSSES_NEEDED = 3;      // as requested
+const COOLDOWN_TICKS = 25;            // 25 ticks between trades
+const DAILY_PROFIT_CAP = 2.00;        // bank profits early
 const DAILY_STOP_LOSS = 5.00;
+const SETTLE_TICKS = 5;               // wait 5 ticks, then check balance
 
 // ---------- State ----------
 const state = {
@@ -62,7 +62,8 @@ const state = {
   waitingForOutcome: false,
 
   realTradeInProgress: false,
-  activeRealTrade: null,
+  activeRealTrade: null,          // { stake, balanceBefore, ticksWaited }
+  settleTicksRemaining: 0,
   logs: [],
   sessionAlreadyUsedToday: false
 };
@@ -129,7 +130,7 @@ function digitSum(price, dp) {
   return sum;
 }
 
-// ---------- Virtual outcome resolution ----------
+// ---------- Virtual outcome ----------
 function resolveVirtualOutcome(currentPrice) {
   if (!state.waitingForOutcome) return;
   state.waitingForOutcome = false;
@@ -145,14 +146,14 @@ function resolveVirtualOutcome(currentPrice) {
     addLog(`VIRTUAL LOSS (${state.virtualLosses}/${VIRTUAL_LOSSES_NEEDED})`);
     if (state.virtualLosses >= VIRTUAL_LOSSES_NEEDED) {
       state.mode = 'real';
-      state.realStake = BASE_STAKE;
+      state.realStake = BASE_STAKE;   // first real trade always at base
       addLog(`→ REAL mode (stake $${state.realStake.toFixed(2)})`);
     }
   }
   state.cooldownTicksLeft = COOLDOWN_TICKS;
 }
 
-// ---------- Real trade settlement (balance‑based) ----------
+// ---------- Real trade settlement (tick‑based balance change) ----------
 function settleRealTrade() {
   if (!state.activeRealTrade || !state.balance) return;
   const profit = state.balance - state.activeRealTrade.balanceBefore;
@@ -174,6 +175,7 @@ function settleRealTrade() {
 
   state.realTradeInProgress = false;
   state.activeRealTrade = null;
+  state.settleTicksRemaining = 0;
   state.cooldownTicksLeft = COOLDOWN_TICKS;
 
   checkDailyLimits();
@@ -185,19 +187,33 @@ function settleRealTrade() {
 function processTick(price) {
   if (!state.active || state.locked) return;
 
+  // 1. If we are counting ticks for settlement, handle that first
+  if (state.settleTicksRemaining > 0) {
+    state.settleTicksRemaining--;
+    if (state.settleTicksRemaining === 0) {
+      settleRealTrade();
+    }
+    broadcastSSE({ state: sanitizeState() });
+    return;
+  }
+
+  // 2. Resolve pending virtual outcome
   if (state.waitingForOutcome) {
     resolveVirtualOutcome(price);
     broadcastSSE({ state: sanitizeState() });
     return;
   }
 
+  // 3. Cooldown
   if (state.cooldownTicksLeft > 0) {
     state.cooldownTicksLeft--;
     return;
   }
 
+  // 4. Real trade in progress? (shouldn't happen if settleTicksRemaining is used, but keep safety)
   if (state.realTradeInProgress) return;
 
+  // 5. Signal check
   const sum = digitSum(price, MARKET.dp);
   if (sum <= DIGIT_SUM_TARGET) return;
 
@@ -206,13 +222,14 @@ function processTick(price) {
     addLog(`VIRTUAL entry – digit sum ${sum} > ${DIGIT_SUM_TARGET}`);
   } else {
     state.realTradeInProgress = true;
-    const stake = Math.round(Math.min(state.realStake, state.balance) * 100) / 100;
+    const stake = Math.round(Math.min(state.realStake, state.balance || Infinity) * 100) / 100;
     addLog(`REAL entry – stake $${stake.toFixed(2)} (digit sum ${sum})`);
 
     state.activeRealTrade = {
       stake,
-      balanceBefore: state.balance
+      balanceBefore: state.balance,
     };
+    state.settleTicksRemaining = 0;  // will be set after buy confirmation
 
     send({
       proposal: 1,
@@ -221,37 +238,75 @@ function processTick(price) {
       currency: state.currency || 'USD',
       duration: 1,
       duration_unit: 't',
-      symbol: MARKET.sym,
+      underlying_symbol: MARKET.sym,
       contract_type: 'DIGITOVER',
-      barrier: FIXED_BARRIER,
-      req_id: ++reqId
+      barrier: FIXED_BARRIER
     });
   }
 
   broadcastSSE({ state: sanitizeState() });
 }
 
-// ---------- Deriv WebSocket ----------
+// ---------- WebSocket connection (PAT → OTP) ----------
 let derivWs = null;
-let reqId = 0;
 
 function send(msg) {
   if (derivWs && derivWs.readyState === WebSocket.OPEN) derivWs.send(JSON.stringify(msg));
 }
 
-function connectDeriv() {
-  if (derivWs) derivWs.close();
-  const appId = process.env.DERIV_APP_ID;
-  derivWs = new WebSocket(`wss://ws.binaryws.com/websockets/v3?app_id=${appId}`);
-  derivWs.on('open', () => {
-    addLog('Connected. Authorizing...');
-    send({ authorize: process.env.DERIV_API_TOKEN });
+async function fetchOTP() {
+  return new Promise((resolve, reject) => {
+    const appId = process.env.DERIV_APP_ID;
+    const pat = process.env.DERIV_PAT;
+    const accountId = process.env.DERIV_ACCOUNT_ID;
+    if (!appId || !pat || !accountId) return reject(new Error('Missing credentials'));
+    const req = https.request({
+      hostname: 'api.derivws.com',
+      path: `/trading/v1/options/accounts/${accountId}/otp`,
+      method: 'POST',
+      headers: {
+        'Deriv-App-ID': appId,
+        'Authorization': `Bearer ${pat}`,
+        'Content-Type': 'application/json'
+      }
+    }, res => {
+      let body = '';
+      res.on('data', chunk => body += chunk);
+      res.on('end', () => {
+        try {
+          const data = JSON.parse(body);
+          if (data?.data?.url) resolve(data.data.url);
+          else reject(new Error(data?.error?.message || 'No OTP URL'));
+        } catch (e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    req.end();
   });
-  derivWs.on('message', data => {
-    try { handleMessage(JSON.parse(data)); } catch(e) {}
-  });
-  derivWs.on('close', () => setTimeout(connectDeriv, 5000));
-  derivWs.on('error', err => addLog(`WebSocket error: ${err.message}`));
+}
+
+async function connectDeriv() {
+  try {
+    addLog('Fetching OTP…');
+    const wsUrl = await fetchOTP();
+    derivWs = new WebSocket(wsUrl);
+    derivWs.on('open', () => {
+      addLog('Connected. Subscribing to balance & ticks.');
+      send({ balance: 1, subscribe: 1 });
+      send({ ticks_history: MARKET.sym, count: 1000, end: 'latest' });
+    });
+    derivWs.on('message', data => {
+      try { handleMessage(JSON.parse(data)); } catch(e) {}
+    });
+    derivWs.on('close', () => {
+      addLog('WebSocket closed. Reconnecting in 5s…');
+      setTimeout(connectDeriv, 5000);
+    });
+    derivWs.on('error', err => addLog(`WebSocket error: ${err.message}`));
+  } catch (e) {
+    addLog(`Connection error: ${e.message}. Retrying in 10s…`);
+    setTimeout(connectDeriv, 10000);
+  }
 }
 
 function handleMessage(msg) {
@@ -260,46 +315,57 @@ function handleMessage(msg) {
     if (state.realTradeInProgress) {
       state.realTradeInProgress = false;
       state.activeRealTrade = null;
-      addLog('Trade aborted – will retry on next signal.');
+      state.settleTicksRemaining = 0;
+      addLog('Trade aborted due to API error.');
     }
     return;
   }
 
-  if (msg.msg_type === 'authorize') {
-    addLog('Authorized. Subscribing to balance & ticks.');
-    send({ balance: 1, subscribe: 1, req_id: ++reqId });
-    send({ ticks_history: MARKET.sym, count: 1000, end: 'latest', req_id: ++reqId });
-  }
-  else if (msg.msg_type === 'balance') {
+  const mt = msg.msg_type;
+
+  // Balance updates (continuous)
+  if (mt === 'balance' && msg.balance) {
     state.balance = parseFloat(msg.balance.balance);
     state.currency = msg.balance.currency;
     broadcastSSE({ state: sanitizeState() });
+    return;
   }
-  else if (msg.msg_type === 'history') {
-    if (msg.history && msg.history.prices) send({ ticks: MARKET.sym, req_id: ++reqId });
+
+  // History feed
+  if (mt === 'history') {
+    send({ ticks: MARKET.sym });
+    return;
   }
-  else if (msg.msg_type === 'tick') {
-    if (msg.tick.symbol !== MARKET.sym) return;
+
+  // Tick feed
+  if (mt === 'tick' && msg.tick?.symbol === MARKET.sym) {
     processTick(parseFloat(msg.tick.quote));
     broadcastSSE({ state: sanitizeState() });
+    return;
   }
-  else if (msg.msg_type === 'proposal') {
-    send({ buy: msg.proposal.id, price: msg.proposal.ask_price, req_id: ++reqId });
+
+  // Proposal response
+  if (mt === 'proposal' && state.activeRealTrade) {
+    const askPrice = msg.proposal.ask_price;
+    send({ buy: msg.proposal.id, price: askPrice });
+    return;
   }
-  else if (msg.msg_type === 'buy') {
-    addLog(`Contract bought – ID ${msg.buy.contract_id}`);
-    if (state.activeRealTrade) {
-      if (state.activeRealTrade.timer) clearTimeout(state.activeRealTrade.timer);
-      state.activeRealTrade.timer = setTimeout(() => settleRealTrade(), 15000);
-    }
+
+  // Buy confirmation – start counting 5 ticks
+  if (mt === 'buy' && state.activeRealTrade) {
+    const contractId = msg.buy.contract_id;
+    addLog(`Contract bought – ID ${contractId}`);
+    state.settleTicksRemaining = SETTLE_TICKS;
+    return;
   }
+
+  // Ignore proposal_open_contract – we use balance change instead
 }
 
 // ---------- API ----------
 app.get('/api/logs', (req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-  res.write('\n');
-  sseClients.add(res);
+  res.write('\n'); sseClients.add(res);
   res.write(`data: ${JSON.stringify({ state: sanitizeState() })}\n\n`);
   req.on('close', () => sseClients.delete(res));
 });
@@ -315,17 +381,16 @@ app.post('/api/control', (req, res) => {
     state.mode = 'virtual'; state.virtualLosses = 0; state.realStake = BASE_STAKE;
     state.cooldownTicksLeft = 0; state.waitingForOutcome = false;
     state.realTradeInProgress = false; state.activeRealTrade = null;
-    addLog('R_75 Decimal‑Sum Bot started.');
+    state.settleTicksRemaining = 0;
+    addLog('R_75 Decimal‑Sum Bot started (digit sum >24, VL=3, cooldown 25, TP $2, SL $5)');
     saveState();
   } else if (action === 'stop') {
     state.active = false;
-    if (state.activeRealTrade && state.activeRealTrade.timer) clearTimeout(state.activeRealTrade.timer);
     state.realTradeInProgress = false; state.activeRealTrade = null;
-    addLog('Trading stopped.');
-    saveState();
+    state.settleTicksRemaining = 0;
+    addLog('Trading stopped.'); saveState();
   }
-  broadcastSSE({ state: sanitizeState() });
-  res.json({ success: true });
+  broadcastSSE({ state: sanitizeState() }); res.json({ success: true });
 });
 
 loadState();
