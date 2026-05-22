@@ -36,11 +36,11 @@ function sanitizeState() {
 // ---------- Market & Strategy ----------
 const MARKET = { sym: 'R_75', name: 'Volatility 75 Index', dp: 4 };
 const FIXED_BARRIER = 3;
-const DIGIT_SUM_TARGET = 24;           // tighter trigger
+const DIGIT_SUM_TARGET = 26;           // tighter trigger
 const BASE_STAKE = 0.35;
 const MARTINGALE = 2.15;
-const VIRTUAL_LOSSES_NEEDED = 3;      // as requested
-const COOLDOWN_TICKS = 25;            // 25 ticks between trades
+const VIRTUAL_LOSSES_NEEDED = 1;      // backtested optimum
+const COOLDOWN_TICKS = 15;            // 15 ticks between trades
 const DAILY_PROFIT_CAP = 2.00;        // bank profits early
 const DAILY_STOP_LOSS = 5.00;
 const SETTLE_TICKS = 5;               // wait 5 ticks, then check balance
@@ -62,7 +62,7 @@ const state = {
   waitingForOutcome: false,
 
   realTradeInProgress: false,
-  activeRealTrade: null,          // { stake, balanceBefore, ticksWaited }
+  activeRealTrade: null,
   settleTicksRemaining: 0,
   logs: [],
   sessionAlreadyUsedToday: false
@@ -146,7 +146,7 @@ function resolveVirtualOutcome(currentPrice) {
     addLog(`VIRTUAL LOSS (${state.virtualLosses}/${VIRTUAL_LOSSES_NEEDED})`);
     if (state.virtualLosses >= VIRTUAL_LOSSES_NEEDED) {
       state.mode = 'real';
-      state.realStake = BASE_STAKE;   // first real trade always at base
+      // ✅ NO reset of realStake – keep whatever it was (martingale preserved)
       addLog(`→ REAL mode (stake $${state.realStake.toFixed(2)})`);
     }
   }
@@ -165,7 +165,7 @@ function settleRealTrade() {
     state.realStake = BASE_STAKE;
     state.mode = 'virtual';
     state.virtualLosses = 0;
-    addLog('→ Back to VIRTUAL mode');
+    addLog('→ Back to VIRTUAL mode (stake reset)');
   } else {
     state.realStake = Math.round(Math.min(state.realStake * MARTINGALE, state.balance) * 100) / 100;
     state.mode = 'virtual';
@@ -187,7 +187,6 @@ function settleRealTrade() {
 function processTick(price) {
   if (!state.active || state.locked) return;
 
-  // 1. If we are counting ticks for settlement, handle that first
   if (state.settleTicksRemaining > 0) {
     state.settleTicksRemaining--;
     if (state.settleTicksRemaining === 0) {
@@ -197,23 +196,19 @@ function processTick(price) {
     return;
   }
 
-  // 2. Resolve pending virtual outcome
   if (state.waitingForOutcome) {
     resolveVirtualOutcome(price);
     broadcastSSE({ state: sanitizeState() });
     return;
   }
 
-  // 3. Cooldown
   if (state.cooldownTicksLeft > 0) {
     state.cooldownTicksLeft--;
     return;
   }
 
-  // 4. Real trade in progress? (shouldn't happen if settleTicksRemaining is used, but keep safety)
   if (state.realTradeInProgress) return;
 
-  // 5. Signal check
   const sum = digitSum(price, MARKET.dp);
   if (sum <= DIGIT_SUM_TARGET) return;
 
@@ -229,7 +224,7 @@ function processTick(price) {
       stake,
       balanceBefore: state.balance,
     };
-    state.settleTicksRemaining = 0;  // will be set after buy confirmation
+    state.settleTicksRemaining = 0;
 
     send({
       proposal: 1,
@@ -323,7 +318,6 @@ function handleMessage(msg) {
 
   const mt = msg.msg_type;
 
-  // Balance updates (continuous)
   if (mt === 'balance' && msg.balance) {
     state.balance = parseFloat(msg.balance.balance);
     state.currency = msg.balance.currency;
@@ -331,35 +325,29 @@ function handleMessage(msg) {
     return;
   }
 
-  // History feed
   if (mt === 'history') {
     send({ ticks: MARKET.sym });
     return;
   }
 
-  // Tick feed
   if (mt === 'tick' && msg.tick?.symbol === MARKET.sym) {
     processTick(parseFloat(msg.tick.quote));
     broadcastSSE({ state: sanitizeState() });
     return;
   }
 
-  // Proposal response
   if (mt === 'proposal' && state.activeRealTrade) {
     const askPrice = msg.proposal.ask_price;
     send({ buy: msg.proposal.id, price: askPrice });
     return;
   }
 
-  // Buy confirmation – start counting 5 ticks
   if (mt === 'buy' && state.activeRealTrade) {
     const contractId = msg.buy.contract_id;
     addLog(`Contract bought – ID ${contractId}`);
     state.settleTicksRemaining = SETTLE_TICKS;
     return;
   }
-
-  // Ignore proposal_open_contract – we use balance change instead
 }
 
 // ---------- API ----------
@@ -382,7 +370,7 @@ app.post('/api/control', (req, res) => {
     state.cooldownTicksLeft = 0; state.waitingForOutcome = false;
     state.realTradeInProgress = false; state.activeRealTrade = null;
     state.settleTicksRemaining = 0;
-    addLog('R_75 Decimal‑Sum Bot started (digit sum >24, VL=3, cooldown 25, TP $2, SL $5)');
+    addLog('R_75 Decimal‑Sum Bot started (digit sum >26, VL=1, cooldown 15, TP $2, SL $5, martingale 2.15x)');
     saveState();
   } else if (action === 'stop') {
     state.active = false;
