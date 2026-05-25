@@ -36,7 +36,7 @@ function sanitizeState() {
 // ---------- Market & Strategy ----------
 const MARKET = { sym: 'R_75', name: 'Volatility 75 Index', dp: 4 };
 const FIXED_BARRIER = 3;
-const DIGIT_SUM_TARGET = 26;           // tighter trigger
+const DIGIT_SUM_TARGET = 31;           // tighter trigger
 const BASE_STAKE = 0.35;
 const MARTINGALE = 2.15;
 const VIRTUAL_LOSSES_NEEDED = 1;      // backtested optimum
