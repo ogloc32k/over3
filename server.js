@@ -87,7 +87,8 @@ class OverThreeTrendEngine {
 
   getCurrentDensity() {
     if (this.ticks.length === 0) return 0;
-    return this.ticks.filter(d => d > 3).length;
+    // Normalized to a scale of 0-100 to map directly to your front-end CSS progress width %
+    return Math.round((this.ticks.filter(d => d > 3).length / WARMUP_TICKS) * 100);
   }
 
   getLast3() {
@@ -189,7 +190,13 @@ function processTick(price) {
   const metrics = engine.feed(price);
   globalTickCounter++;
 
-  if (!metrics) return;
+  // Dynamically update metrics calibration tracker before requirements met
+  if (state.active && !state.warmupComplete) {
+    state.warmupTicksFed = engine.ticks.length;
+    if (state.warmupTicksFed >= WARMUP_TICKS) {
+      state.warmupComplete = true;
+    }
+  }
 
   if (state.settleTicksRemaining > 0) {
     state.settleTicksRemaining--;
@@ -200,6 +207,7 @@ function processTick(price) {
 
   if (state.cooldownTicksLeft > 0) { state.cooldownTicksLeft--; return; }
   if (!state.active || state.locked || !state.warmupComplete || state.tradeInProgress) return;
+  if (!metrics) return;
 
   // OVER-3 SIGNAL INTERCEPTOR
   if (metrics.currentPercent === 60 && metrics.wasRising && metrics.isTriggerDigit) {
@@ -288,7 +296,6 @@ async function connectDeriv() {
     state.currency = targetAccount.currency || 'USD';
     if (state.dailyStartBalance === null) state.dailyStartBalance = state.balance;
 
-    // DEFENSIVE FIX: Explicitly sending stringified empty object to prevent JSON 400 content-length dropping
     const otpRes = await fetch(`https://api.derivws.com/trading/v1/options/accounts/${targetAccount.account_id}/otp`, {
       method: 'POST', 
       headers: { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' },
@@ -304,11 +311,8 @@ async function connectDeriv() {
       send({ balance: 1, subscribe: 1, req_id: ++reqId });
       send({ ticks_history: MARKET.sym, count: WARMUP_TICKS, end: 'latest', req_id: ++reqId });
 
-      // ACTIVE PERSISTENCE LINK: Keeps the cloud provider from cutting an idle socket
       keepAliveLoop = setInterval(() => {
         send({ ping: 1 });
-        
-        // Watchdog: If the network socket freezes up, terminate it instantly to trigger immediate hot-swap rebuild
         watchdogTimer = setTimeout(() => {
           addLog('🚨 Anti-Drop Warning: WebSocket stream stalled out. Forcing structural network reset...');
           if (derivWs) derivWs.terminate();
@@ -319,7 +323,6 @@ async function connectDeriv() {
     derivWs.on('message', raw => {
       try {
         const msg = JSON.parse(raw);
-        // Intercept ping reflections cleanly to verify live wire integrity
         if (msg.msg_type === 'ping') { clearTimeout(watchdogTimer); return; }
         handleMessage(msg);
       } catch(e) {}
@@ -351,10 +354,13 @@ function handleMessage(msg) {
     state.balance = parseFloat(msg.balance.balance);
     broadcastSSE({ state: sanitizeState() });
   } else if (msg.msg_type === 'history') {
-    state.warmupTicksFed = msg.history.prices.length;
-    for (const p of msg.history.prices) engine.feed(p);
+    const historicalPrices = msg.history.prices;
+    state.warmupTicksFed = historicalPrices.length;
+    for (const p of historicalPrices) engine.feed(p);
+    
     if (!state.liveSubscribed) {
-      state.warmupComplete = true; state.liveSubscribed = true;
+      state.warmupComplete = (state.warmupTicksFed >= WARMUP_TICKS);
+      state.liveSubscribed = true;
       addLog('✅ Technical configuration calibrated. Continuous monitoring active.');
       send({ ticks: MARKET.sym, req_id: ++reqId });
     }
@@ -372,7 +378,10 @@ function handleMessage(msg) {
 
 app.get('/api/logs', (req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-  sseClients.add(res); res.write(`data: ${JSON.stringify({ state: sanitizeState() })}\n\n`);
+  sseClients.add(res); 
+  
+  // CRITICAL ALIGNMENT: Pushes pre-existing state variables and backlog logs right at connection handshake
+  res.write(`data: ${JSON.stringify({ state: sanitizeState(), logs: state.logs })}\n\n`);
   req.on('close', () => sseClients.delete(res));
 });
 
