@@ -12,7 +12,7 @@ const STATE_FILE = '/var/data/deriv_state.json';
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
-// ---------- SSE ----------
+// ---------- Server-Sent Events Array Router ----------
 const sseClients = new Set();
 let logId = 1;
 
@@ -29,78 +29,75 @@ function broadcastSSE(payload) {
 
 function sanitizeState() {
   const { logs, ...rest } = state;
-  return rest;
+  return {
+    ...rest,
+    currentDensity: engine ? engine.getCurrentDensity() : 0,
+    last3Ticks: engine ? engine.getLast3() : []
+  };
 }
 
-// ---------- Under-6 Institutional Configuration ----------
+// ---------- Over-3 Analysis Engine Setup ----------
 const MARKET = { sym: 'R_75', name: 'Volatility 75 Index', dp: 4 };
-const FIXED_BARRIER = 6;         // Fixed to 6 (Wins on 0, 1, 2, 3, 4, 5)
+const FIXED_BARRIER = 3;         
+const WARMUP_TICKS = 100;        
 
-// Edge Core: Trade only when losing digits (6-9) heavily saturate the feed
-const EXHAUSTION_Z_SCORE = 2.00; // Requires > 2.0 Standard Deviations of imbalance
-const MIN_STREAK = 4;            // Must see at least 4 consecutive losing digits (6-9)
+const RISK_PERCENT = 1.5;        
+const MIN_STAKE = 0.35;          
+const TP_PERCENT = 5;            
+const SL_PERCENT = 10;           
 
-// Risk Management Core
-const RISK_PERCENT = 1.5;        // Trade strictly 1.5% of account balance
-const MIN_STAKE = 0.35;          // Minimum execution floor
-const TP_PERCENT = 5;            // Target Profit at 5% of starting balance
-const SL_PERCENT = 10;           // Stop Loss at 10% of starting balance
-
-const COOLDOWN_TICKS = 25;       
-const SETTLE_TICKS = 15;
-const WARMUP_TICKS = 300;
+const COOLDOWN_TICKS = 10;       
+const SETTLE_TICKS = 12;
 
 let globalTickCounter = 0;
 
-// ---------- Statistical Exhaustion Analyzer ----------
-class StatisticalExhaustionEngine {
+class OverThreeTrendEngine {
   constructor() {
     this.ticks = [];
-    this.consecutiveLossDigits = 0;
   }
 
   feed(price) {
     const digit = parseInt(parseFloat(price).toFixed(MARKET.dp).slice(-1));
-    this.ticks.push(digit);
-    if (this.ticks.length > 400) this.ticks.shift();
-
-    // Track streaks of losing digits (6, 7, 8, 9)
-    if (digit >= 6) {
-      this.consecutiveLossDigits++;
-    } else {
-      this.consecutiveLossDigits = 0;
+    
+    let previousCount = null;
+    if (this.ticks.length === WARMUP_TICKS) {
+      previousCount = this.ticks.filter(d => d > 3).length;
     }
-  }
 
-  getMetrics() {
+    this.ticks.push(digit);
+    if (this.ticks.length > WARMUP_TICKS) this.ticks.shift();
+
     if (this.ticks.length < WARMUP_TICKS) return null;
 
-    const shortWindow = this.ticks.slice(-30);
-    const longWindow = this.ticks.slice(-300);
+    const currentCount = this.ticks.filter(d => d > 3).length; 
+    const wasRising = (previousCount !== null && currentCount > previousCount);
+    const isTriggerDigit = (digit === 6);
 
-    // Dynamic historical baseline tracking for digits 6-9 (~40% expected)
-    const longLossDigits = longWindow.filter(d => d >= 6).length;
-    const pBaseline = longLossDigits / longWindow.length; 
-
-    const shortLossDigits = shortWindow.filter(d => d >= 6).length;
-    const n = shortWindow.length;
-
-    const expectedLossDigits = n * pBaseline;
-    const standardDeviation = Math.sqrt(n * pBaseline * (1 - pBaseline));
-    
-    const zScore = (shortLossDigits - expectedLossDigits) / (standardDeviation || 1);
+    const last3 = this.ticks.slice(-3);
+    const isExhausted = (last3.length === 3 && last3.every(d => d >= 7));
 
     return {
-      zScore: zScore, 
-      currentStreak: this.consecutiveLossDigits,
-      shortDensity: (shortLossDigits / n) * 100
+      currentPercent: currentCount,
+      wasRising: wasRising,
+      isTriggerDigit: isTriggerDigit,
+      isExhausted: isExhausted,
+      literalDigit: digit
     };
+  }
+
+  getCurrentDensity() {
+    if (this.ticks.length === 0) return 0;
+    return this.ticks.filter(d => d > 3).length;
+  }
+
+  getLast3() {
+    return this.ticks.slice(-3);
   }
 }
 
-const engine = new StatisticalExhaustionEngine();
+const engine = new OverThreeTrendEngine();
 
-// ---------- State ----------
+// ---------- Real-Time Framework State Engine ----------
 const state = {
   active: false,
   tradingMode: 'demo', 
@@ -113,25 +110,22 @@ const state = {
   warmupComplete: false,
   warmupTicksFed: 0,
   liveSubscribed: false,
-  accountType: 'Connecting...',
-
+  accountType: 'Awaiting Authorization...',
   tradeInProgress: false,
   activeRealTrade: null,
   settleTicksRemaining: 0,
   currentStake: MIN_STAKE,
   cooldownTicksLeft: 0,
-
-  logs: [],
-  sessionAlreadyUsedToday: false
+  logs: []
 };
 
-// ---------- Persistence ----------
+// ---------- Session Persistence Framework ----------
 function saveState() {
   try {
     const dir = path.dirname(STATE_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(STATE_FILE, JSON.stringify({
-      date: new Date().toISOString().slice(0,10),
+      date: getEATDateString(),
       tradingMode: state.tradingMode,
       dailyStartBalance: state.dailyStartBalance,
       dailyPnl: state.dailyPnl,
@@ -146,41 +140,31 @@ function loadState() {
   try {
     if (fs.existsSync(STATE_FILE)) {
       const saved = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-      const today = new Date().toISOString().slice(0,10);
-      
-      if (saved.tradingMode) state.tradingMode = saved.tradingMode;
-      
-      if (saved.date === today && saved.sessionActive) {
-        state.sessionAlreadyUsedToday = true;
-        state.locked = true;
-        state.lockReason = 'Daily session safety limits locked.';
-        addLog(state.lockReason);
-      }
-      if (saved.date === today) {
+      if (saved.date === getEATDateString()) {
+        state.tradingMode = saved.tradingMode || 'demo';
         state.dailyStartBalance = saved.dailyStartBalance;
         state.dailyPnl = saved.dailyPnl || 0;
-        if (saved.locked) { state.locked = true; state.lockReason = saved.lockReason || ''; }
+        state.locked = saved.locked || false;
+        state.lockReason = saved.lockReason || '';
       }
     }
   } catch(e) {}
 }
 
-function getTP() { return state.dailyStartBalance ? (state.dailyStartBalance * TP_PERCENT / 100) : 0; }
-function getSL() { return state.dailyStartBalance ? (state.dailyStartBalance * SL_PERCENT / 100) : 0; }
-
 function checkDailyLimits() {
   if (!state.dailyStartBalance) return false;
-  if (state.dailyPnl >= getTP()) {
-    state.locked = true;
-    state.lockReason = `Target Target-Profit +$${getTP().toFixed(2)} (${TP_PERCENT}%) secured.`;
-    addLog(state.lockReason);
-    return true;
+  const tpLimit = state.dailyStartBalance * (TP_PERCENT / 100);
+  const slLimit = state.dailyStartBalance * (SL_PERCENT / 100);
+
+  if (state.dailyPnl >= tpLimit) {
+    state.locked = true; state.active = false;
+    state.lockReason = `🎯 Target hit! Secured +$${state.dailyPnl.toFixed(2)}. Unlocking at midnight.`;
+    addLog(state.lockReason); disconnectDeriv(); return true;
   }
-  if (state.dailyPnl <= -getSL()) {
-    state.locked = true;
-    state.lockReason = `Emergency Stop-Loss -$${getSL().toFixed(2)} (${SL_PERCENT}%) executed.`;
-    addLog(state.lockReason);
-    return true;
+  if (state.dailyPnl <= -slLimit) {
+    state.locked = true; state.active = false;
+    state.lockReason = `🛑 Risk Limit hit. Portfolio preserved at -$${Math.abs(state.dailyPnl).toFixed(2)}. Unlocking at midnight.`;
+    addLog(state.lockReason); disconnectDeriv(); return true;
   }
   return false;
 }
@@ -189,37 +173,23 @@ function settleRealTrade() {
   if (!state.activeRealTrade || state.balance == null) return;
   const profit = state.balance - state.activeRealTrade.balanceBefore;
   state.dailyPnl += profit;
-  const result = profit > 0 ? 'WIN' : (profit < 0 ? 'LOSS' : 'DRAW');
   
-  addLog(`[${state.tradingMode.toUpperCase()}] ${result}: ${profit > 0 ? '+' : ''}${profit.toFixed(2)} | Session P&L: ${state.dailyPnl.toFixed(2)}`);
-
-  state.tradeInProgress = false;
-  state.activeRealTrade = null;
-  state.settleTicksRemaining = 0;
+  addLog(`[${state.tradingMode.toUpperCase()}] Trade Settled: ${profit >= 0 ? '+' : ''}${profit.toFixed(2)} | Today P&L: ${state.dailyPnl.toFixed(2)}`);
+  
+  state.tradeInProgress = false; state.activeRealTrade = null; state.settleTicksRemaining = 0;
   state.cooldownTicksLeft = COOLDOWN_TICKS;
 
-  // Pre-calculate next potential stake for UI display accuracy
-  const nextCalculatedRisk = state.balance * (RISK_PERCENT / 100);
-  const nextRawStake = Math.min(Math.max(MIN_STAKE, nextCalculatedRisk), state.balance);
-  state.currentStake = Math.round(nextRawStake * 100) / 100;
+  const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
+  state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-  checkDailyLimits();
-  saveState();
-  broadcastSSE({ state: sanitizeState() });
+  checkDailyLimits(); saveState(); broadcastSSE({ state: sanitizeState() });
 }
 
 function processTick(price) {
-  engine.feed(price);
-  const metrics = engine.getMetrics();
-  
+  const metrics = engine.feed(price);
   globalTickCounter++;
-  
-  // Dashboard metrics visual heartbeat
-  if (globalTickCounter % 15 === 0 && metrics) {
-    addLog(`📊 Matrix Status: Losing Streak (6-9): [${metrics.currentStreak}] | Risk Density: [${metrics.shortDensity.toFixed(0)}%] | Exhaustion Z-Score: [${metrics.zScore.toFixed(2)} / ${EXHAUSTION_Z_SCORE}]`);
-  }
 
-  if (!state.active || state.locked || !state.warmupComplete) return;
+  if (!metrics) return;
 
   if (state.settleTicksRemaining > 0) {
     state.settleTicksRemaining--;
@@ -229,37 +199,48 @@ function processTick(price) {
   }
 
   if (state.cooldownTicksLeft > 0) { state.cooldownTicksLeft--; return; }
-  if (state.tradeInProgress) return;
-  if (!metrics) return;
+  if (!state.active || state.locked || !state.warmupComplete || state.tradeInProgress) return;
 
-  // UNDER 6 HIGH-CONVICTION EXECUTION TARGET
-  if (metrics.zScore >= EXHAUSTION_Z_SCORE && metrics.currentStreak >= MIN_STREAK) {
+  // OVER-3 SIGNAL INTERCEPTOR
+  if (metrics.currentPercent === 60 && metrics.wasRising && metrics.isTriggerDigit) {
+    if (metrics.isExhausted) {
+      addLog(`⚠️ Exhaustion block triggered (last digits ≥ 7). Skipping setup to protect capital.`);
+      return;
+    }
+
     state.tradeInProgress = true;
-    
-    // Dynamic Risk Allocation: 1.5% of balance, floor of $0.35, strict 2 decimal places
-    let calculatedRisk = state.balance * (RISK_PERCENT / 100);
-    let rawStake = Math.max(MIN_STAKE, calculatedRisk); // Enforce $0.35 minimum
-    rawStake = Math.min(rawStake, state.balance);       // Prevent allocating more than total balance
-    const stake = Math.round(rawStake * 100) / 100;     // Format to strictly 2 decimal places
-    
-    state.currentStake = stake; // Update telemetry state
+    const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
+    state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-    addLog(`🎯 EXHAUSTION DETECTED! Allocating $${stake.toFixed(2)} (1.5% Risk Factor). Order: DIGITUNDER 6`);
-
-    state.activeRealTrade = { stake, balanceBefore: state.balance };
+    addLog(`🎯 Momentum match: Over-3 density at 60% and rising. Execution sent with stake $${state.currentStake}`);
+    state.activeRealTrade = { stake: state.currentStake, balanceBefore: state.balance };
     
-    // API updated to use underlying_symbol
     send({
-      proposal: 1, amount: stake, basis: 'stake', currency: state.currency || 'USD',
+      proposal: 1, amount: state.currentStake, basis: 'stake', currency: state.currency,
       duration: 1, duration_unit: 't', underlying_symbol: MARKET.sym,
-      contract_type: 'DIGITUNDER', barrier: FIXED_BARRIER, req_id: ++reqId
+      contract_type: 'DIGITOVER', barrier: FIXED_BARRIER, req_id: ++reqId
     });
-
     broadcastSSE({ state: sanitizeState() });
   }
 }
 
-// ---------- WebSocket & REST Core Setup ----------
+// ---------- Midnight Automation Reset Loop ----------
+function getEATDateString() {
+  return new Date().toLocaleDateString("en-US", { timeZone: "Africa/Nairobi" });
+}
+
+setInterval(() => {
+  const nowEAT = new Date().toLocaleTimeString("en-US", { timeZone: "Africa/Nairobi", hour12: false });
+  if (nowEAT === "00:00:00") {
+    addLog(`⏰ Midnight EAT reached. Resetting parameters for the new daily session...`);
+    state.locked = false; state.lockReason = ''; state.dailyStartBalance = null; state.dailyPnl = 0;
+    state.warmupComplete = false; state.warmupTicksFed = 0; state.liveSubscribed = false;
+    state.tradeInProgress = false; state.activeRealTrade = null; state.settleTicksRemaining = 0;
+    saveState(); connectDeriv();
+  }
+}, 1000);
+
+// ---------- Connection Persistence Engine ----------
 let derivWs = null;
 let reqId = 0;
 let keepAliveLoop = null;
@@ -269,111 +250,100 @@ function send(msg) {
   if (derivWs && derivWs.readyState === WebSocket.OPEN) derivWs.send(JSON.stringify(msg));
 }
 
-// Cleans up memory leaks and broken socket threads before rebuilding connections
 function disconnectDeriv() {
-  clearInterval(keepAliveLoop);
+  clearInterval(keepAliveLoop); 
   clearTimeout(watchdogTimer);
-  if (derivWs) {
-    derivWs.removeAllListeners();
-    try { derivWs.terminate(); } catch(e) {}
-    derivWs = null;
+  if (derivWs) { 
+    derivWs.removeAllListeners(); 
+    try { derivWs.terminate(); } catch(e) {} 
+    derivWs = null; 
   }
 }
 
 async function connectDeriv() {
-  if (!state.active) return;
-  disconnectDeriv(); // Always wipe old cycles before connecting
-  
+  if (!state.active || state.locked) return;
+  disconnectDeriv();
+
   const appId = (process.env.DERIV_APP_ID || '').trim();
   const token = (process.env.DERIV_PAT || '').trim();
 
   if (!appId || !token) {
-    addLog('Configuration error: Check Render environment strings.');
+    addLog('Configuration Halt: Environment variables for APP_ID or Token are missing.');
     return;
   }
 
   try {
-    const accountsResponse = await fetch('https://api.derivws.com/trading/v1/options/accounts', {
-      method: 'GET',
-      headers: { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' }
+    const accRes = await fetch('https://api.derivws.com/trading/v1/options/accounts', {
+      method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' }
     });
+    if (!accRes.ok) throw new Error('API Token authorization rejected.');
 
-    if (!accountsResponse.ok) throw new Error('API Profile access denied.');
-
-    const accountsData = await accountsResponse.json();
-    const accountList = Array.isArray(accountsData.data) ? accountsData.data : [accountsData.data];
-    const account = accountList.find(acc => acc.account_type === (state.tradingMode || 'demo'));
+    const data = await accRes.json();
+    const accList = Array.isArray(data.data) ? data.data : [data.data];
+    const targetAccount = accList.find(a => a.account_type === state.tradingMode);
     
-    if (!account) throw new Error(`Target account configuration mismatch.`);
+    if (!targetAccount) throw new Error(`Could not find an active profile matching ${state.tradingMode}`);
 
-    const accountId = account.account_id;
-    state.accountType = account.account_type === 'demo' ? '🧪 DEMO PIPELINE' : '⚠️ LIVE PRODUCTION PORTFOLIO';
-    state.balance = parseFloat(account.balance);
-    state.currency = account.currency || 'USD';
-    
+    state.balance = parseFloat(targetAccount.balance);
+    state.currency = targetAccount.currency || 'USD';
     if (state.dailyStartBalance === null) state.dailyStartBalance = state.balance;
 
-    addLog(`✅ Secure Routing Active: ${accountId} (${state.accountType})`);
-
-    const otpResponse = await fetch(`https://api.derivws.com/trading/v1/options/accounts/${accountId}/otp`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' }
+    // DEFENSIVE FIX: Explicitly sending stringified empty object to prevent JSON 400 content-length dropping
+    const otpRes = await fetch(`https://api.derivws.com/trading/v1/options/accounts/${targetAccount.account_id}/otp`, {
+      method: 'POST', 
+      headers: { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
     });
+    if (!otpRes.ok) throw new Error('Security token acquisition rejected.');
 
-    if (!otpResponse.ok) throw new Error('Security core refused session allocation.');
-
-    const otpData = await otpResponse.json();
+    const otpData = await otpRes.json();
     derivWs = new WebSocket(otpData.data.url);
 
     derivWs.on('open', () => {
-      addLog(`Syncing historical feed arrays...`);
+      addLog(`Connected securely to Deriv API. Mirroring wallet balance: $${state.balance.toFixed(2)}`);
       send({ balance: 1, subscribe: 1, req_id: ++reqId });
       send({ ticks_history: MARKET.sym, count: WARMUP_TICKS, end: 'latest', req_id: ++reqId });
 
-      // HIGH FREQUENCY HEARTBEAT: Keeps Koyeb proxies from killing the connection
+      // ACTIVE PERSISTENCE LINK: Keeps the cloud provider from cutting an idle socket
       keepAliveLoop = setInterval(() => {
         send({ ping: 1 });
-        // Watchdog: If the server doesn't respond to our ping within 5 seconds, dump the pipe
+        
+        // Watchdog: If the network socket freezes up, terminate it instantly to trigger immediate hot-swap rebuild
         watchdogTimer = setTimeout(() => {
-          addLog('🚨 Watchdog Alert: Pipeline stalled out. Triggering hot swap...');
+          addLog('🚨 Anti-Drop Warning: WebSocket stream stalled out. Forcing structural network reset...');
           if (derivWs) derivWs.terminate();
-        }, 5000);
-      }, 15000); // Check every 15 seconds
+        }, 4000);
+      }, 15000);
     });
 
-    derivWs.on('message', data => { 
-      try { 
-        const parsedData = JSON.parse(data);
-        // Intercept ping returns silently to clear the watchdog timer
-        if (parsedData.msg_type === 'ping') {
-          clearTimeout(watchdogTimer);
-          return;
-        }
-        handleMessage(parsedData); 
-      } catch(e) {} 
+    derivWs.on('message', raw => {
+      try {
+        const msg = JSON.parse(raw);
+        // Intercept ping reflections cleanly to verify live wire integrity
+        if (msg.msg_type === 'ping') { clearTimeout(watchdogTimer); return; }
+        handleMessage(msg);
+      } catch(e) {}
     });
-    
-    derivWs.on('close', () => { 
+
+    derivWs.on('close', () => {
       disconnectDeriv();
-      if (state.active) {
-        addLog('⚠️ Session pipe dropped. Attempting automated reconnection in 5s...');
-        setTimeout(connectDeriv, 5000); 
+      if (state.active && !state.locked) {
+        addLog('⚠️ Network drift detected. Activating hot-swap reconnect system in 2s...');
+        setTimeout(connectDeriv, 2000);
       }
     });
 
-    derivWs.on('error', () => {
-      if (derivWs) derivWs.terminate();
-    });
+    derivWs.on('error', () => { if (derivWs) derivWs.terminate(); });
 
-  } catch (e) {
-    addLog(`Pipeline Error: ${e.message}. Retrying...`);
-    if (state.active) setTimeout(connectDeriv, 10000);
+  } catch(e) {
+    addLog(`Network Link Exception: ${e.message}. Retrying execution in 5s...`);
+    if (state.active && !state.locked) setTimeout(connectDeriv, 5000);
   }
 }
 
 function handleMessage(msg) {
   if (msg.error) {
-    addLog(`Deriv API Flag: ${msg.error.message}`);
+    addLog(`Server Error Response: ${msg.error.message}`);
     state.tradeInProgress = false; state.activeRealTrade = null; state.settleTicksRemaining = 0;
     return;
   }
@@ -381,11 +351,11 @@ function handleMessage(msg) {
     state.balance = parseFloat(msg.balance.balance);
     broadcastSSE({ state: sanitizeState() });
   } else if (msg.msg_type === 'history') {
-    state.warmupTicksFed += msg.history.prices.length;
+    state.warmupTicksFed = msg.history.prices.length;
     for (const p of msg.history.prices) engine.feed(p);
-    if (state.warmupTicksFed >= WARMUP_TICKS && !state.liveSubscribed) {
+    if (!state.liveSubscribed) {
       state.warmupComplete = true; state.liveSubscribed = true;
-      addLog('✅ Baseline calibrated. High-probability Under-6 strategy armed.');
+      addLog('✅ Technical configuration calibrated. Continuous monitoring active.');
       send({ ticks: MARKET.sym, req_id: ++reqId });
     }
     broadcastSSE({ state: sanitizeState() });
@@ -406,28 +376,25 @@ app.get('/api/logs', (req, res) => {
   req.on('close', () => sseClients.delete(res));
 });
 
-app.get('/api/state', (req, res) => res.json({ ...state, logs: undefined }));
-
 app.post('/api/control', (req, res) => {
   const { action, mode } = req.body;
   if (action === 'set_mode') {
-    if (state.active) return res.status(400).json({ error: 'System processing core active.' });
+    if (state.active) return res.status(400).json({ error: 'Core processing engine active.' });
     state.tradingMode = mode; state.dailyStartBalance = null; state.dailyPnl = 0;
     saveState(); broadcastSSE({ state: sanitizeState() }); return res.json({ success: true });
   }
   if (action === 'start') {
-    if (state.sessionAlreadyUsedToday) return res.status(403).json({ error: 'Session locked.' });
     state.active = true; state.locked = false; state.dailyStartBalance = null; state.dailyPnl = 0;
     state.warmupComplete = false; state.warmupTicksFed = 0; state.liveSubscribed = false;
     state.tradeInProgress = false; state.activeRealTrade = null; state.settleTicksRemaining = 0;
-    addLog(`🚀 Core Initiated. Target Vector: [UNDER 6] Mode: [${state.tradingMode.toUpperCase()}].`);
+    addLog(`🚀 Processing Pipeline Armed. Listening to V75 Index Streams.`);
     connectDeriv(); saveState();
   } else if (action === 'stop') {
     state.active = false; disconnectDeriv();
-    state.tradeInProgress = false; addLog('Engine returned to standby.'); saveState();
+    state.tradeInProgress = false; addLog('🚨 Core Engine Disarmed Safely.'); saveState();
   }
   broadcastSSE({ state: sanitizeState() }); res.json({ success: true });
 });
 
 loadState();
-server.listen(PORT, () => console.log(`Terminal operating on port ${PORT}`));
+server.listen(PORT, () => console.log(`Production Terminal Operating on Port ${PORT}`));
