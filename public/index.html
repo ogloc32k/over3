@@ -3,92 +3,160 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Over-3 Production Terminal</title>
+  <title>Over-3 Quant Execution Deck</title>
   <style>
     :root {
-      --bg-main: #f8f9fa;
+      --bg-main: #f4f6f9;
       --bg-card: #ffffff;
-      --text-main: #1a1a1a;
-      --text-muted: #666666;
-      --border-color: #cccccc;
-      --color-success: #2e7d32;
-      --color-danger: #c62828;
-      --color-primary: #1565c0;
+      --text-main: #111111;
+      --text-muted: #555555;
+      --border-color: #dddddd;
+      --color-success: #1b5e20;
+      --color-success-bg: #e8f5e9;
+      --color-danger: #b71c1c;
+      --color-danger-bg: #ffebee;
+      --color-warn: #e65100;
+      --color-warn-bg: #fff3e0;
+      --color-primary: #0d47a1;
+      --color-primary-bg: #e3f2fd;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { background-color: var(--bg-main); color: var(--text-main); padding: 30px; line-height: 1.5; }
-    .container { max-width: 1100px; margin: 0 auto; }
+    body { background-color: var(--bg-main); color: var(--text-main); padding: 25px; line-height: 1.4; }
+    .container { max-width: 1400px; margin: 0 auto; }
     
-    header { margin-bottom: 25px; padding-bottom: 15px; border-bottom: 2px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; }
-    header h1 { font-size: 24px; font-weight: 700; color: var(--text-main); }
+    /* Top Navigation bar */
+    header { background: var(--bg-card); border: 1px solid var(--border-color); padding: 15px 25px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+    header h1 { font-size: 20px; font-weight: 700; color: var(--color-primary); display: flex; align-items: center; gap: 10px; }
     
-    .grid { display: grid; grid-template-columns: 1fr 2fr; gap: 25px; margin-bottom: 25px; }
-    .card { background: var(--bg-card); border: 1px solid var(--border-color); padding: 20px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    .card h2 { font-size: 16px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 15px; color: var(--text-muted); border-bottom: 1px solid #eeeeee; padding-bottom: 5px; }
+    .telemetry-strip { display: flex; gap: 20px; align-items: center; }
+    .telemetry-item { font-size: 13px; font-weight: 500; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+    .indicator-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: #999; }
+    .dot-active { background: #4caf50; animation: pulse 1.5s infinite; }
+    .dot-error { background: #f44336; }
     
-    .metric-row { display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 15px; }
-    .metric-row span:first-child { color: var(--text-muted); font-weight: 500; }
-    .metric-row span:last-child { font-weight: 600; }
+    @keyframes pulse { 0% { opacity: 0.4; } 50% { opacity: 1; } 100% { opacity: 0.4; } }
+
+    /* Layout Grids */
+    .layout-matrix { display: grid; grid-template-columns: 320px 1fr; gap: 20px; }
+    .control-panel { display: flex; flex-direction: column; gap: 20px; }
     
-    .btn { display: inline-block; width: 100%; padding: 12px; font-size: 15px; font-weight: 600; text-align: center; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 10px; transition: opacity 0.2s; }
-    .btn:hover { opacity: 0.9; }
-    .btn-start { background-color: var(--color-success); color: white; }
-    .btn-stop { background-color: var(--color-danger); color: white; }
-    .btn-toggle { background-color: #e0e0e0; color: var(--text-main); border: 1px solid var(--border-color); }
+    .card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+    .card h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); margin-bottom: 15px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; font-weight: 700; }
     
-    #lock-banner { background-color: #fff3cd; border: 1px solid #ffeeba; color: #856404; padding: 12px; border-radius: 4px; margin-bottom: 20px; display: none; font-weight: 600; font-size: 14px; text-align: center; }
-    
-    .log-container { background: #fafafa; border: 1px solid var(--border-color); height: 350px; overflow-y: auto; padding: 15px; font-family: "Courier New", Courier, monospace; font-size: 13px; border-radius: 4px; display: flex; flex-direction: column-reverse; }
-    .log-entry { padding: 4px 0; border-bottom: 1px solid #f0f0f0; word-break: break-all; color: #333333; }
-    .log-time { color: #888888; margin-right: 8px; }
-    
-    .status-badge { display: inline-block; padding: 3px 8px; font-size: 12px; font-weight: 700; border-radius: 3px; text-transform: uppercase; }
-    .status-active { background: #e8f5e9; color: var(--color-success); }
-    .status-idle { background: #ffebee; color: var(--color-danger); }
-    .status-locked { background: #fff3cd; color: #856404; }
+    /* Interactive Buttons */
+    .btn { display: block; width: 100%; padding: 14px; font-size: 14px; font-weight: 700; text-align: center; border: none; border-radius: 6px; cursor: pointer; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; transition: all 0.2s; }
+    .btn-arm { background: var(--color-success); color: white; box-shadow: 0 2px 6px rgba(27,94,32,0.2); }
+    .btn-arm:hover { background: #2e7d32; }
+    .btn-kill { background: var(--color-danger); color: white; box-shadow: 0 2px 6px rgba(183,28,28,0.2); }
+    .btn-kill:hover { background: #c62828; }
+    .btn-swap { background: #ffffff; color: var(--text-main); border: 1px solid var(--border-color); font-size: 12px; padding: 10px; }
+    .btn-swap:hover { background: #f5f5f5; }
+
+    /* Financial Registry Display */
+    .registry-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px dashed #f0f0f0; font-size: 14px; }
+    .registry-row:last-child { border-bottom: none; }
+    .registry-label { color: var(--text-muted); font-weight: 500; }
+    .registry-val { font-weight: 700; font-family: monospace; font-size: 15px; }
+
+    /* Central Display Engine */
+    .workspace { display: flex; flex-direction: column; gap: 20px; }
+    .analytics-banner { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
+    .stat-widget { background: var(--bg-card); border: 1px solid var(--border-color); padding: 15px; border-radius: 6px; text-align: center; }
+    .stat-lbl { font-size: 12px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 5px; font-weight: 600; }
+    .stat-num { font-size: 22px; font-weight: 800; font-family: monospace; }
+
+    /* Strategy Progress Bar Engine */
+    .engine-status-box { display: flex; align-items: center; justify-content: space-between; background: #fafafa; padding: 15px; border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 15px; }
+    .density-bar-container { background: #e0e0e0; height: 24px; border-radius: 4px; overflow: hidden; position: relative; margin-top: 5px; border: 1px solid #ccc; }
+    .density-bar-fill { background: var(--color-primary); height: 100%; width: 0%; transition: width 0.3s ease; }
+    .density-target-marker { position: absolute; left: 60%; top: 0; bottom: 0; width: 2px; background: red; z-index: 2; }
+    .density-text { position: absolute; width: 100%; text-align: center; top: 0; line-height: 24px; font-size: 13px; font-weight: 700; color: #111; text-shadow: 0 0 3px #fff; }
+
+    .exhaustion-badge-strip { display: flex; gap: 8px; margin-top: 10px; }
+    .digit-badge { padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border-color); font-weight: 700; font-family: monospace; background: #f0f0f0; }
+    .digit-exhausted { background: var(--color-danger-bg); color: var(--color-danger); border-color: #ffcdd2; }
+
+    #lock-banner { background-color: var(--color-warn-bg); border: 1px solid #ffe0b2; color: var(--color-warn); padding: 15px; border-radius: 6px; font-weight: 700; margin-bottom: 15px; display: none; font-size: 14px; }
+
+    /* Audit Stream Logs layout */
+    .log-container { background: #ffffff; border: 1px solid var(--border-color); height: 420px; overflow-y: auto; padding: 15px; font-family: "Courier New", Courier, monospace; font-size: 12px; border-radius: 6px; display: flex; flex-direction: column-reverse; box-shadow: inset 0 2px 4px rgba(0,0,0,0.01); }
+    .log-entry { padding: 6px 0; border-bottom: 1px solid #f7f7f7; word-break: break-all; display: flex; align-items: flex-start; }
+    .log-time { color: #888888; font-weight: bold; margin-right: 12px; white-space: nowrap; }
+    .log-text { color: #222222; }
+
+    .status-pill { padding: 4px 10px; font-size: 11px; font-weight: 700; border-radius: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .sp-active { background: var(--color-success-bg); color: var(--color-success); border: 1px solid #c8e6c9; }
+    .sp-idle { background: var(--color-danger-bg); color: var(--color-danger); border: 1px solid #ffcdd2; }
+    .sp-warmup { background: var(--color-primary-bg); color: var(--color-primary); border: 1px solid #bbdefb; }
+    .sp-lock { background: var(--color-warn-bg); color: var(--color-warn); border: 1px solid #ffe0b2; }
   </style>
 </head>
 <body>
 
 <div class="container">
   <header>
-    <h1>Over-3 Algorithmic Trading Core</h1>
-    <div id="engine-status-badge" class="status-badge status-idle">System Offline</div>
+    <h1>⚙️ Over-3 High-Velocity Production Deck</h1>
+    <div class="telemetry-strip">
+      <div class="telemetry-item"><span id="network-dot" class="indicator-dot dot-active"></span> Pipeline Sync: <span id="network-status" style="font-weight:700; color:#4caf50;">ONLINE</span></div>
+      <div id="engine-state-pill" class="status-pill sp-idle">Engine Offline</div>
+    </div>
   </header>
 
   <div id="lock-banner"></div>
 
-  <div class="grid">
-    <div class="space-y">
-      <div class="card" style="margin-bottom: 25px;">
-        <h2>Engine Operational Controls</h2>
-        <button class="btn btn-start" onclick="triggerAction('start')">ARM ENGINE</button>
-        <button class="btn btn-stop" onclick="triggerAction('stop')">FORCE KILL SWITCH</button>
-        <button class="btn btn-toggle" id="mode-toggle-btn" onclick="toggleMode()">Switch Environment</button>
+  <div class="layout-matrix">
+    <div class="control-panel">
+      <div class="card">
+        <h2>System Core Trigger</h2>
+        <button class="btn btn-arm" onclick="executeControl('start')">ARM Core Engine</button>
+        <button class="btn btn-kill" onclick="executeControl('stop')">Forced Kill Switch</button>
+        <button class="btn btn-swap" id="environment-swap-btn" onclick="triggerEnvironmentSwap()">Switch to Real Portfolio</button>
       </div>
 
       <div class="card">
-        <h2>Account & Risk Registry</h2>
-        <div class="metric-row"><span>Pipeline Environment</span><span id="account-type">Loading...</span></div>
-        <div class="metric-row"><span>Wallet Balance</span><span id="wallet-balance">$0.00</span></div>
-        <div class="metric-row"><span>Session Start Benchmark</span><span id="start-balance">$0.00</span></div>
-        <div class="metric-row"><span>Net Realized Return (P&L)</span><span id="session-pnl">$0.00</span></div>
-        <div class="metric-row"><span>Assigned Micro-Stake</span><span id="current-stake">$0.00</span></div>
+        <h2>Financial Position Ledger</h2>
+        <div class="registry-row"><span class="registry-label">Environment Target</span><span id="ui-acc-type" class="registry-val" style="color:var(--color-primary);">Loading...</span></div>
+        <div class="registry-row"><span class="registry-label">Live Account Balance</span><span id="ui-balance" class="registry-val">—</span></div>
+        <div class="registry-row"><span class="registry-label">Daily Anchor Balance</span><span id="ui-anchor" class="registry-val">—</span></div>
+        <div class="registry-row"><span class="registry-label">Session Net Return</span><span id="ui-pnl" class="registry-val">$0.00</span></div>
+        <div class="registry-row"><span class="registry-label">Assigned Core Stake</span><span id="ui-stake" class="registry-val">$0.00</span></div>
       </div>
     </div>
 
-    <div class="card">
-      <h2>Live Quant System Audit Logs</h2>
-      <div class="log-container" id="log-box"></div>
+    <div class="workspace">
+      <div class="card">
+        <h2>Real-Time Strategy Tracker</h2>
+        <div style="margin-bottom: 15px;">
+          <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Over-3 Accumulation Density</label>
+          <div class="density-bar-container">
+            <div class="density-target-marker"></div>
+            <div id="ui-density-fill" class="density-bar-fill"></div>
+            <div id="ui-density-txt" class="density-text">0% (Calibration Active)</div>
+          </div>
+        </div>
+        <div>
+          <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Exhaustion Buffer Interceptor (Last 3 Digits)</label>
+          <div class="exhaustion-badge-strip" id="ui-exhaustion-strip">
+            <div class="digit-badge">—</div>
+            <div class="digit-badge">—</div>
+            <div class="digit-badge">—</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Live System Audit Logs</h2>
+        <div class="log-container" id="log-stream-box"></div>
+      </div>
     </div>
   </div>
 </div>
 
 <script>
-  let currentTradingMode = 'demo';
+  let activeTradingMode = 'demo';
 
-  function triggerAction(action) {
+  function executeControl(action) {
     fetch('/api/control', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -96,77 +164,127 @@
     });
   }
 
-  function toggleMode() {
-    const targetMode = currentTradingMode === 'demo' ? 'real' : 'demo';
+  function triggerEnvironmentSwap() {
+    const nextMode = activeTradingMode === 'demo' ? 'real' : 'demo';
     fetch('/api/control', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'set_mode', mode: targetMode })
+      body: JSON.stringify({ action: 'set_mode', mode: nextMode })
     }).then(res => {
-      if(!res.ok) alert("Cannot hot-swap pipeline environments while the execution engine is actively running!");
+      if(!res.ok) alert("Safety Lock: Cannot adjust strategy pipelines while engine loop is armed!");
     });
   }
 
-  // Establish standard Server-Sent Events stream link back to server matrix
-  const eventSource = new EventSource('/api/logs');
+  // Bind Server-Sent Events Network Matrix
+  const sseConnection = new EventSource('/api/logs');
 
-  eventSource.onmessage = function(event) {
-    const data = JSON.parse(event.data);
+  sseConnection.onopen = () => {
+    document.getElementById('network-dot').className = "indicator-dot dot-active";
+    document.getElementById('network-status').innerText = "ONLINE";
+    document.getElementById('network-status').style.color = "#4caf50";
+  };
+
+  sseConnection.onerror = () => {
+    document.getElementById('network-dot').className = "indicator-dot dot-error";
+    document.getElementById('network-status').innerText = "DISCONNECTED / RECONNECTING";
+    document.getElementById('network-status').style.color = "#f44336";
+  };
+
+  sseConnection.onmessage = function(event) {
+    const eventData = JSON.parse(event.data);
     
-    if (data.state) {
-      const state = data.state;
-      currentTradingMode = state.tradingMode;
+    if (eventData.state) {
+      const state = eventData.state;
+      activeTradingMode = state.tradingMode;
 
-      // Update financial UI blocks
-      document.getElementById('account-type').innerText = state.accountType;
-      document.getElementById('wallet-balance').innerText = state.balance ? `$${parseFloat(state.balance).toFixed(2)} ${state.currency}` : 'Connecting...';
-      document.getElementById('start-balance').innerText = state.dailyStartBalance ? `$${parseFloat(state.dailyStartBalance).toFixed(2)}` : '$0.00';
+      // Update Financial Metrics Elements
+      document.getElementById('ui-acc-type').innerText = state.tradingMode === 'demo' ? 'DEMO PIPELINE' : 'REAL PRODUCTION';
+      document.getElementById('ui-balance').innerText = state.balance ? `$${parseFloat(state.balance).toFixed(2)} ${state.currency}` : 'Synchronizing...';
+      document.getElementById('ui-anchor').innerText = state.dailyStartBalance ? `$${parseFloat(state.dailyStartBalance).toFixed(2)}` : 'Awaiting Activation';
       
-      const pnlEl = document.getElementById('session-pnl');
-      pnlEl.innerText = `$${parseFloat(state.dailyPnl).toFixed(2)}`;
-      pnlEl.style.color = state.dailyPnl > 0 ? 'var(--color-success)' : (state.dailyPnl < 0 ? 'var(--color-danger)' : 'var(--text-main)');
+      const pnlContainer = document.getElementById('ui-pnl');
+      pnlContainer.innerText = `$${parseFloat(state.dailyPnl).toFixed(2)}`;
+      pnlContainer.style.color = state.dailyPnl > 0 ? 'var(--color-success)' : (state.dailyPnl < 0 ? 'var(--color-danger)' : 'var(--text-main)');
       
-      document.getElementById('current-stake').innerText = `$${parseFloat(state.currentStake).toFixed(2)}`;
+      document.getElementById('ui-stake').innerText = `$${parseFloat(state.currentStake).toFixed(2)}`;
+      document.getElementById('environment-swap-btn').innerText = `Swap to ${state.tradingMode === 'demo' ? 'REAL PORTFOLIO' : 'DEMO PIPELINE'}`;
 
-      // Update Mode Toggle Button Copy Text
-      document.getElementById('mode-toggle-btn').innerText = `Swap to ${state.tradingMode === 'demo' ? 'REAL PORTFOLIO' : 'DEMO PIPELINE'}`;
+      // Live Strategy Density Progress Animation logic
+      const densityPercent = state.currentDensity || 0;
+      const fillBar = document.getElementById('ui-density-fill');
+      fillBar.style.width = `${densityPercent}%`;
+      document.getElementById('ui-density-txt').innerText = `${densityPercent}% (${state.warmupComplete ? 'Monitoring' : 'Calibrating'})`;
+      
+      if (densityPercent === 60) {
+        fillBar.style.background = "var(--color-success)";
+      } else if (densityPercent > 60) {
+        fillBar.style.background = "var(--color-warn)";
+      } else {
+        fillBar.style.background = "var(--color-primary)";
+      }
 
-      // Handle Operational Lock and Header Status Badges
-      const statusBadge = document.getElementById('engine-status-badge');
-      const lockBanner = document.getElementById('lock-banner');
+      // Handle Exhaustion Array Ticks Rendering Engine
+      const stripContainer = document.getElementById('ui-exhaustion-strip');
+      stripContainer.innerHTML = '';
+      const last3Digits = state.last3Ticks || [];
+      
+      // Ensure we fill three placeholders cleanly
+      const placeholders = [...last3Digits];
+      while(placeholders.length < 3) placeholders.unshift('—');
+      
+      placeholders.forEach(digit => {
+        const badge = document.createElement('div');
+        badge.className = 'digit-badge';
+        if (digit !== '—' && parseInt(digit) >= 7) {
+          badge.className = 'digit-badge digit-exhausted';
+        }
+        badge.innerText = digit;
+        stripContainer.appendChild(badge);
+      });
+
+      // Update Header Badges and Emergency Locks
+      const statePill = document.getElementById('engine-state-pill');
+      const errorBanner = document.getElementById('lock-banner');
 
       if (state.locked) {
-        statusBadge.innerText = "Hard Locked";
-        statusBadge.className = "status-badge status-locked";
-        lockBanner.innerText = state.lockReason;
-        lockBanner.style.display = "block";
+        statePill.innerText = "System Locked";
+        statePill.className = "status-pill sp-lock";
+        errorBanner.innerText = state.lockReason;
+        errorBanner.style.display = "block";
       } else if (state.active) {
-        statusBadge.innerText = state.warmupComplete ? "Core Armed & Running" : "Calibrating Matrix Buffer...";
-        statusBadge.className = "status-badge status-active";
-        lockBanner.style.display = "none";
+        if (state.warmupComplete) {
+          statePill.innerText = "Engine Active & Armed";
+          statePill.className = "status-pill sp-active";
+        } else {
+          statePill.innerText = `Calibrating (${state.warmupTicksFed}/100)`;
+          statePill.className = "status-pill sp-warmup";
+        }
+        errorBanner.style.display = "none";
       } else {
-        statusBadge.innerText = "System Offline";
-        statusBadge.className = "status-badge status-idle";
-        lockBanner.style.display = "none";
+        statePill.innerText = "Engine Idle";
+        statePill.className = "status-pill sp-idle";
+        errorBanner.style.display = "none";
       }
     }
 
-    // Append Incoming Log Vectors efficiently
-    if (data.logs && data.logs.length > 0) {
-      const logBox = document.getElementById('log-box');
-      data.logs.forEach(log => {
-        const entry = document.createElement('div');
-        entry.className = 'log-entry';
+    // Process Incoming Real-Time Audit Log Buffers
+    if (eventData.logs && eventData.logs.length > 0) {
+      const logsBox = document.getElementById('log-stream-box');
+      eventData.logs.forEach(log => {
+        const row = document.createElement('div');
+        row.className = 'log-entry';
         
-        const timestamp = document.createElement('span');
-        timestamp.className = 'log-time';
-        timestamp.innerText = new Date(log.time).toLocaleTimeString();
+        const timeBadge = document.createElement('span');
+        timeBadge.className = 'log-time';
+        timeBadge.innerText = new Date(log.time).toLocaleTimeString();
 
-        const messageText = document.createTextNode(log.message);
+        const textWrapper = document.createElement('span');
+        textWrapper.className = 'log-text';
+        textWrapper.innerText = log.message;
         
-        entry.appendChild(timestamp);
-        entry.appendChild(messageText);
-        logBox.insertBefore(entry, logBox.firstChild);
+        row.appendChild(timeBadge);
+        row.appendChild(textWrapper);
+        logsBox.insertBefore(row, logsBox.firstChild);
       });
     }
   };
