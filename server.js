@@ -12,7 +12,7 @@ const STATE_FILE = '/var/data/deriv_state.json';
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
-// ---------- SSE Setup ----------
+// ---------- SSE ----------
 const sseClients = new Set();
 let logId = 1;
 
@@ -32,65 +32,75 @@ function sanitizeState() {
   return rest;
 }
 
-// ---------- Over-3 Momentum Configuration ----------
+// ---------- Under-6 Institutional Configuration ----------
 const MARKET = { sym: 'R_75', name: 'Volatility 75 Index', dp: 4 };
-const FIXED_BARRIER = 3;         
-const WARMUP_TICKS = 100;        
+const FIXED_BARRIER = 6;         // Fixed to 6 (Wins on 0, 1, 2, 3, 4, 5)
 
-// Risk Parameters
-const RISK_PERCENT = 1.0;        
-const MIN_STAKE = 0.35;          
-const TP_PERCENT = 5;            
-const SL_PERCENT = 10;           
+// Edge Core: Trade only when losing digits (6-9) heavily saturate the feed
+const EXHAUSTION_Z_SCORE = 2.00; // Requires > 2.0 Standard Deviations of imbalance
+const MIN_STREAK = 4;            // Must see at least 4 consecutive losing digits (6-9)
 
-const COOLDOWN_TICKS = 10;       
-const SETTLE_TICKS = 12;
+// Risk Management Core
+const RISK_PERCENT = 1.5;        // Trade strictly 1.5% of account balance
+const MIN_STAKE = 0.35;          // Minimum execution floor
+const TP_PERCENT = 5;            // Target Profit at 5% of starting balance
+const SL_PERCENT = 10;           // Stop Loss at 10% of starting balance
+
+const COOLDOWN_TICKS = 25;       
+const SETTLE_TICKS = 15;
+const WARMUP_TICKS = 300;
 
 let globalTickCounter = 0;
 
-// ---------- Over-3 Trend Core Analyzer ----------
-class OverThreeTrendEngine {
+// ---------- Statistical Exhaustion Analyzer ----------
+class StatisticalExhaustionEngine {
   constructor() {
     this.ticks = [];
+    this.consecutiveLossDigits = 0;
   }
 
   feed(price) {
     const digit = parseInt(parseFloat(price).toFixed(MARKET.dp).slice(-1));
-    
-    let previousCount = null;
-    if (this.ticks.length === WARMUP_TICKS) {
-      previousCount = this.ticks.filter(d => d > 3).length;
-    }
-
     this.ticks.push(digit);
-    if (this.ticks.length > WARMUP_TICKS) this.ticks.shift();
+    if (this.ticks.length > 400) this.ticks.shift();
 
+    // Track streaks of losing digits (6, 7, 8, 9)
+    if (digit >= 6) {
+      this.consecutiveLossDigits++;
+    } else {
+      this.consecutiveLossDigits = 0;
+    }
+  }
+
+  getMetrics() {
     if (this.ticks.length < WARMUP_TICKS) return null;
 
-    const currentCount = this.ticks.filter(d => d > 3).length; 
-    
-    const isExact60 = (currentCount === 60);
-    const wasRising = (previousCount !== null && currentCount > previousCount);
-    const isTriggerDigit = (digit === 6);
+    const shortWindow = this.ticks.slice(-30);
+    const longWindow = this.ticks.slice(-300);
 
-    // UPGRADE: Strict Digit Exhaustion Vector (Checks last 3 elements for structural saturation >= 7)
-    const last3 = this.ticks.slice(-3);
-    const isExhausted = (last3.length === 3 && last3.every(d => d >= 7));
+    // Dynamic historical baseline tracking for digits 6-9 (~40% expected)
+    const longLossDigits = longWindow.filter(d => d >= 6).length;
+    const pBaseline = longLossDigits / longWindow.length; 
+
+    const shortLossDigits = shortWindow.filter(d => d >= 6).length;
+    const n = shortWindow.length;
+
+    const expectedLossDigits = n * pBaseline;
+    const standardDeviation = Math.sqrt(n * pBaseline * (1 - pBaseline));
+    
+    const zScore = (shortLossDigits - expectedLossDigits) / (standardDeviation || 1);
 
     return {
-      currentPercent: currentCount,
-      wasRising: wasRising,
-      isExact60: isExact60,
-      isTriggerDigit: isTriggerDigit,
-      isExhausted: isExhausted,
-      literalDigit: digit
+      zScore: zScore, 
+      currentStreak: this.consecutiveLossDigits,
+      shortDensity: (shortLossDigits / n) * 100
     };
   }
 }
 
-const engine = new OverThreeTrendEngine();
+const engine = new StatisticalExhaustionEngine();
 
-// ---------- State Engine ----------
+// ---------- State ----------
 const state = {
   active: false,
   tradingMode: 'demo', 
@@ -103,7 +113,7 @@ const state = {
   warmupComplete: false,
   warmupTicksFed: 0,
   liveSubscribed: false,
-  accountType: 'Awaiting Authorization...',
+  accountType: 'Connecting...',
 
   tradeInProgress: false,
   activeRealTrade: null,
@@ -115,13 +125,13 @@ const state = {
   sessionAlreadyUsedToday: false
 };
 
-// ---------- Persistence Matrix ----------
+// ---------- Persistence ----------
 function saveState() {
   try {
     const dir = path.dirname(STATE_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(STATE_FILE, JSON.stringify({
-      date: getEATDateString(),
+      date: new Date().toISOString().slice(0,10),
       tradingMode: state.tradingMode,
       dailyStartBalance: state.dailyStartBalance,
       dailyPnl: state.dailyPnl,
@@ -136,17 +146,20 @@ function loadState() {
   try {
     if (fs.existsSync(STATE_FILE)) {
       const saved = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-      const todayEAT = getEATDateString();
+      const today = new Date().toISOString().slice(0,10);
       
       if (saved.tradingMode) state.tradingMode = saved.tradingMode;
       
-      if (saved.date === todayEAT) {
+      if (saved.date === today && saved.sessionActive) {
+        state.sessionAlreadyUsedToday = true;
+        state.locked = true;
+        state.lockReason = 'Daily session safety limits locked.';
+        addLog(state.lockReason);
+      }
+      if (saved.date === today) {
         state.dailyStartBalance = saved.dailyStartBalance;
         state.dailyPnl = saved.dailyPnl || 0;
-        if (saved.locked) { 
-          state.locked = true; 
-          state.lockReason = saved.lockReason || ''; 
-        }
+        if (saved.locked) { state.locked = true; state.lockReason = saved.lockReason || ''; }
       }
     }
   } catch(e) {}
@@ -159,18 +172,14 @@ function checkDailyLimits() {
   if (!state.dailyStartBalance) return false;
   if (state.dailyPnl >= getTP()) {
     state.locked = true;
-    state.active = false;
-    state.lockReason = `🎯 Daily Take-Profit target reached! secured +$${getTP().toFixed(2)}. System shutting down safely.`;
+    state.lockReason = `Target Target-Profit +$${getTP().toFixed(2)} (${TP_PERCENT}%) secured.`;
     addLog(state.lockReason);
-    if (derivWs) derivWs.close();
     return true;
   }
   if (state.dailyPnl <= -getSL()) {
     state.locked = true;
-    state.active = false;
-    state.lockReason = `🛑 Daily Stop-Loss limit hit! Portfolio preserved at -$${getSL().toFixed(2)}. Core disconnected.`;
+    state.lockReason = `Emergency Stop-Loss -$${getSL().toFixed(2)} (${SL_PERCENT}%) executed.`;
     addLog(state.lockReason);
-    if (derivWs) derivWs.close();
     return true;
   }
   return false;
@@ -182,16 +191,17 @@ function settleRealTrade() {
   state.dailyPnl += profit;
   const result = profit > 0 ? 'WIN' : (profit < 0 ? 'LOSS' : 'DRAW');
   
-  addLog(`[${state.tradingMode.toUpperCase()}] ${result}: ${profit > 0 ? '+' : ''}${profit.toFixed(2)} | Session cumulative P&L: ${state.dailyPnl.toFixed(2)}`);
+  addLog(`[${state.tradingMode.toUpperCase()}] ${result}: ${profit > 0 ? '+' : ''}${profit.toFixed(2)} | Session P&L: ${state.dailyPnl.toFixed(2)}`);
 
   state.tradeInProgress = false;
   state.activeRealTrade = null;
   state.settleTicksRemaining = 0;
   state.cooldownTicksLeft = COOLDOWN_TICKS;
 
-  const calculatedRisk = state.balance * (RISK_PERCENT / 100);
-  const rawStake = Math.min(Math.max(MIN_STAKE, calculatedRisk), state.balance);
-  state.currentStake = Math.round(rawStake * 100) / 100;
+  // Pre-calculate next potential stake for UI display accuracy
+  const nextCalculatedRisk = state.balance * (RISK_PERCENT / 100);
+  const nextRawStake = Math.min(Math.max(MIN_STAKE, nextCalculatedRisk), state.balance);
+  state.currentStake = Math.round(nextRawStake * 100) / 100;
 
   checkDailyLimits();
   saveState();
@@ -199,13 +209,14 @@ function settleRealTrade() {
 }
 
 function processTick(price) {
-  const metrics = engine.feed(price);
+  engine.feed(price);
+  const metrics = engine.getMetrics();
+  
   globalTickCounter++;
-
-  if (!metrics) return;
-
-  if (globalTickCounter % 10 === 0) {
-    addLog(`📊 Metrics Stream: Over-3 Density: [${metrics.currentPercent}%] | Momentum Vector: [${metrics.wasRising ? 'RISING ↗️' : 'STABLE/FALLING ↘️'}] | Current Spot Digit: [${metrics.literalDigit}]`);
+  
+  // Dashboard metrics visual heartbeat
+  if (globalTickCounter % 15 === 0 && metrics) {
+    addLog(`📊 Matrix Status: Losing Streak (6-9): [${metrics.currentStreak}] | Risk Density: [${metrics.shortDensity.toFixed(0)}%] | Exhaustion Z-Score: [${metrics.zScore.toFixed(2)} / ${EXHAUSTION_Z_SCORE}]`);
   }
 
   if (!state.active || state.locked || !state.warmupComplete) return;
@@ -219,91 +230,65 @@ function processTick(price) {
 
   if (state.cooldownTicksLeft > 0) { state.cooldownTicksLeft--; return; }
   if (state.tradeInProgress) return;
+  if (!metrics) return;
 
-  if (metrics.isExact60 && metrics.wasRising && metrics.isTriggerDigit) {
-    
-    // UPGRADE IMPLEMENTATION: Digit Exhaustion Interceptor (>= 7 check)
-    if (metrics.isExhausted) {
-      addLog(`⚠️ SETUP BLOCKED: Exhaustion rule triggered. The last 3 ticks were all ≥ 7. Skipping trade to safeguard capital against mean reversion.`);
-      return;
-    }
-
+  // UNDER 6 HIGH-CONVICTION EXECUTION TARGET
+  if (metrics.zScore >= EXHAUSTION_Z_SCORE && metrics.currentStreak >= MIN_STREAK) {
     state.tradeInProgress = true;
     
+    // Dynamic Risk Allocation: 1.5% of balance, floor of $0.35, strict 2 decimal places
     let calculatedRisk = state.balance * (RISK_PERCENT / 100);
-    let rawStake = Math.max(MIN_STAKE, calculatedRisk); 
-    rawStake = Math.min(rawStake, state.balance);       
-    const stake = Math.round(rawStake * 100) / 100;     
+    let rawStake = Math.max(MIN_STAKE, calculatedRisk); // Enforce $0.35 minimum
+    rawStake = Math.min(rawStake, state.balance);       // Prevent allocating more than total balance
+    const stake = Math.round(rawStake * 100) / 100;     // Format to strictly 2 decimal places
     
-    state.currentStake = stake;
+    state.currentStake = stake; // Update telemetry state
 
-    addLog(`🎯 SNAPSHOT SETUP DETECTED! Over-3 density precisely at 60% and rising. Trigger digit 6 printed. Stake assigned: $${stake.toFixed(2)}. Execution sent.`);
+    addLog(`🎯 EXHAUSTION DETECTED! Allocating $${stake.toFixed(2)} (1.5% Risk Factor). Order: DIGITUNDER 6`);
 
     state.activeRealTrade = { stake, balanceBefore: state.balance };
     
+    // API updated to use underlying_symbol
     send({
       proposal: 1, amount: stake, basis: 'stake', currency: state.currency || 'USD',
       duration: 1, duration_unit: 't', underlying_symbol: MARKET.sym,
-      contract_type: 'DIGITOVER', barrier: FIXED_BARRIER, req_id: ++reqId
+      contract_type: 'DIGITUNDER', barrier: FIXED_BARRIER, req_id: ++reqId
     });
 
     broadcastSSE({ state: sanitizeState() });
   }
 }
 
-// ---------- East African Time (EAT) Clock Engine ----------
-function getEATDateString() {
-  return new Date().toLocaleDateString("en-US", { timeZone: "Africa/Nairobi" });
-}
-
-setInterval(() => {
-  const nowEAT = new Date().toLocaleTimeString("en-US", { timeZone: "Africa/Nairobi", hour12: false });
-  
-  // UPGRADE: Complete Automated Zero-Manual-Intervention Midnight Hard-Reset Sequence
-  if (nowEAT === "00:00:00") {
-    addLog(`⏰ Midnight EAT reached. Resetting daily boundaries and lifting all psychological hard-locks...`);
-    
-    state.locked = false;
-    state.lockReason = '';
-    state.dailyStartBalance = null;
-    state.dailyPnl = 0;
-    
-    state.active = true;
-    state.warmupComplete = false;
-    state.warmupTicksFed = 0;
-    state.liveSubscribed = false;
-    state.tradeInProgress = false;
-    state.activeRealTrade = null;
-    state.settleTicksRemaining = 0;
-    
-    connectDeriv();
-    saveState();
-    broadcastSSE({ state: sanitizeState() });
-  }
-}, 1000);
-
-// ---------- WebSocket Router Architecture & Heartbeats ----------
+// ---------- WebSocket & REST Core Setup ----------
 let derivWs = null;
 let reqId = 0;
-let heartbeatInterval = null;
-let heartbeatTimeout = null;
+let keepAliveLoop = null;
+let watchdogTimer = null;
 
 function send(msg) {
   if (derivWs && derivWs.readyState === WebSocket.OPEN) derivWs.send(JSON.stringify(msg));
 }
 
+// Cleans up memory leaks and broken socket threads before rebuilding connections
+function disconnectDeriv() {
+  clearInterval(keepAliveLoop);
+  clearTimeout(watchdogTimer);
+  if (derivWs) {
+    derivWs.removeAllListeners();
+    try { derivWs.terminate(); } catch(e) {}
+    derivWs = null;
+  }
+}
+
 async function connectDeriv() {
   if (!state.active) return;
+  disconnectDeriv(); // Always wipe old cycles before connecting
   
-  // Clear any dangling heartbeats before attempting connection strings
-  clearInterval(heartbeatInterval);
-  clearTimeout(heartbeatTimeout);
-
   const appId = (process.env.DERIV_APP_ID || '').trim();
   const token = (process.env.DERIV_PAT || '').trim();
 
   if (!appId || !token) {
-    addLog('Configuration rejection: Active environment tokens not found.');
+    addLog('Configuration error: Check Render environment strings.');
     return;
   }
 
@@ -313,76 +298,82 @@ async function connectDeriv() {
       headers: { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' }
     });
 
-    if (!accountsResponse.ok) throw new Error('API Access Token unauthorized.');
+    if (!accountsResponse.ok) throw new Error('API Profile access denied.');
 
     const accountsData = await accountsResponse.json();
     const accountList = Array.isArray(accountsData.data) ? accountsData.data : [accountsData.data];
     const account = accountList.find(acc => acc.account_type === (state.tradingMode || 'demo'));
     
-    if (!account) throw new Error(`Target profile configuration mismatch.`);
+    if (!account) throw new Error(`Target account configuration mismatch.`);
 
     const accountId = account.account_id;
-    state.accountType = account.account_type === 'demo' ? '🧪 DEMO SCALPING PIPELINE' : '⚠️ PRODUCTION LIVE PORTFOLIO';
+    state.accountType = account.account_type === 'demo' ? '🧪 DEMO PIPELINE' : '⚠️ LIVE PRODUCTION PORTFOLIO';
     state.balance = parseFloat(account.balance);
     state.currency = account.currency || 'USD';
     
     if (state.dailyStartBalance === null) state.dailyStartBalance = state.balance;
 
-    addLog(`✅ Pipeline Connected: ${accountId} (${state.accountType})`);
+    addLog(`✅ Secure Routing Active: ${accountId} (${state.accountType})`);
 
     const otpResponse = await fetch(`https://api.derivws.com/trading/v1/options/accounts/${accountId}/otp`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' }
     });
 
-    if (!otpResponse.ok) throw new Error('Security framework token acquisition rejected.');
+    if (!otpResponse.ok) throw new Error('Security core refused session allocation.');
 
     const otpData = await otpResponse.json();
     derivWs = new WebSocket(otpData.data.url);
 
     derivWs.on('open', () => {
-      addLog(`Initializing strict 100-tick buffer calibration array...`);
+      addLog(`Syncing historical feed arrays...`);
       send({ balance: 1, subscribe: 1, req_id: ++reqId });
       send({ ticks_history: MARKET.sym, count: WARMUP_TICKS, end: 'latest', req_id: ++reqId });
 
-      // UPGRADE: Intelligently manage active/half-open connections via standard ping intervals
-      heartbeatInterval = setInterval(() => {
+      // HIGH FREQUENCY HEARTBEAT: Keeps Koyeb proxies from killing the connection
+      keepAliveLoop = setInterval(() => {
         send({ ping: 1 });
-        
-        // If server fails to response in 5 seconds, cut the cord
-        heartbeatTimeout = setTimeout(() => {
-          addLog('🚨 Fault Intercept: WebSocket half-open connection detected. Forcing socket termination...');
-          if (derivWs) derivWs.terminate(); 
+        // Watchdog: If the server doesn't respond to our ping within 5 seconds, dump the pipe
+        watchdogTimer = setTimeout(() => {
+          addLog('🚨 Watchdog Alert: Pipeline stalled out. Triggering hot swap...');
+          if (derivWs) derivWs.terminate();
         }, 5000);
-      }, 3000);
+      }, 15000); // Check every 15 seconds
     });
 
-    derivWs.on('message', data => { try { handleMessage(JSON.parse(data)); } catch(e) {} });
+    derivWs.on('message', data => { 
+      try { 
+        const parsedData = JSON.parse(data);
+        // Intercept ping returns silently to clear the watchdog timer
+        if (parsedData.msg_type === 'ping') {
+          clearTimeout(watchdogTimer);
+          return;
+        }
+        handleMessage(parsedData); 
+      } catch(e) {} 
+    });
     
     derivWs.on('close', () => { 
-      clearInterval(heartbeatInterval);
-      clearTimeout(heartbeatTimeout);
-      
-      if (state.active && !state.locked) {
-        addLog('⚠️ Connection drop detected. Initializing automatic system hot-swap recovery...');
-        setTimeout(connectDeriv, 3000);
+      disconnectDeriv();
+      if (state.active) {
+        addLog('⚠️ Session pipe dropped. Attempting automated reconnection in 5s...');
+        setTimeout(connectDeriv, 5000); 
       }
     });
+
+    derivWs.on('error', () => {
+      if (derivWs) derivWs.terminate();
+    });
+
   } catch (e) {
-    addLog(`Pipeline core connection fault: ${e.message}. Retrying in 10s...`);
-    if (state.active && !state.locked) setTimeout(connectDeriv, 10000);
+    addLog(`Pipeline Error: ${e.message}. Retrying...`);
+    if (state.active) setTimeout(connectDeriv, 10000);
   }
 }
 
 function handleMessage(msg) {
-  // Clear pong intercept timers cleanly upon successful message callbacks
-  if (msg.msg_type === 'ping') {
-    clearTimeout(heartbeatTimeout);
-    return;
-  }
-
   if (msg.error) {
-    addLog(`Deriv Server Error: ${msg.error.message}`);
+    addLog(`Deriv API Flag: ${msg.error.message}`);
     state.tradeInProgress = false; state.activeRealTrade = null; state.settleTicksRemaining = 0;
     return;
   }
@@ -394,7 +385,7 @@ function handleMessage(msg) {
     for (const p of msg.history.prices) engine.feed(p);
     if (state.warmupTicksFed >= WARMUP_TICKS && !state.liveSubscribed) {
       state.warmupComplete = true; state.liveSubscribed = true;
-      addLog('✅ Momentum framework calibrated. Continuous structural monitoring active.');
+      addLog('✅ Baseline calibrated. High-probability Under-6 strategy armed.');
       send({ ticks: MARKET.sym, req_id: ++reqId });
     }
     broadcastSSE({ state: sanitizeState() });
@@ -420,22 +411,23 @@ app.get('/api/state', (req, res) => res.json({ ...state, logs: undefined }));
 app.post('/api/control', (req, res) => {
   const { action, mode } = req.body;
   if (action === 'set_mode') {
-    if (state.active) return res.status(400).json({ error: 'Core processing engine active.' });
+    if (state.active) return res.status(400).json({ error: 'System processing core active.' });
     state.tradingMode = mode; state.dailyStartBalance = null; state.dailyPnl = 0;
     saveState(); broadcastSSE({ state: sanitizeState() }); return res.json({ success: true });
   }
   if (action === 'start') {
+    if (state.sessionAlreadyUsedToday) return res.status(403).json({ error: 'Session locked.' });
     state.active = true; state.locked = false; state.dailyStartBalance = null; state.dailyPnl = 0;
     state.warmupComplete = false; state.warmupTicksFed = 0; state.liveSubscribed = false;
     state.tradeInProgress = false; state.activeRealTrade = null; state.settleTicksRemaining = 0;
-    addLog(`🚀 Core Manually Initiated. Targeting Over-3 Momentum Setup.`);
+    addLog(`🚀 Core Initiated. Target Vector: [UNDER 6] Mode: [${state.tradingMode.toUpperCase()}].`);
     connectDeriv(); saveState();
   } else if (action === 'stop') {
-    state.active = false; if (derivWs) derivWs.close();
-    state.tradeInProgress = false; addLog('🚨 User Kill-Switch Triggered. Core forced offline.'); saveState();
+    state.active = false; disconnectDeriv();
+    state.tradeInProgress = false; addLog('Engine returned to standby.'); saveState();
   }
   broadcastSSE({ state: sanitizeState() }); res.json({ success: true });
 });
 
 loadState();
-server.listen(PORT, () => console.log(`Over-3 Matrix Active on Port ${PORT}`));
+server.listen(PORT, () => console.log(`Terminal operating on port ${PORT}`));
