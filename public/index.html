@@ -6,89 +6,105 @@
   <title>Over-3 Quant Execution Deck</title>
   <style>
     :root {
-      --bg-main: #f4f6f9;
+      --bg-main: #f8fafc;
       --bg-card: #ffffff;
-      --text-main: #111111;
-      --text-muted: #555555;
-      --border-color: #dddddd;
-      --color-success: #1b5e20;
-      --color-success-bg: #e8f5e9;
-      --color-danger: #b71c1c;
-      --color-danger-bg: #ffebee;
-      --color-warn: #e65100;
-      --color-warn-bg: #fff3e0;
-      --color-primary: #0d47a1;
-      --color-primary-bg: #e3f2fd;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --border-color: #e2e8f0;
+      --color-success: #16a34a;
+      --color-success-bg: #f0fdf4;
+      --color-danger: #dc2626;
+      --color-danger-bg: #fef2f2;
+      --color-warn: #ea580c;
+      --color-warn-bg: #fff7ed;
+      --color-primary: #2563eb;
+      --color-primary-bg: #eff6ff;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     body { background-color: var(--bg-main); color: var(--text-main); padding: 25px; line-height: 1.4; }
     .container { max-width: 1400px; margin: 0 auto; }
     
-    header { background: var(--bg-card); border: 1px solid var(--border-color); padding: 15px 25px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+    header { background: var(--bg-card); border: 1px solid var(--border-color); padding: 15px 25px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
     header h1 { font-size: 20px; font-weight: 700; color: var(--color-primary); display: flex; align-items: center; gap: 10px; }
     
     .telemetry-strip { display: flex; gap: 20px; align-items: center; }
     .telemetry-item { font-size: 13px; font-weight: 500; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
-    .indicator-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: #999; }
-    .dot-active { background: #4caf50; animation: pulse 1.5s infinite; }
-    .dot-error { background: #f44336; }
+    .indicator-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: #94a3b8; }
+    .dot-active { background: #22c55e; animation: pulse 1.5s infinite; }
+    .dot-error { background: #ef4444; }
     
     @keyframes pulse { 0% { opacity: 0.4; } 50% { opacity: 1; } 100% { opacity: 0.4; } }
 
-    .layout-matrix { display: grid; grid-template-columns: 320px 1fr; gap: 20px; }
+    .layout-matrix { display: grid; grid-template-columns: 340px 1fr; gap: 20px; }
     .control-panel { display: flex; flex-direction: column; gap: 20px; }
     
-    .card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
-    .card h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); margin-bottom: 15px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; font-weight: 700; }
+    .card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
+    .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); margin-bottom: 15px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; font-weight: 700; }
     
-    .btn { display: block; width: 100%; padding: 14px; font-size: 14px; font-weight: 700; text-align: center; border: none; border-radius: 6px; cursor: pointer; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; transition: all 0.2s; }
-    .btn-arm { background: var(--color-success); color: white; box-shadow: 0 2px 6px rgba(27,94,32,0.2); }
-    .btn-arm:hover { background: #2e7d32; }
-    .btn-kill { background: var(--color-danger); color: white; box-shadow: 0 2px 6px rgba(183,28,28,0.2); }
-    .btn-kill:hover { background: #c62828; }
-    .btn-swap { background: #ffffff; color: var(--text-main); border: 1px solid var(--border-color); font-size: 12px; padding: 10px; }
-    .btn-swap:hover { background: #f5f5f5; }
+    .btn { display: block; width: 100%; padding: 14px; font-size: 13px; font-weight: 700; text-align: center; border: none; border-radius: 6px; cursor: pointer; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; transition: all 0.2s; }
+    .btn-arm { background: var(--color-success); color: white; }
+    .btn-arm:hover { background: #15803d; }
+    .btn-kill { background: var(--color-danger); color: white; }
+    .btn-kill:hover { background: #b91c1c; }
+    .btn-swap { background: #ffffff; color: var(--text-main); border: 1px solid var(--border-color); font-size: 11px; padding: 10px; }
+    .btn-swap:hover { background: #f8fafc; }
 
-    .registry-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px dashed #f0f0f0; font-size: 14px; }
+    .registry-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px dashed #e2e8f0; font-size: 14px; }
     .registry-row:last-child { border-bottom: none; }
     .registry-label { color: var(--text-muted); font-weight: 500; }
     .registry-val { font-weight: 700; font-family: monospace; font-size: 15px; }
 
     .workspace { display: flex; flex-direction: column; gap: 20px; }
     
-    .density-bar-container { background: #e0e0e0; height: 24px; border-radius: 4px; overflow: hidden; position: relative; margin-top: 5px; border: 1px solid #ccc; }
+    /* Class-A High Fidelity Distribution Matrix Styling */
+    .distribution-matrix { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin: 15px 0; }
+    .digit-box { border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; text-align: center; background: #fff; transition: all 0.2s; position: relative; overflow: hidden; }
+    .digit-box .num-label { font-size: 20px; font-weight: 800; color: #1e293b; margin-bottom: 2px; }
+    .digit-box .pct-val { font-size: 14px; font-weight: 700; font-family: monospace; }
+    
+    /* Strict UI Strategy Color Overlays */
+    .db-under { background: var(--color-warn-bg); border-color: #fed7aa; }
+    .db-under .pct-val { color: var(--color-warn); }
+    .db-over { background: var(--color-primary-bg); border-color: #bfdbfe; }
+    .db-over .pct-val { color: var(--color-primary); }
+    .db-under.rule-violated { border: 2px solid var(--color-danger); background: #fef2f2; }
+    .db-over.rule-violated { border: 2px solid var(--color-danger); background: #fef2f2; }
+    
+    /* Extreme Circle Identifiers */
+    .circle-tag { position: absolute; top: 0; left: 0; right: 0; font-size: 9px; font-weight: 800; text-transform: uppercase; color: #fff; padding: 2px 0; }
+    .tag-green { background: var(--color-success); }
+    .tag-red { background: var(--color-danger); }
+
+    .density-bar-container { background: #e2e8f0; height: 24px; border-radius: 4px; overflow: hidden; position: relative; margin-top: 5px; border: 1px solid var(--border-color); }
     .density-bar-fill { background: var(--color-primary); height: 100%; width: 0%; transition: width 0.3s ease; }
-    .density-target-marker { position: absolute; left: 60%; top: 0; bottom: 0; width: 2px; background: red; z-index: 2; }
-    .density-text { position: absolute; width: 100%; text-align: center; top: 0; line-height: 24px; font-size: 13px; font-weight: 700; color: #111; text-shadow: 0 0 3px #fff; }
+    .density-text { position: absolute; width: 100%; text-align: center; top: 0; line-height: 24px; font-size: 13px; font-weight: 700; color: #0f172a; text-shadow: 0 0 4px #fff; }
 
     .exhaustion-badge-strip { display: flex; gap: 8px; margin-top: 10px; }
-    .digit-badge { padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border-color); font-weight: 700; font-family: monospace; background: #f0f0f0; width: 45px; text-align: center; }
-    .digit-under { background: var(--color-warn-bg); color: var(--color-warn); border-color: #ffe0b2; }
+    .digit-badge { padding: 6px 12px; border-radius: 4px; border: 1px solid var(--border-color); font-weight: 700; font-family: monospace; background: #f1f5f9; width: 45px; text-align: center; font-size: 14px; }
+    .digit-under-alert { background: var(--color-warn-bg); color: var(--color-warn); border-color: #fed7aa; }
 
-    #lock-banner { background-color: var(--color-warn-bg); border: 1px solid #ffe0b2; color: var(--color-warn); padding: 15px; border-radius: 6px; font-weight: 700; margin-bottom: 15px; display: none; font-size: 14px; }
+    #lock-banner { background-color: var(--color-warn-bg); border: 1px solid #fed7aa; color: var(--color-warn); padding: 15px; border-radius: 6px; font-weight: 700; margin-bottom: 15px; display: none; font-size: 14px; }
 
-    .log-container { background: #ffffff; border: 1px solid var(--border-color); height: 420px; overflow-y: auto; padding: 15px; font-family: "Courier New", Courier, monospace; font-size: 12px; border-radius: 6px; display: flex; flex-direction: column-reverse; box-shadow: inset 0 2px 4px rgba(0,0,0,0.01); }
-    .log-entry { padding: 6px 0; border-bottom: 1px solid #f7f7f7; word-break: break-all; display: flex; align-items: flex-start; }
-    .log-time { color: #888888; font-weight: bold; margin-right: 12px; white-space: nowrap; }
-    .log-text { color: #222222; }
+    .log-container { background: #ffffff; border: 1px solid var(--border-color); height: 350px; overflow-y: auto; padding: 15px; font-family: "Courier New", Courier, monospace; font-size: 12px; border-radius: 6px; display: flex; flex-direction: column-reverse; }
+    .log-entry { padding: 5px 0; border-bottom: 1px solid #f1f5f9; display: flex; align-items: flex-start; }
+    .log-time { color: #94a3b8; font-weight: bold; margin-right: 12px; white-space: nowrap; }
+    .log-text { color: #334155; }
 
-    .status-pill { padding: 4px 10px; font-size: 11px; font-weight: 700; border-radius: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .sp-active { background: var(--color-success-bg); color: var(--color-success); border: 1px solid #c8e6c9; }
-    .sp-idle { background: var(--color-danger-bg); color: var(--color-danger); border: 1px solid #ffcdd2; }
-    .sp-warmup { background: var(--color-primary-bg); color: var(--color-primary); border: 1px solid #bbdefb; }
-    .sp-lock { background: var(--color-warn-bg); color: var(--color-warn); border: 1px solid #ffe0b2; }
-    
-    .circle-metric-box { display: flex; gap: 15px; margin-top: 10px; padding: 10px; background: #fafafa; border: 1px solid var(--border-color); border-radius: 5px; font-size: 13px; font-weight: 600; }
+    .status-pill { padding: 4px 12px; font-size: 11px; font-weight: 700; border-radius: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .sp-active { background: var(--color-success-bg); color: var(--color-success); border: 1px solid #bbf7d0; }
+    .sp-idle { background: var(--color-danger-bg); color: var(--color-danger); border: 1px solid #fecaca; }
+    .sp-warmup { background: var(--color-primary-bg); color: var(--color-primary); border: 1px solid #bfdbfe; }
+    .sp-lock { background: var(--color-warn-bg); color: var(--color-warn); border: 1px solid #fed7aa; }
   </style>
 </head>
 <body>
 
 <div class="container">
   <header>
-    <h1>⚙️ Over-3 High-Velocity Production Deck</h1>
+    <h1>⚙️ Over-3 Rolling Buffer Execution Deck</h1>
     <div class="telemetry-strip">
-      <div class="telemetry-item"><span id="network-dot" class="indicator-dot dot-active"></span> Pipeline Sync: <span id="network-status" style="font-weight:700; color:#4caf50;">ONLINE</span></div>
+      <div class="telemetry-item"><span id="network-dot" class="indicator-dot dot-active"></span> Pipeline Sync: <span id="network-status" style="font-weight:700; color:#22c55e;">ONLINE</span></div>
       <div id="engine-state-pill" class="status-pill sp-idle">Engine Offline</div>
     </div>
   </header>
@@ -116,22 +132,21 @@
 
     <div class="workspace">
       <div class="card">
-        <h2>Real-Time Strategy Tracker</h2>
-        <div style="margin-bottom: 15px;">
-          <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Over-3 Target Satiation Density (100 Ticks)</label>
-          <div class="density-bar-container">
-            <div class="density-target-marker"></div>
-            <div id="ui-density-fill" class="density-bar-fill"></div>
-            <div id="ui-density-txt" class="density-text">0% (Calibration Active)</div>
+        <h2>Class-A Digit Saturation Matrix (100-Tick Rolling Array)</h2>
+        
+        <div class="distribution-matrix" id="ui-matrix-grid">
           </div>
-          
-          <div class="circle-metric-box">
-            <div>🟢 Green Circle (Most): <span id="ui-green-circle" style="font-family:monospace; font-size:14px; color:var(--color-success);">—</span> <span id="ui-green-pct" style="color:#777; font-size:11px;"></span></div>
-            <div style="border-left: 1px solid #ddd; padding-left: 15px;">🔴 Red Circle (Least): <span id="ui-red-circle" style="font-family:monospace; font-size:14px; color:var(--color-danger);">—</span> <span id="ui-red-pct" style="color:#777; font-size:11px;"></span></div>
+
+        <div style="margin-top: 20px; margin-bottom: 15px;">
+          <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Over-3 Win-Space Density (Digits 4-9)</label>
+          <div class="density-bar-container">
+            <div id="ui-density-fill" class="density-bar-fill"></div>
+            <div id="ui-density-txt" class="density-text">0%</div>
           </div>
         </div>
+
         <div>
-          <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Live Ticker Tracking Window (Last 3 Digits)</label>
+          <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Live Stream Tail (Last 3 Digits)</label>
           <div class="exhaustion-badge-strip" id="ui-exhaustion-strip">
             <div class="digit-badge">—</div>
             <div class="digit-badge">—</div>
@@ -151,6 +166,21 @@
 <script>
   let activeTradingMode = 'demo';
 
+  // Build the unified layout components for digits 0-9 inside the frame
+  const matrixGrid = document.getElementById('ui-matrix-grid');
+  for (let i = 0; i <= 9; i++) {
+    const isUnder = i <= 3;
+    const box = document.createElement('div');
+    box.id = `digit-card-${i}`;
+    box.className = `digit-box ${isUnder ? 'db-under' : 'db-over'}`;
+    box.innerHTML = `
+      <div class="circle-tag" id="digit-tag-${i}" style="display:none;"></div>
+      <div class="num-label">${i}</div>
+      <div class="pct-val" id="digit-pct-${i}">0.0%</div>
+    `;
+    matrixGrid.appendChild(box);
+  }
+
   function executeControl(action) {
     fetch('/api/control', {
       method: 'POST',
@@ -166,7 +196,7 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'set_mode', mode: nextMode })
     }).then(res => {
-      if(!res.ok) alert("Safety Lock: Cannot adjust strategy pipelines while engine loop is armed!");
+      if(!res.ok) alert("Safety Lockout: Cannot adjust modes while engine loop is active!");
     });
   }
 
@@ -175,13 +205,13 @@
   sseConnection.onopen = () => {
     document.getElementById('network-dot').className = "indicator-dot dot-active";
     document.getElementById('network-status').innerText = "ONLINE";
-    document.getElementById('network-status').style.color = "#4caf50";
+    document.getElementById('network-status').style.color = "#22c55e";
   };
 
   sseConnection.onerror = () => {
     document.getElementById('network-dot').className = "indicator-dot dot-error";
-    document.getElementById('network-status').innerText = "DISCONNECTED / RECONNECTING";
-    document.getElementById('network-status').style.color = "#f44336";
+    document.getElementById('network-status').innerText = "DISCONNECTED / ATTEMPTING RESTORATION";
+    document.getElementById('network-status').style.color = "#dc2626";
   };
 
   sseConnection.onmessage = function(event) {
@@ -191,43 +221,61 @@
       const state = eventData.state;
       activeTradingMode = state.tradingMode;
 
-      document.getElementById('ui-acc-type').innerText = state.tradingMode === 'demo' ? 'DEMO PIPELINE' : 'REAL PRODUCTION';
-      document.getElementById('ui-balance').innerText = state.balance ? `$${parseFloat(state.balance).toFixed(2)} ${state.currency}` : 'Synchronizing...';
-      document.getElementById('ui-anchor').innerText = state.dailyStartBalance ? `$${parseFloat(state.dailyStartBalance).toFixed(2)}` : 'Awaiting Activation';
+      document.getElementById('ui-acc-type').innerText = state.tradingMode === 'demo' ? 'DEMO ENVIRONMENT' : 'REAL PRODUCTION LIVE';
+      document.getElementById('ui-balance').innerText = state.balance ? `$${parseFloat(state.balance).toFixed(2)} ${state.currency}` : 'Connecting...';
+      document.getElementById('ui-anchor').innerText = state.dailyStartBalance ? `$${parseFloat(state.dailyStartBalance).toFixed(2)}` : 'Awaiting Data';
       
       const pnlContainer = document.getElementById('ui-pnl');
       pnlContainer.innerText = `$${parseFloat(state.dailyPnl).toFixed(2)}`;
       pnlContainer.style.color = state.dailyPnl > 0 ? 'var(--color-success)' : (state.dailyPnl < 0 ? 'var(--color-danger)' : 'var(--text-main)');
       
       document.getElementById('ui-stake').innerText = `$${parseFloat(state.currentStake).toFixed(2)}`;
-      document.getElementById('environment-swap-btn').innerText = `Swap to ${state.tradingMode === 'demo' ? 'REAL PORTFOLIO' : 'DEMO PIPELINE'}`;
+      document.getElementById('environment-swap-btn').innerText = `Swap to ${state.tradingMode === 'demo' ? 'REAL PORTFOLIO' : 'DEMO ENVIRONMENT'}`;
 
-      // Update Normalized Density Line Mapping 
+      // Update Win Space Density
       const densityPercent = state.currentDensity || 0;
-      const fillBar = document.getElementById('ui-density-fill');
-      fillBar.style.width = `${densityPercent}%`;
-      document.getElementById('ui-density-txt').innerText = `${densityPercent}% (${state.warmupComplete ? 'Monitoring' : 'Compiling Hist.'})`;
+      document.getElementById('ui-density-fill').style.width = `${densityPercent}%`;
+      document.getElementById('ui-density-txt').innerText = `${densityPercent}%`;
 
-      // Dynamic updates to Circle elements
-      document.getElementById('ui-green-circle').innerText = state.greenCircle;
-      document.getElementById('ui-green-pct').innerText = state.greenFreq ? `(${state.greenFreq}%)` : '';
-      document.getElementById('ui-red-circle').innerText = state.redCircle;
-      document.getElementById('ui-red-pct').innerText = state.redFreq ? `(${state.redFreq}%)` : '';
+      // Update Individual Digit Percentage Elements
+      const percentages = state.digitPercentages || Array(10).fill(0);
+      for (let i = 0; i <= 9; i++) {
+        const pct = percentages[i];
+        const pctLabel = document.getElementById(`digit-pct-${i}`);
+        const card = document.getElementById(`digit-card-${i}`);
+        const tag = document.getElementById(`digit-tag-${i}`);
+        
+        pctLabel.innerText = `${pct.toFixed(1)}%`;
+        
+        // Dynamic strategy threshold warnings
+        card.classList.remove('rule-violated');
+        if (i <= 3 && pct >= 9.7) card.classList.add('rule-violated');
+        if (i >= 4 && pct < 9.8) card.classList.add('rule-violated');
 
-      // Live 3-Digit Stream Parser (Highlights structural Under-3 execution setups)
+        // Circle tag allocation overlay logic
+        if (i === state.greenCircle) {
+          tag.innerText = "Green"; tag.className = "circle-tag tag-green"; tag.style.display = "block";
+          card.style.border = "2px solid var(--color-success)";
+        } else if (i === state.redCircle) {
+          tag.innerText = "Red"; tag.className = "circle-tag tag-red"; tag.style.display = "block";
+          card.style.border = "2px solid var(--color-danger)";
+        } else {
+          tag.style.display = "none";
+          card.style.border = "";
+        }
+      }
+
+      // Update Live 3 Ticker Badges
       const stripContainer = document.getElementById('ui-exhaustion-strip');
       stripContainer.innerHTML = '';
       const last3Digits = state.last3Ticks || [];
-      
       const placeholders = [...last3Digits];
       while(placeholders.length < 3) placeholders.unshift('—');
       
       placeholders.forEach(digit => {
         const badge = document.createElement('div');
         badge.className = 'digit-badge';
-        if (digit !== '—' && parseInt(digit) < 3) {
-          badge.className = 'digit-badge digit-under';
-        }
+        if (digit !== '—' && parseInt(digit) < 3) badge.className = 'digit-badge digit-under-alert';
         badge.innerText = digit;
         stripContainer.appendChild(badge);
       });
@@ -236,22 +284,17 @@
       const errorBanner = document.getElementById('lock-banner');
 
       if (state.locked) {
-        statePill.innerText = "System Locked";
-        statePill.className = "status-pill sp-lock";
-        errorBanner.innerText = state.lockReason;
-        errorBanner.style.display = "block";
+        statePill.innerText = "Portfolio Locked"; statePill.className = "status-pill sp-lock";
+        errorBanner.innerText = state.lockReason; errorBanner.style.display = "block";
       } else if (state.active) {
         if (state.warmupComplete) {
-          statePill.innerText = "Engine Active & Armed";
-          statePill.className = "status-pill sp-active";
+          statePill.innerText = "Engine Streaming"; statePill.className = "status-pill sp-active";
         } else {
-          statePill.innerText = `Calibrating (${state.warmupTicksFed}/100)`;
-          statePill.className = "status-pill sp-warmup";
+          statePill.innerText = "Seeding Rolling Buffer..."; statePill.className = "status-pill sp-warmup";
         }
         errorBanner.style.display = "none";
       } else {
-        statePill.innerText = "Engine Idle";
-        statePill.className = "status-pill sp-idle";
+        statePill.innerText = "Engine Inactive"; statePill.className = "status-pill sp-idle";
         errorBanner.style.display = "none";
       }
     }
