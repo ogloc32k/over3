@@ -25,7 +25,6 @@
     body { background-color: var(--bg-main); color: var(--text-main); padding: 25px; line-height: 1.4; }
     .container { max-width: 1400px; margin: 0 auto; }
     
-    /* Top Navigation bar */
     header { background: var(--bg-card); border: 1px solid var(--border-color); padding: 15px 25px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
     header h1 { font-size: 20px; font-weight: 700; color: var(--color-primary); display: flex; align-items: center; gap: 10px; }
     
@@ -37,14 +36,12 @@
     
     @keyframes pulse { 0% { opacity: 0.4; } 50% { opacity: 1; } 100% { opacity: 0.4; } }
 
-    /* Layout Grids */
     .layout-matrix { display: grid; grid-template-columns: 320px 1fr; gap: 20px; }
     .control-panel { display: flex; flex-direction: column; gap: 20px; }
     
     .card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
     .card h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); margin-bottom: 15px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; font-weight: 700; }
     
-    /* Interactive Buttons */
     .btn { display: block; width: 100%; padding: 14px; font-size: 14px; font-weight: 700; text-align: center; border: none; border-radius: 6px; cursor: pointer; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; transition: all 0.2s; }
     .btn-arm { background: var(--color-success); color: white; box-shadow: 0 2px 6px rgba(27,94,32,0.2); }
     .btn-arm:hover { background: #2e7d32; }
@@ -53,33 +50,24 @@
     .btn-swap { background: #ffffff; color: var(--text-main); border: 1px solid var(--border-color); font-size: 12px; padding: 10px; }
     .btn-swap:hover { background: #f5f5f5; }
 
-    /* Financial Registry Display */
     .registry-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px dashed #f0f0f0; font-size: 14px; }
     .registry-row:last-child { border-bottom: none; }
     .registry-label { color: var(--text-muted); font-weight: 500; }
     .registry-val { font-weight: 700; font-family: monospace; font-size: 15px; }
 
-    /* Central Display Engine */
     .workspace { display: flex; flex-direction: column; gap: 20px; }
-    .analytics-banner { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
-    .stat-widget { background: var(--bg-card); border: 1px solid var(--border-color); padding: 15px; border-radius: 6px; text-align: center; }
-    .stat-lbl { font-size: 12px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 5px; font-weight: 600; }
-    .stat-num { font-size: 22px; font-weight: 800; font-family: monospace; }
-
-    /* Strategy Progress Bar Engine */
-    .engine-status-box { display: flex; align-items: center; justify-content: space-between; background: #fafafa; padding: 15px; border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 15px; }
+    
     .density-bar-container { background: #e0e0e0; height: 24px; border-radius: 4px; overflow: hidden; position: relative; margin-top: 5px; border: 1px solid #ccc; }
     .density-bar-fill { background: var(--color-primary); height: 100%; width: 0%; transition: width 0.3s ease; }
     .density-target-marker { position: absolute; left: 60%; top: 0; bottom: 0; width: 2px; background: red; z-index: 2; }
     .density-text { position: absolute; width: 100%; text-align: center; top: 0; line-height: 24px; font-size: 13px; font-weight: 700; color: #111; text-shadow: 0 0 3px #fff; }
 
     .exhaustion-badge-strip { display: flex; gap: 8px; margin-top: 10px; }
-    .digit-badge { padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border-color); font-weight: 700; font-family: monospace; background: #f0f0f0; }
-    .digit-exhausted { background: var(--color-danger-bg); color: var(--color-danger); border-color: #ffcdd2; }
+    .digit-badge { padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border-color); font-weight: 700; font-family: monospace; background: #f0f0f0; width: 45px; text-align: center; }
+    .digit-under { background: var(--color-warn-bg); color: var(--color-warn); border-color: #ffe0b2; }
 
     #lock-banner { background-color: var(--color-warn-bg); border: 1px solid #ffe0b2; color: var(--color-warn); padding: 15px; border-radius: 6px; font-weight: 700; margin-bottom: 15px; display: none; font-size: 14px; }
 
-    /* Audit Stream Logs layout */
     .log-container { background: #ffffff; border: 1px solid var(--border-color); height: 420px; overflow-y: auto; padding: 15px; font-family: "Courier New", Courier, monospace; font-size: 12px; border-radius: 6px; display: flex; flex-direction: column-reverse; box-shadow: inset 0 2px 4px rgba(0,0,0,0.01); }
     .log-entry { padding: 6px 0; border-bottom: 1px solid #f7f7f7; word-break: break-all; display: flex; align-items: flex-start; }
     .log-time { color: #888888; font-weight: bold; margin-right: 12px; white-space: nowrap; }
@@ -90,6 +78,8 @@
     .sp-idle { background: var(--color-danger-bg); color: var(--color-danger); border: 1px solid #ffcdd2; }
     .sp-warmup { background: var(--color-primary-bg); color: var(--color-primary); border: 1px solid #bbdefb; }
     .sp-lock { background: var(--color-warn-bg); color: var(--color-warn); border: 1px solid #ffe0b2; }
+    
+    .circle-metric-box { display: flex; gap: 15px; margin-top: 10px; padding: 10px; background: #fafafa; border: 1px solid var(--border-color); border-radius: 5px; font-size: 13px; font-weight: 600; }
   </style>
 </head>
 <body>
@@ -128,15 +118,20 @@
       <div class="card">
         <h2>Real-Time Strategy Tracker</h2>
         <div style="margin-bottom: 15px;">
-          <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Over-3 Accumulation Density</label>
+          <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Over-3 Target Satiation Density (100 Ticks)</label>
           <div class="density-bar-container">
             <div class="density-target-marker"></div>
             <div id="ui-density-fill" class="density-bar-fill"></div>
             <div id="ui-density-txt" class="density-text">0% (Calibration Active)</div>
           </div>
+          
+          <div class="circle-metric-box">
+            <div>🟢 Green Circle (Most): <span id="ui-green-circle" style="font-family:monospace; font-size:14px; color:var(--color-success);">—</span> <span id="ui-green-pct" style="color:#777; font-size:11px;"></span></div>
+            <div style="border-left: 1px solid #ddd; padding-left: 15px;">🔴 Red Circle (Least): <span id="ui-red-circle" style="font-family:monospace; font-size:14px; color:var(--color-danger);">—</span> <span id="ui-red-pct" style="color:#777; font-size:11px;"></span></div>
+          </div>
         </div>
         <div>
-          <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Exhaustion Buffer Interceptor (Last 3 Digits)</label>
+          <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Live Ticker Tracking Window (Last 3 Digits)</label>
           <div class="exhaustion-badge-strip" id="ui-exhaustion-strip">
             <div class="digit-badge">—</div>
             <div class="digit-badge">—</div>
@@ -175,7 +170,6 @@
     });
   }
 
-  // Bind Server-Sent Events Network Matrix
   const sseConnection = new EventSource('/api/logs');
 
   sseConnection.onopen = () => {
@@ -197,7 +191,6 @@
       const state = eventData.state;
       activeTradingMode = state.tradingMode;
 
-      // Update Financial Metrics Elements
       document.getElementById('ui-acc-type').innerText = state.tradingMode === 'demo' ? 'DEMO PIPELINE' : 'REAL PRODUCTION';
       document.getElementById('ui-balance').innerText = state.balance ? `$${parseFloat(state.balance).toFixed(2)} ${state.currency}` : 'Synchronizing...';
       document.getElementById('ui-anchor').innerText = state.dailyStartBalance ? `$${parseFloat(state.dailyStartBalance).toFixed(2)}` : 'Awaiting Activation';
@@ -209,40 +202,36 @@
       document.getElementById('ui-stake').innerText = `$${parseFloat(state.currentStake).toFixed(2)}`;
       document.getElementById('environment-swap-btn').innerText = `Swap to ${state.tradingMode === 'demo' ? 'REAL PORTFOLIO' : 'DEMO PIPELINE'}`;
 
-      // Live Strategy Density Progress Animation logic
+      // Update Normalized Density Line Mapping 
       const densityPercent = state.currentDensity || 0;
       const fillBar = document.getElementById('ui-density-fill');
       fillBar.style.width = `${densityPercent}%`;
-      document.getElementById('ui-density-txt').innerText = `${densityPercent}% (${state.warmupComplete ? 'Monitoring' : 'Calibrating'})`;
-      
-      if (densityPercent === 60) {
-        fillBar.style.background = "var(--color-success)";
-      } else if (densityPercent > 60) {
-        fillBar.style.background = "var(--color-warn)";
-      } else {
-        fillBar.style.background = "var(--color-primary)";
-      }
+      document.getElementById('ui-density-txt').innerText = `${densityPercent}% (${state.warmupComplete ? 'Monitoring' : 'Compiling Hist.'})`;
 
-      // Handle Exhaustion Array Ticks Rendering Engine
+      // Dynamic updates to Circle elements
+      document.getElementById('ui-green-circle').innerText = state.greenCircle;
+      document.getElementById('ui-green-pct').innerText = state.greenFreq ? `(${state.greenFreq}%)` : '';
+      document.getElementById('ui-red-circle').innerText = state.redCircle;
+      document.getElementById('ui-red-pct').innerText = state.redFreq ? `(${state.redFreq}%)` : '';
+
+      // Live 3-Digit Stream Parser (Highlights structural Under-3 execution setups)
       const stripContainer = document.getElementById('ui-exhaustion-strip');
       stripContainer.innerHTML = '';
       const last3Digits = state.last3Ticks || [];
       
-      // Ensure we fill three placeholders cleanly
       const placeholders = [...last3Digits];
       while(placeholders.length < 3) placeholders.unshift('—');
       
       placeholders.forEach(digit => {
         const badge = document.createElement('div');
         badge.className = 'digit-badge';
-        if (digit !== '—' && parseInt(digit) >= 7) {
-          badge.className = 'digit-badge digit-exhausted';
+        if (digit !== '—' && parseInt(digit) < 3) {
+          badge.className = 'digit-badge digit-under';
         }
         badge.innerText = digit;
         stripContainer.appendChild(badge);
       });
 
-      // Update Header Badges and Emergency Locks
       const statePill = document.getElementById('engine-state-pill');
       const errorBanner = document.getElementById('lock-banner');
 
@@ -267,7 +256,6 @@
       }
     }
 
-    // Process Incoming Real-Time Audit Log Buffers
     if (eventData.logs && eventData.logs.length > 0) {
       const logsBox = document.getElementById('log-stream-box');
       eventData.logs.forEach(log => {
