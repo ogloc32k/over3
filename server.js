@@ -32,62 +32,115 @@ function sanitizeState() {
   return {
     ...rest,
     currentDensity: engine ? engine.getCurrentDensity() : 0,
-    last3Ticks: engine ? engine.getLast3() : []
+    last3Ticks: engine ? engine.getLast3() : [],
+    greenCircle: engine && engine.metrics ? engine.metrics.greenCircle : '—',
+    redCircle: engine && engine.metrics ? engine.metrics.redCircle : '—',
+    greenFreq: engine && engine.metrics && engine.metrics.freq ? engine.metrics.freq[engine.metrics.greenCircle] : 0,
+    redFreq: engine && engine.metrics && engine.metrics.freq ? engine.metrics.freq[engine.metrics.redCircle] : 0
   };
 }
 
 // ---------- Over-3 Analysis Engine Setup ----------
-const MARKET = { sym: 'R_75', name: 'Volatility 75 Index', dp: 4 };
+const MARKET = { sym: 'R_75', name: 'Volatility 75 Index', dp: 4 }; // UNTOUCHED
 const FIXED_BARRIER = 3;         
-const WARMUP_TICKS = 100;        
+const WARMUP_TICKS = 100; // Analysis Window
 
-const RISK_PERCENT = 1.5;        
+// Fixed Risk Registry - Absolute Anti-Martingale Setup
+const RISK_PERCENT = 1;   // 1% of current balance assigned per position
+const TP_PERCENT = 2;     // 2% target cap
+const SL_PERCENT = 4;     // 4% preservation limit
 const MIN_STAKE = 0.35;          
-const TP_PERCENT = 5;            
-const SL_PERCENT = 10;           
 
 const COOLDOWN_TICKS = 10;       
-const SETTLE_TICKS = 12;
+const SETTLE_TICKS = 3;   // Optimized for swift 1-tick trade settlements
 
 let globalTickCounter = 0;
 
 class OverThreeTrendEngine {
   constructor() {
     this.ticks = [];
+    this.metrics = null;
   }
 
   feed(price) {
+    // Exact decimal processing remains fully preserved to prevent guessing
     const digit = parseInt(parseFloat(price).toFixed(MARKET.dp).slice(-1));
     
-    let previousCount = null;
-    if (this.ticks.length === WARMUP_TICKS) {
-      previousCount = this.ticks.filter(d => d > 3).length;
-    }
-
     this.ticks.push(digit);
     if (this.ticks.length > WARMUP_TICKS) this.ticks.shift();
 
     if (this.ticks.length < WARMUP_TICKS) return null;
 
-    const currentCount = this.ticks.filter(d => d > 3).length; 
-    const wasRising = (previousCount !== null && currentCount > previousCount);
-    const isTriggerDigit = (digit === 6);
+    // 1. Establish Digit Frequencies (0-9 explicitly captured and recorded)
+    const freq = Array(10).fill(0);
+    this.ticks.forEach(d => freq[d]++);
 
+    // 2. Identify Green Circle (Most appearing digit)
+    let greenCircle = 0;
+    let maxCount = -1;
+    for (let i = 0; i <= 9; i++) {
+      if (freq[i] >= maxCount) {
+        maxCount = freq[i];
+        greenCircle = i;
+      }
+    }
+
+    // 3. Identify Red Circle (Least appearing digit)
+    let redCircle = 0;
+    let minCount = Infinity;
+    for (let i = 0; i <= 9; i++) {
+      if (freq[i] <= minCount) {
+        minCount = freq[i];
+        redCircle = i;
+      }
+    }
+
+    // 4. Validate Structural Strategy Rules
+    // Condition A: Both circles must be 2-3 numbers away from 3 (Valid pool: 6, 7, 8, 9)
+    const circlesInRange = (greenCircle >= 6 && redCircle >= 6);
+    
+    // Condition B: Green circle must be positioned in front of the red circle (higher value)
+    const greenInFront = (greenCircle > redCircle);
+
+    // Condition C: Percentages of all numbers below 3 including 3 itself (0, 1, 2, 3) must be under 9.7%
+    let under3Valid = true;
+    for (let i = 0; i <= 3; i++) {
+      if (freq[i] >= 9.7) {
+        under3Valid = false;
+        break;
+      }
+    }
+
+    // Condition D: Percentages of all numbers above 3 (4, 5, 6, 7, 8, 9) must stay above 10% (at least 9.8%)
+    let over3Valid = true;
+    for (let i = 4; i <= 9; i++) {
+      if (freq[i] < 9.8) {
+        over3Valid = false;
+        break;
+      }
+    }
+
+    const setupValid = circlesInRange && greenInFront && under3Valid && over3Valid;
+
+    // 5. Analyze Live Entry Triggers
     const last3 = this.ticks.slice(-3);
-    const isExhausted = (last3.length === 3 && last3.every(d => d >= 7));
+    const currentDigit = digit;
+    const prevDigit = last3.length >= 2 ? last3[last3.length - 2] : null;
 
-    return {
-      currentPercent: currentCount,
-      wasRising: wasRising,
-      isTriggerDigit: isTriggerDigit,
-      isExhausted: isExhausted,
-      literalDigit: digit
-    };
+    let triggerFired = false;
+    if (currentDigit === 1) {
+      triggerFired = true; // Pattern B: lands on 1 completely alone
+    } else if (currentDigit < 3 && prevDigit !== null && prevDigit < 3) {
+      triggerFired = true; // Pattern A/C: prints a minimum of two consecutive numbers below 3 (0,1,2)
+    }
+
+    this.metrics = { setupValid, triggerFired, greenCircle, redCircle, freq, literalDigit: currentDigit };
+    return this.metrics;
   }
 
   getCurrentDensity() {
     if (this.ticks.length === 0) return 0;
-    // Normalized to a scale of 0-100 to map directly to your front-end CSS progress width %
+    // Pushes full winning space percentage (digits 4-9) directly to your frontend fill-bar
     return Math.round((this.ticks.filter(d => d > 3).length / WARMUP_TICKS) * 100);
   }
 
@@ -120,7 +173,6 @@ const state = {
   logs: []
 };
 
-// ---------- Session Persistence Framework ----------
 function saveState() {
   try {
     const dir = path.dirname(STATE_FILE);
@@ -159,12 +211,12 @@ function checkDailyLimits() {
 
   if (state.dailyPnl >= tpLimit) {
     state.locked = true; state.active = false;
-    state.lockReason = `🎯 Target hit! Secured +$${state.dailyPnl.toFixed(2)}. Unlocking at midnight.`;
+    state.lockReason = `🎯 Target hit! Secured +$${state.dailyPnl.toFixed(2)} (2% Cap). Unlocking at midnight.`;
     addLog(state.lockReason); disconnectDeriv(); return true;
   }
   if (state.dailyPnl <= -slLimit) {
     state.locked = true; state.active = false;
-    state.lockReason = `🛑 Risk Limit hit. Portfolio preserved at -$${Math.abs(state.dailyPnl).toFixed(2)}. Unlocking at midnight.`;
+    state.lockReason = `🛑 Risk Limit hit. Portfolio preserved at -$${Math.abs(state.dailyPnl).toFixed(2)} (4% Max Loss). Unlocking at midnight.`;
     addLog(state.lockReason); disconnectDeriv(); return true;
   }
   return false;
@@ -175,11 +227,12 @@ function settleRealTrade() {
   const profit = state.balance - state.activeRealTrade.balanceBefore;
   state.dailyPnl += profit;
   
-  addLog(`[${state.tradingMode.toUpperCase()}] Trade Settled: ${profit >= 0 ? '+' : ''}${profit.toFixed(2)} | Today P&L: ${state.dailyPnl.toFixed(2)}`);
+  addLog(`[${state.tradingMode.toUpperCase()}] Contract Finalized: ${profit >= 0 ? 'WIN (+$' : 'LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Net P&L: ${state.dailyPnl.toFixed(2)}`);
   
   state.tradeInProgress = false; state.activeRealTrade = null; state.settleTicksRemaining = 0;
   state.cooldownTicksLeft = COOLDOWN_TICKS;
 
+  // Re-evaluates exact flat 1% stake from updated ledger balance (Anti-Martingale)
   const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
   state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
@@ -190,7 +243,6 @@ function processTick(price) {
   const metrics = engine.feed(price);
   globalTickCounter++;
 
-  // Dynamically update metrics calibration tracker before requirements met
   if (state.active && !state.warmupComplete) {
     state.warmupTicksFed = engine.ticks.length;
     if (state.warmupTicksFed >= WARMUP_TICKS) {
@@ -209,18 +261,15 @@ function processTick(price) {
   if (!state.active || state.locked || !state.warmupComplete || state.tradeInProgress) return;
   if (!metrics) return;
 
-  // OVER-3 SIGNAL INTERCEPTOR
-  if (metrics.currentPercent === 60 && metrics.wasRising && metrics.isTriggerDigit) {
-    if (metrics.isExhausted) {
-      addLog(`⚠️ Exhaustion block triggered (last digits ≥ 7). Skipping setup to protect capital.`);
-      return;
-    }
-
+  // OVER-3 COMBINATORIAL EXECUTION ENGINE
+  if (metrics.setupValid && metrics.triggerFired) {
     state.tradeInProgress = true;
+    
+    // Rigorous Anti-Martingale Stake Calculations: Always 1% of liquid portfolio
     const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
     state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-    addLog(`🎯 Momentum match: Over-3 density at 60% and rising. Execution sent with stake $${state.currentStake}`);
+    addLog(`🎯 Execution Triggered | Green Circle: ${metrics.greenCircle} | Red Circle: ${metrics.redCircle} | Last Digit: ${metrics.literalDigit}. Transmitting 1-tick contract.`);
     state.activeRealTrade = { stake: state.currentStake, balanceBefore: state.balance };
     
     send({
@@ -232,7 +281,6 @@ function processTick(price) {
   }
 }
 
-// ---------- Midnight Automation Reset Loop ----------
 function getEATDateString() {
   return new Date().toLocaleDateString("en-US", { timeZone: "Africa/Nairobi" });
 }
@@ -248,7 +296,6 @@ setInterval(() => {
   }
 }, 1000);
 
-// ---------- Connection Persistence Engine ----------
 let derivWs = null;
 let reqId = 0;
 let keepAliveLoop = null;
@@ -361,7 +408,7 @@ function handleMessage(msg) {
     if (!state.liveSubscribed) {
       state.warmupComplete = (state.warmupTicksFed >= WARMUP_TICKS);
       state.liveSubscribed = true;
-      addLog('✅ Technical configuration calibrated. Continuous monitoring active.');
+      addLog('✅ Historical data compiled. Under/Over threshold filters initialized.');
       send({ ticks: MARKET.sym, req_id: ++reqId });
     }
     broadcastSSE({ state: sanitizeState() });
@@ -379,8 +426,6 @@ function handleMessage(msg) {
 app.get('/api/logs', (req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
   sseClients.add(res); 
-  
-  // CRITICAL ALIGNMENT: Pushes pre-existing state variables and backlog logs right at connection handshake
   res.write(`data: ${JSON.stringify({ state: sanitizeState(), logs: state.logs })}\n\n`);
   req.on('close', () => sseClients.delete(res));
 });
