@@ -41,7 +41,7 @@ function sanitizeState() {
 // ---------- Strategy Parameters & Constants ----------
 const MARKET = { sym: 'R_75', name: 'Volatility 75 Index', dp: 4 }; // UNTOUCHED DECIMAL SETTING
 const FIXED_BARRIER = 3;         
-const BUFFER_CAPACITY = 100; 
+const BUFFER_CAPACITY = 1000; 
 
 // Strict Anti-Martingale & Risk Limits
 const RISK_PERCENT = 1;   
