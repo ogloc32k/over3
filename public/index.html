@@ -3,462 +3,174 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OVER-3 EXECUTION MATRIX</title>
-  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <title>Over-3 Production Terminal</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght=400;500;700&family=Plus+Jakarta+Sans:wght=400;600;700&display=swap');
-    body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #060a13; }
-    .terminal-font { font-family: 'JetBrains Mono', monospace; }
-    .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-    .custom-scrollbar::-webkit-scrollbar-track { background: #0b1325; }
-    .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
-    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #334155; }
+    :root {
+      --bg-main: #f8f9fa;
+      --bg-card: #ffffff;
+      --text-main: #1a1a1a;
+      --text-muted: #666666;
+      --border-color: #cccccc;
+      --color-success: #2e7d32;
+      --color-danger: #c62828;
+      --color-primary: #1565c0;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg-main); color: var(--text-main); padding: 30px; line-height: 1.5; }
+    .container { max-width: 1100px; margin: 0 auto; }
+    
+    header { margin-bottom: 25px; padding-bottom: 15px; border-bottom: 2px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; }
+    header h1 { font-size: 24px; font-weight: 700; color: var(--text-main); }
+    
+    .grid { display: grid; grid-template-columns: 1fr 2fr; gap: 25px; margin-bottom: 25px; }
+    .card { background: var(--bg-card); border: 1px solid var(--border-color); padding: 20px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .card h2 { font-size: 16px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 15px; color: var(--text-muted); border-bottom: 1px solid #eeeeee; padding-bottom: 5px; }
+    
+    .metric-row { display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 15px; }
+    .metric-row span:first-child { color: var(--text-muted); font-weight: 500; }
+    .metric-row span:last-child { font-weight: 600; }
+    
+    .btn { display: inline-block; width: 100%; padding: 12px; font-size: 15px; font-weight: 600; text-align: center; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 10px; transition: opacity 0.2s; }
+    .btn:hover { opacity: 0.9; }
+    .btn-start { background-color: var(--color-success); color: white; }
+    .btn-stop { background-color: var(--color-danger); color: white; }
+    .btn-toggle { background-color: #e0e0e0; color: var(--text-main); border: 1px solid var(--border-color); }
+    
+    #lock-banner { background-color: #fff3cd; border: 1px solid #ffeeba; color: #856404; padding: 12px; border-radius: 4px; margin-bottom: 20px; display: none; font-weight: 600; font-size: 14px; text-align: center; }
+    
+    .log-container { background: #fafafa; border: 1px solid var(--border-color); height: 350px; overflow-y: auto; padding: 15px; font-family: "Courier New", Courier, monospace; font-size: 13px; border-radius: 4px; display: flex; flex-direction: column-reverse; }
+    .log-entry { padding: 4px 0; border-bottom: 1px solid #f0f0f0; word-break: break-all; color: #333333; }
+    .log-time { color: #888888; margin-right: 8px; }
+    
+    .status-badge { display: inline-block; padding: 3px 8px; font-size: 12px; font-weight: 700; border-radius: 3px; text-transform: uppercase; }
+    .status-active { background: #e8f5e9; color: var(--color-success); }
+    .status-idle { background: #ffebee; color: var(--color-danger); }
+    .status-locked { background: #fff3cd; color: #856404; }
   </style>
 </head>
-<body class="text-slate-100 min-h-screen flex flex-col antialiased">
+<body>
 
-  <!-- TOP DECK NAVIGATION HEADER -->
-  <header class="border-b border-slate-800 bg-[#0b1325]/80 backdrop-blur-md px-6 py-4 sticky top-0 z-50 flex flex-wrap justify-between items-center gap-4">
-    <div class="flex items-center gap-3">
-      <div class="relative flex h-3 w-3">
-        <span class="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 bg-emerald-400" id="pulse-indicator"></span>
-        <span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500" id="dot-indicator"></span>
-      </div>
-      <div>
-        <h1 class="text-xs font-bold tracking-widest text-slate-400 uppercase terminal-font">ALGORITHMIC QUANT MATRIX</h1>
-        <p class="text-lg font-bold bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent" id="account-type-header">Initializing Secure Sync...</p>
-      </div>
-    </div>
-
-    <!-- CORE HARDWARE CONTROLS -->
-    <div class="flex items-center gap-3">
-      <select id="mode-selector" class="bg-[#121d33] border border-slate-700 text-xs rounded px-3 py-2 font-semibold text-slate-300 focus:outline-none focus:border-emerald-500 transition-colors cursor-pointer">
-        <option value="demo">🧪 DEMO SANDBOX</option>
-        <option value="real">⚠️ LIVE PRODUCTION</option>
-      </select>
-      <button id="btn-toggle" class="bg-emerald-500 hover:bg-emerald-600 font-bold text-xs text-slate-950 px-5 py-2.5 rounded shadow-lg shadow-emerald-500/10 hover:shadow-emerald-500/20 active:scale-95 transition-all cursor-pointer">
-        ARM ENGINE
-      </button>
-    </div>
+<div class="container">
+  <header>
+    <h1>Over-3 Algorithmic Trading Core</h1>
+    <div id="engine-status-badge" class="status-badge status-idle">System Offline</div>
   </header>
 
-  <!-- MASTER WORKSPACE DECK CONTROLLER TABS -->
-  <section class="bg-[#090f1c] border-b border-slate-800/60 px-6 py-2.5 flex gap-2">
-    <button onclick="switchWorkspace('LIVE')" id="tab-workspace-live" class="px-4 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all border border-emerald-500/20 bg-[#12223a] text-emerald-400 cursor-pointer">
-      📊 LIVE MONITOR CONSOLE
-    </button>
-    <button onclick="switchWorkspace('LEDGER')" id="tab-workspace-ledger" class="px-4 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all border border-transparent text-slate-400 hover:text-slate-200 cursor-pointer">
-      📜 HISTORICAL TRADE LEDGER
-    </button>
-  </section>
+  <div id="lock-banner"></div>
 
-  <!-- DECK 1: LIVE MONITOR CONSOLE (GRID) -->
-  <main id="deck-workspace-live" class="flex-1 p-6 max-w-[1600px] w-full mx-auto grid grid-cols-1 xl:grid-cols-4 gap-6">
-    <!-- LEFT SIDE: PERFORMANCE METRICS & CHARTS -->
-    <div class="xl:col-span-3 flex flex-col gap-6">
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div class="bg-[#0b1325] border border-slate-800/80 rounded-xl p-5">
-          <p class="text-xs font-semibold tracking-wider text-slate-400 uppercase mb-1">Available Liquidity</p>
-          <p class="text-3xl font-bold tracking-tight text-white terminal-font" id="metric-balance">$0.00</p>
-          <div class="mt-3 flex items-center justify-between text-xs border-t border-slate-800/60 pt-2 text-slate-400">
-            <span>Dynamic Stake (1.0%)</span>
-            <span class="text-emerald-400 font-bold terminal-font" id="metric-stake">$0.00</span>
-          </div>
-        </div>
-
-        <div class="bg-[#0b1325] border border-slate-800/80 rounded-xl p-5">
-          <div class="flex justify-between items-center mb-1">
-            <p class="text-xs font-semibold tracking-wider text-slate-400 uppercase">Take Profit Progress (5%)</p>
-            <span class="text-xs text-emerald-400 font-bold terminal-font" id="tp-target-val">+$0.00</span>
-          </div>
-          <p class="text-2xl font-bold tracking-tight text-emerald-400 terminal-font mb-2" id="metric-pnl">+$0.00</p>
-          <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-            <div id="tp-progress-bar" class="bg-gradient-to-r from-emerald-500 to-teal-400 h-1.5 transition-all duration-500" style="width: 0%"></div>
-          </div>
-        </div>
-
-        <div class="bg-[#0b1325] border border-slate-800/80 rounded-xl p-5">
-          <div class="flex justify-between items-center mb-1">
-            <p class="text-xs font-semibold tracking-wider text-slate-400 uppercase">Stop Loss Ceiling (10%)</p>
-            <span class="text-xs text-rose-400 font-bold terminal-font" id="sl-target-val">-$0.00</span>
-          </div>
-          <p class="text-2xl font-bold tracking-tight text-slate-200 terminal-font mb-2" id="metric-pnl-raw">0.00%</p>
-          <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
-            <div id="sl-progress-bar" class="bg-rose-500 h-1.5 transition-all duration-500" style="width: 0%"></div>
-          </div>
-        </div>
+  <div class="grid">
+    <div class="space-y">
+      <div class="card" style="margin-bottom: 25px;">
+        <h2>Engine Operational Controls</h2>
+        <button class="btn btn-start" onclick="triggerAction('start')">ARM ENGINE</button>
+        <button class="btn btn-stop" onclick="triggerAction('stop')">FORCE KILL SWITCH</button>
+        <button class="btn btn-toggle" id="mode-toggle-btn" onclick="toggleMode()">Switch Environment</button>
       </div>
 
-      <!-- ANALYTICS PLOTS -->
-      <div class="bg-[#0b1325] border border-slate-800/80 rounded-xl p-6 flex flex-col flex-1 min-h-[400px]">
-        <div class="flex flex-wrap justify-between items-center gap-4 border-b border-slate-800 pb-4 mb-4">
-          <div class="flex bg-[#070c17] p-1 rounded-lg border border-slate-800">
-            <button onclick="switchChartTab('1W')" class="chart-tab px-4 py-1.5 text-xs font-semibold rounded-md bg-[#121d33] text-emerald-400 transition-all cursor-pointer">1W Growth</button>
-            <button onclick="switchChartTab('1M')" class="chart-tab px-4 py-1.5 text-xs font-semibold rounded-md text-slate-400 hover:text-slate-200 transition-all cursor-pointer">1M Growth</button>
-            <button onclick="switchChartTab('1Y')" class="chart-tab px-4 py-1.5 text-xs font-semibold rounded-md text-slate-400 hover:text-slate-200 transition-all cursor-pointer">1Y Growth</button>
-            <button onclick="switchChartTab('STAT')" class="chart-tab px-4 py-1.5 text-xs font-semibold rounded-md text-slate-400 hover:text-slate-200 transition-all cursor-pointer">📊 Optimized EAT Hours</button>
-          </div>
-          <div id="custom-range-wrapper" class="flex items-center gap-2 text-xs text-slate-400">
-            <input type="date" id="custom-start" class="bg-[#121d33] border border-slate-700 rounded px-2 py-1 text-slate-200 focus:outline-none">
-            <span>to</span>
-            <input type="date" id="custom-end" class="bg-[#121d33] border border-slate-700 rounded px-2 py-1 text-slate-200 focus:outline-none">
-            <button onclick="applyCustomRange()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-slate-200 font-semibold cursor-pointer">Filter</button>
-          </div>
-        </div>
-        <div class="flex-1 relative min-h-[300px]">
-          <canvas id="analyticsChart"></canvas>
-        </div>
+      <div class="card">
+        <h2>Account & Risk Registry</h2>
+        <div class="metric-row"><span>Pipeline Environment</span><span id="account-type">Loading...</span></div>
+        <div class="metric-row"><span>Wallet Balance</span><span id="wallet-balance">$0.00</span></div>
+        <div class="metric-row"><span>Session Start Benchmark</span><span id="start-balance">$0.00</span></div>
+        <div class="metric-row"><span>Net Realized Return (P&L)</span><span id="session-pnl">$0.00</span></div>
+        <div class="metric-row"><span>Assigned Micro-Stake</span><span id="current-stake">$0.00</span></div>
       </div>
     </div>
 
-    <!-- RIGHT SIDE: TELEMETRY DIAGNOSTICS & SYSTEM TERMINAL -->
-    <div class="xl:col-span-1 flex flex-col gap-6">
-      <div class="bg-[#0b1325] border border-slate-800/80 rounded-xl p-5 flex flex-col">
-        <h3 class="text-xs font-bold tracking-wider text-slate-400 uppercase mb-3 border-b border-slate-800 pb-2">HARDWARE DIAGNOSTICS</h3>
-        <div class="space-y-3 text-xs">
-          <div class="flex justify-between items-center bg-[#070c17] p-2.5 rounded border border-slate-800/40">
-            <span class="text-slate-400">WebSocket Core Connection</span>
-            <span class="font-bold text-emerald-400" id="diag-ws">ONLINE</span>
-          </div>
-          <div class="flex justify-between items-center bg-[#070c17] p-2.5 rounded border border-slate-800/40">
-            <span class="text-slate-400">API Payload Schema</span>
-            <span class="font-bold text-emerald-400 terminal-font" id="diag-schema">v2.0 (Verified)</span>
-          </div>
-          <div class="flex justify-between items-center bg-[#070c17] p-2.5 rounded border border-slate-800/40">
-            <span class="text-slate-400">EAT Auto-Scheduler</span>
-            <span class="font-bold text-cyan-400" id="diag-clock">ARMED (00:00)</span>
-          </div>
-          <div class="bg-rose-500/10 border border-rose-500/20 text-rose-400 p-3 rounded text-[11px] hidden" id="diag-error-box">
-            <span class="font-bold">CRITICAL WARNING:</span> <span id="diag-error-msg">None detected.</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="bg-[#0b1325] border border-slate-800/80 rounded-xl p-5 flex flex-col flex-1 min-h-[350px]">
-        <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-3">
-          <h3 class="text-xs font-bold tracking-wider text-slate-400 uppercase">QUANT SYSTEM TERMINAL</h3>
-          <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-        </div>
-        <div id="terminal-feed" class="flex-1 overflow-y-auto terminal-font text-[11px] leading-relaxed space-y-2 text-slate-300 custom-scrollbar pr-1 max-h-[450px]">
-          <div class="text-slate-500">[System Booting] Accessing pipeline arrays...</div>
-        </div>
-      </div>
+    <div class="card">
+      <h2>Live Quant System Audit Logs</h2>
+      <div class="log-container" id="log-box"></div>
     </div>
-  </main>
+  </div>
+</div>
 
-  <!-- DECK 2: HISTORICAL TRADE LEDGER (HIDDEN BY DEFAULT) -->
-  <main id="deck-workspace-ledger" class="flex-1 p-6 max-w-[1600px] w-full mx-auto hidden">
-    <div class="bg-[#0b1325] border border-slate-800/80 rounded-xl p-6 flex flex-col h-full">
-      <div class="flex justify-between items-center border-b border-slate-800 pb-4 mb-4">
-        <div>
-          <h2 class="text-lg font-bold text-white tracking-tight">Historical Execution Archive</h2>
-          <p class="text-xs text-slate-400">Comprehensive cryptographic record of all tick positions executed by the core processor.</p>
-        </div>
-        <button onclick="clearLedgerDisplay()" class="text-xs bg-slate-800/50 hover:bg-slate-800 text-slate-400 hover:text-rose-400 px-3 py-1.5 rounded border border-slate-700/60 transition-all cursor-pointer">
-          Clear Session View
-        </button>
-      </div>
+<script>
+  let currentTradingMode = 'demo';
 
-      <!-- RESPONSIVE AUDIT TABLE -->
-      <div class="overflow-x-auto custom-scrollbar">
-        <table class="w-full text-left border-collapse">
-          <thead>
-            <tr class="border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider terminal-font">
-              <th class="py-3 px-4">Timestamp (EAT)</th>
-              <th class="py-3 px-4">Market Asset</th>
-              <th class="py-3 px-4">Contract Scheme</th>
-              <th class="py-3 px-4">Risk Allocation</th>
-              <th class="py-3 px-4 text-right">Net Return (USD)</th>
-              <th class="py-3 px-4 text-center">Status Flag</th>
-            </tr>
-          </thead>
-          <tbody id="ledger-table-rows" class="text-xs divide-y divide-slate-800/50 terminal-font text-slate-300">
-            <!-- Simulated database entries populate here seamlessly -->
-            <tr class="hover:bg-[#0e172a]/40 transition-colors">
-              <td class="py-3 px-4 text-slate-400">00:14:22</td>
-              <td class="py-3 px-4 font-semibold text-slate-200">Volatility 75 Index</td>
-              <td class="py-3 px-4"><span class="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded text-[10px] font-bold">DIGITOVER 3</span></td>
-              <td class="py-3 px-4">$12.45</td>
-              <td class="py-3 px-4 text-right font-bold text-emerald-400">+$11.82</td>
-              <td class="py-3 px-4 text-center"><span class="bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded text-[10px] font-bold">SETTLED WIN</span></td>
-            </tr>
-            <tr class="hover:bg-[#0e172a]/40 transition-colors">
-              <td class="py-3 px-4 text-slate-400">00:03:05</td>
-              <td class="py-3 px-4 font-semibold text-slate-200">Volatility 75 Index</td>
-              <td class="py-3 px-4"><span class="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded text-[10px] font-bold">DIGITOVER 3</span></td>
-              <td class="py-3 px-4">$12.45</td>
-              <td class="py-3 px-4 text-right font-bold text-rose-400">-$12.45</td>
-              <td class="py-3 px-4 text-center"><span class="bg-rose-500/10 text-rose-400 px-2 py-0.5 rounded text-[10px] font-bold">LIQUIDATED</span></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </main>
+  function triggerAction(action) {
+    fetch('/api/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action })
+    });
+  }
 
-  <!-- LOGIC AND CONTROLLER SYNC INTERCONNECTIONS -->
-  <script>
-    let activeChart = null;
-    let currentTab = '1W';
-    let serverState = {};
+  function toggleMode() {
+    const targetMode = currentTradingMode === 'demo' ? 'real' : 'demo';
+    fetch('/api/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'set_mode', mode: targetMode })
+    }).then(res => {
+      if(!res.ok) alert("Cannot hot-swap pipeline environments while the execution engine is actively running!");
+    });
+  }
 
-    // DOM Elements
-    const terminalFeed = document.getElementById('terminal-feed');
-    const btnToggle = document.getElementById('btn-toggle');
-    const modeSelector = document.getElementById('mode-selector');
-    const metricBalance = document.getElementById('metric-balance');
-    const metricStake = document.getElementById('metric-stake');
-    const metricPnl = document.getElementById('metric-pnl');
-    const metricPnlRaw = document.getElementById('metric-pnl-raw');
-    const tpProgressBar = document.getElementById('tp-progress-bar');
-    const slProgressBar = document.getElementById('sl-progress-bar');
-    const tpTargetVal = document.getElementById('tp-target-val');
-    const slTargetVal = document.getElementById('sl-target-val');
-    const accountTypeHeader = document.getElementById('account-type-header');
-    const pulseIndicator = document.getElementById('pulse-indicator');
-    const dotIndicator = document.getElementById('dot-indicator');
-    const diagWs = document.getElementById('diag-ws');
-    const diagErrorBox = document.getElementById('diag-error-box');
-    const diagErrorMsg = document.getElementById('diag-error-msg');
-    const ledgerTableRows = document.getElementById('ledger-table-rows');
+  // Establish standard Server-Sent Events stream link back to server matrix
+  const eventSource = new EventSource('/api/logs');
 
-    // MOCK DATA STORAGE
-    const historicalData = {
-      '1W': { labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], data: [1120, 1150, 1142, 1185, 1210, 1205, 1245] },
-      '1M': { labels: ['Wk 1', 'Wk 2', 'Wk 3', 'Wk 4'], data: [1000, 1080, 1190, 1245] },
-      '1Y': { labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'], data: [500, 680, 890, 1050, 1120, 1245] },
-      'STAT': { labels: ['00-04 EAT', '04-08 EAT', '08-12 EAT', '12-16 EAT', '16-20 EAT', '20-00 EAT'], data: [72, 48, 51, 68, 55, 42] }
-    };
+  eventSource.onmessage = function(event) {
+    const data = JSON.parse(event.data);
+    
+    if (data.state) {
+      const state = data.state;
+      currentTradingMode = state.tradingMode;
 
-    // DECK SWITCHING LOGIC (Hides/Shows sections instantly)
-    function switchWorkspace(targetWorkspace) {
-      const liveDeck = document.getElementById('deck-workspace-live');
-      const ledgerDeck = document.getElementById('deck-workspace-ledger');
-      const tabLive = document.getElementById('tab-workspace-live');
-      const tabLedger = document.getElementById('tab-workspace-ledger');
+      // Update financial UI blocks
+      document.getElementById('account-type').innerText = state.accountType;
+      document.getElementById('wallet-balance').innerText = state.balance ? `$${parseFloat(state.balance).toFixed(2)} ${state.currency}` : 'Connecting...';
+      document.getElementById('start-balance').innerText = state.dailyStartBalance ? `$${parseFloat(state.dailyStartBalance).toFixed(2)}` : '$0.00';
+      
+      const pnlEl = document.getElementById('session-pnl');
+      pnlEl.innerText = `$${parseFloat(state.dailyPnl).toFixed(2)}`;
+      pnlEl.style.color = state.dailyPnl > 0 ? 'var(--color-success)' : (state.dailyPnl < 0 ? 'var(--color-danger)' : 'var(--text-main)');
+      
+      document.getElementById('current-stake').innerText = `$${parseFloat(state.currentStake).toFixed(2)}`;
 
-      if (targetWorkspace === 'LIVE') {
-        liveDeck.classList.remove('hidden');
-        ledgerDeck.classList.add('hidden');
-        tabLive.className = "px-4 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all border border-emerald-500/20 bg-[#12223a] text-emerald-400 cursor-pointer";
-        tabLedger.className = "px-4 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all border border-transparent text-slate-400 hover:text-slate-200 cursor-pointer";
-        // Re-render chart frame safely when swapping views to prevent rendering sizing bugs
-        renderAnalyticsChart(currentTab);
+      // Update Mode Toggle Button Copy Text
+      document.getElementById('mode-toggle-btn').innerText = `Swap to ${state.tradingMode === 'demo' ? 'REAL PORTFOLIO' : 'DEMO PIPELINE'}`;
+
+      // Handle Operational Lock and Header Status Badges
+      const statusBadge = document.getElementById('engine-status-badge');
+      const lockBanner = document.getElementById('lock-banner');
+
+      if (state.locked) {
+        statusBadge.innerText = "Hard Locked";
+        statusBadge.className = "status-badge status-locked";
+        lockBanner.innerText = state.lockReason;
+        lockBanner.style.display = "block";
+      } else if (state.active) {
+        statusBadge.innerText = state.warmupComplete ? "Core Armed & Running" : "Calibrating Matrix Buffer...";
+        statusBadge.className = "status-badge status-active";
+        lockBanner.style.display = "none";
       } else {
-        liveDeck.classList.add('hidden');
-        ledgerDeck.classList.remove('hidden');
-        tabLive.className = "px-4 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all border border-transparent text-slate-400 hover:text-slate-200 cursor-pointer";
-        tabLedger.className = "px-4 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all border border-emerald-500/20 bg-[#12223a] text-emerald-400 cursor-pointer";
+        statusBadge.innerText = "System Offline";
+        statusBadge.className = "status-badge status-idle";
+        lockBanner.style.display = "none";
       }
     }
 
-    // CHART CONTROLLER
-    function renderAnalyticsChart(type) {
-      const ctx = document.getElementById('analyticsChart').getContext('2d');
-      if (activeChart) activeChart.destroy();
-      const config = historicalData[type];
-      const isStat = (type === 'STAT');
+    // Append Incoming Log Vectors efficiently
+    if (data.logs && data.logs.length > 0) {
+      const logBox = document.getElementById('log-box');
+      data.logs.forEach(log => {
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        
+        const timestamp = document.createElement('span');
+        timestamp.className = 'log-time';
+        timestamp.innerText = new Date(log.time).toLocaleTimeString();
 
-      activeChart = new Chart(ctx, {
-        type: isStat ? 'bar' : 'line',
-        data: {
-          labels: config.labels,
-          datasets: [{
-            label: isStat ? 'Statistical Win-Rate (%)' : 'Compounded Equity ($)',
-            data: config.data,
-            borderColor: '#10b981',
-            backgroundColor: isStat ? 'rgba(16, 185, 129, 0.15)' : 'rgba(16, 185, 129, 0.03)',
-            borderWidth: 2,
-            pointBackgroundColor: '#10b981',
-            borderRadius: isStat ? 4 : 0,
-            tension: 0.25,
-            fill: true
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
-          scales: {
-            x: { grid: { color: '#111e36' }, ticks: { color: '#94a3b8', font: { family: 'JetBrains Mono', size: 10 } } },
-            y: { grid: { color: '#111e36' }, ticks: { color: '#94a3b8', font: { family: 'JetBrains Mono', size: 10 } } }
-          }
-        }
+        const messageText = document.createTextNode(log.message);
+        
+        entry.appendChild(timestamp);
+        entry.appendChild(messageText);
+        logBox.insertBefore(entry, logBox.firstChild);
       });
     }
+  };
+</script>
 
-    function switchChartTab(tabName) {
-      currentTab = tabName;
-      document.querySelectorAll('.chart-tab').forEach(btn => {
-        btn.classList.remove('bg-[#121d33]', 'text-emerald-400');
-        btn.classList.add('text-slate-400');
-      });
-      event.target.classList.add('bg-[#121d33]', 'text-emerald-400');
-      renderAnalyticsChart(tabName);
-    }
-
-    function applyCustomRange() {
-      const start = document.getElementById('custom-start').value;
-      const end = document.getElementById('custom-end').value;
-      if(!start || !end) return alert('Select complete framework date parameters.');
-      historicalData['CUSTOM'] = { labels: [start, 'Midpoint Matrix Step', end], data: [1100, 1180, 1245] };
-      switchChartTab('CUSTOM');
-    }
-
-    function clearLedgerDisplay() {
-      ledgerTableRows.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-slate-500 italic">Session view cleared. New data incoming...</td></tr>`;
-    }
-
-    // BACKEND HARDWARE INTERFACES
-    async function apiRequest(endpoint, payload = {}) {
-      try {
-        const response = await fetch(`/api/control`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        return await response.json();
-      } catch (e) {
-        addLocalLog('Terminal connection error communicating with hardware backend.');
-      }
-    }
-
-    btnToggle.addEventListener('click', () => {
-      if (serverState.active) {
-        apiRequest('/api/control', { action: 'stop' });
-      } else {
-        apiRequest('/api/control', { action: 'start' });
-      }
-    });
-
-    modeSelector.addEventListener('change', () => {
-      apiRequest('/api/control', { action: 'set_mode', mode: modeSelector.value });
-    });
-
-    function appendToLedgerTable(message, time) {
-      // Intelligently parse raw terminal message strings into pristine columns
-      if (!message.includes('WIN:') && !message.includes('LOSS:')) return;
-      
-      const isWin = message.includes('WIN:');
-      const pnlValue = message.split('|')[0].split(':')[1].trim();
-      const timeStamp = time.slice(11, 19);
-      
-      const row = document.createElement('tr');
-      row.className = 'hover:bg-[#0e172a]/40 transition-colors border-b border-slate-800/30';
-      row.innerHTML = `
-        <td class="py-3 px-4 text-slate-400">${timeStamp}</td>
-        <td class="py-3 px-4 font-semibold text-slate-200">Volatility 75 Index</td>
-        <td class="py-3 px-4"><span class="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded text-[10px] font-bold">DIGITOVER 3</span></td>
-        <td class="py-3 px-4">$${serverState.currentStake || '0.35'}</td>
-        <td class="py-3 px-4 text-right font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}">${isWin ? '+' : ''}${pnlValue}</td>
-        <td class="py-3 px-4 text-center">
-          <span class="${isWin ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'} px-2 py-0.5 rounded text-[10px] font-bold">
-            ${isWin ? 'SETTLED WIN' : 'LIQUIDATED'}
-          </span>
-        </td>
-      `;
-      ledgerTableRows.insertBefore(row, ledgerTableRows.firstChild);
-    }
-
-    function addLocalLog(message, time = new Date().toISOString()) {
-      const row = document.createElement('div');
-      if(message.includes('Error') || message.includes('Flag') || message.includes('Rejection') || message.includes('fault')) {
-        row.className = 'text-rose-400 font-semibold';
-        diagErrorBox.classList.remove('hidden');
-        diagErrorMsg.textContent = message;
-      } else if (message.includes('🎯') || message.includes('✅')) {
-        row.className = 'text-emerald-400 font-semibold';
-      }
-      
-      const timeStamp = time.slice(11, 19);
-      row.innerHTML = `<span class="text-slate-500">[${timeStamp}]</span> ${message}`;
-      terminalFeed.insertBefore(row, terminalFeed.firstChild);
-
-      // Silently route settle logs straight to the ledger database without crowding the console UI
-      appendToLedgerTable(message, time);
-    }
-
-    function establishSseCore() {
-      const eventSource = new EventSource('/api/logs');
-      eventSource.onmessage = (event) => {
-        const payload = JSON.parse(event.data);
-        if (payload.logs) {
-          payload.logs.forEach(log => addLocalLog(log.message, log.time));
-        }
-        if (payload.state) {
-          serverState = payload.state;
-          updateDashboardUI();
-        }
-      };
-      eventSource.onerror = () => {
-        eventSource.close();
-        diagWs.textContent = 'DISCONNECTED';
-        diagWs.className = 'font-bold text-rose-500';
-        pulseIndicator.className = 'absolute inline-flex h-full w-full rounded-full opacity-75 bg-rose-400 animate-ping';
-        dotIndicator.className = 'relative inline-flex rounded-full h-3 w-3 bg-rose-500';
-        addLocalLog('🚨 System Pipeline Interrupted. Initializing automated background hot-swap recovery...');
-        setTimeout(establishSseCore, 5000);
-      };
-    }
-
-    function updateDashboardUI() {
-      if (serverState.active) {
-        btnToggle.textContent = 'HALT ENGINE';
-        btnToggle.className = 'bg-rose-500 hover:bg-rose-600 font-bold text-xs text-white px-5 py-2.5 rounded shadow-lg shadow-rose-500/10 cursor-pointer';
-        diagWs.textContent = 'ONLINE';
-        diagWs.className = 'font-bold text-emerald-400';
-        pulseIndicator.className = 'absolute inline-flex h-full w-full rounded-full opacity-75 bg-emerald-400 animate-ping';
-        dotIndicator.className = 'relative inline-flex rounded-full h-3 w-3 bg-emerald-500';
-      } else {
-        btnToggle.textContent = 'ARM ENGINE';
-        btnToggle.className = 'bg-emerald-500 hover:bg-emerald-600 font-bold text-xs text-slate-950 px-5 py-2.5 rounded shadow-lg shadow-emerald-500/10 cursor-pointer';
-      }
-
-      modeSelector.value = serverState.tradingMode || 'demo';
-      accountTypeHeader.textContent = serverState.accountType || 'Synchronizing Data Matrix...';
-
-      const balance = serverState.balance || 0;
-      const dailyPnl = serverState.dailyPnl || 0;
-      const startBalance = serverState.dailyStartBalance || balance || 1;
-      const stake = serverState.currentStake || 0;
-
-      metricBalance.textContent = `$${balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      metricStake.textContent = `$${stake.toFixed(2)}`;
-      metricPnl.textContent = `${dailyPnl >= 0 ? '+' : ''}$${dailyPnl.toFixed(2)}`;
-      
-      if(dailyPnl < 0) {
-        metricPnl.className = 'text-2xl font-bold tracking-tight text-rose-400 terminal-font mb-2';
-      } else {
-        metricPnl.className = 'text-2xl font-bold tracking-tight text-emerald-400 terminal-font mb-2';
-      }
-
-      const tpTargetLimit = startBalance * 0.05;
-      const slTargetLimit = startBalance * 0.10;
-
-      tpTargetVal.textContent = `+$${tpTargetLimit.toFixed(2)}`;
-      slTargetVal.textContent = `-$${slTargetLimit.toFixed(2)}`;
-
-      const tpPercentage = Math.min(Math.max((dailyPnl / tpTargetLimit) * 100, 0), 100);
-      const slPercentage = Math.min(Math.max((Math.abs(dailyPnl) / slTargetLimit) * 100, 0), 100);
-
-      tpProgressBar.style.width = `${tpPercentage}%`;
-      slProgressBar.style.width = `${dailyPnl < 0 ? slPercentage : 0}%`;
-      
-      const sessionGrowthRaw = (dailyPnl / startBalance) * 100;
-      metricPnlRaw.textContent = `${sessionGrowthRaw >= 0 ? '+' : ''}${sessionGrowthRaw.toFixed(2)}%`;
-
-      if (!serverState.locked && !serverState.lockReason) {
-        diagErrorBox.classList.add('hidden');
-      } else if (serverState.locked) {
-        diagErrorBox.classList.remove('hidden');
-        diagErrorMsg.textContent = serverState.lockReason;
-      }
-    }
-
-    // RUN TIME INITS
-    renderAnalyticsChart('1W');
-    establishSseCore();
-  </script>
 </body>
 </html>
