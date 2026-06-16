@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Over-3 Spatial Quant Deck</title>
+  <title>Over-3 Hybrid Execution Deck</title>
   <style>
     :root {
       --bg-main: #f8fafc;
@@ -50,6 +50,14 @@
     .btn-swap { background: #ffffff; color: var(--text-main); border: 1px solid var(--border-color); font-size: 11px; padding: 10px; }
     .btn-swap:hover { background: #f8fafc; }
 
+    .manual-flex-deck { display: flex; gap: 12px; margin-top: 5px; }
+    .btn-manual-buy { background: var(--color-success); color: white; font-size: 14px; font-weight: 800; padding: 15px 0; margin-bottom: 0; flex: 1; border: none; border-radius: 6px; cursor: pointer; text-transform: uppercase; }
+    .btn-manual-buy:hover { background: #15803d; transform: translateY(-1px); }
+    .btn-manual-buy:active { transform: translateY(0); }
+    .btn-manual-sell { background: var(--color-danger); color: white; font-size: 14px; font-weight: 800; padding: 15px 0; margin-bottom: 0; flex: 1; border: none; border-radius: 6px; cursor: pointer; text-transform: uppercase; }
+    .btn-manual-sell:hover { background: #b91c1c; transform: translateY(-1px); }
+    .btn-manual-sell:active { transform: translateY(0); }
+
     .registry-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px dashed #e2e8f0; font-size: 14px; }
     .registry-row:last-child { border-bottom: none; }
     .registry-label { color: var(--text-muted); font-weight: 500; }
@@ -82,14 +90,14 @@
 
     #lock-banner { background-color: var(--color-warn-bg); border: 1px solid #fed7aa; color: var(--color-warn); padding: 15px; border-radius: 6px; font-weight: 700; margin-bottom: 15px; display: none; font-size: 14px; }
 
-    .log-container { background: #ffffff; border: 1px solid var(--border-color); height: 350px; overflow-y: auto; padding: 15px; font-family: "Courier New", Courier, monospace; font-size: 12px; border-radius: 6px; display: flex; flex-direction: column-reverse; }
+    .log-container { background: #ffffff; border: 1px solid var(--border-color); height: 380px; overflow-y: auto; padding: 15px; font-family: "Courier New", Courier, monospace; font-size: 12px; border-radius: 6px; display: flex; flex-direction: column-reverse; }
     .log-entry { padding: 5px 0; border-bottom: 1px solid #f1f5f9; display: flex; align-items: flex-start; }
     .log-time { color: #94a3b8; font-weight: bold; margin-right: 12px; white-space: nowrap; }
     .log-text { color: #334155; }
 
     .status-pill { padding: 4px 12px; font-size: 11px; font-weight: 700; border-radius: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
     .sp-active { background: var(--color-success-bg); color: var(--color-success); border: 1px solid #bbf7d0; }
-    .sp-idle { background: var(--color-danger-bg); color: var(--color-danger); border: 1px solid #fecaca; }
+    .sp-idle { background: var(--color-primary-bg); color: var(--color-primary); border: 1px solid #bfdbfe; }
     .sp-warmup { background: var(--color-primary-bg); color: var(--color-primary); border: 1px solid #bfdbfe; }
     .sp-lock { background: var(--color-warn-bg); color: var(--color-warn); border: 1px solid #fed7aa; }
   </style>
@@ -98,10 +106,10 @@
 
 <div class="container">
   <header>
-    <h1>⚙️ Over-3 Spatial Quant Execution Deck</h1>
+    <h1>⚙️ Over-3 Hybrid Strategy Deck</h1>
     <div class="telemetry-strip">
       <div class="telemetry-item"><span id="network-dot" class="indicator-dot dot-active"></span> Pipeline Sync: <span id="network-status" style="font-weight:700; color:#22c55e;">ONLINE</span></div>
-      <div id="engine-state-pill" class="status-pill sp-idle">Engine Offline</div>
+      <div id="engine-state-pill" class="status-pill sp-idle">Pipeline Streaming</div>
     </div>
   </header>
 
@@ -110,10 +118,18 @@
   <div class="layout-matrix">
     <div class="control-panel">
       <div class="card">
-        <h2>System Core Trigger</h2>
-        <button class="btn btn-arm" onclick="executeControl('start')">ARM Core Engine</button>
-        <button class="btn btn-kill" onclick="executeControl('stop')">Forced Kill Switch</button>
+        <h2>Bot Automation Gate</h2>
+        <button class="btn btn-arm" onclick="executeControl('start')">ARM Automation Core</button>
+        <button class="btn btn-kill" onclick="executeControl('stop')">Disarm Automation</button>
         <button class="btn btn-swap" id="environment-swap-btn" onclick="triggerEnvironmentSwap()">Switch to Real Portfolio</button>
+      </div>
+
+      <div class="card">
+        <h2>Manual Execution Desk</h2>
+        <div class="manual-flex-deck">
+          <button class="btn btn-manual-buy" onclick="sendManualExecution('OVER')">Buy</button>
+          <button class="btn btn-manual-sell" onclick="sendManualExecution('UNDER')">Sell ⬇</button>
+        </div>
       </div>
 
       <div class="card">
@@ -130,9 +146,7 @@
       <div class="card">
         <h2>Class-A Digit Saturation Matrix (100-Tick Rolling Array)</h2>
         
-        <div class="distribution-matrix" id="ui-matrix-grid">
-          <!-- Dynamically generated individual digit telemetry slots from 0 to 9 -->
-        </div>
+        <div class="distribution-matrix" id="ui-matrix-grid"></div>
 
         <div style="margin-top: 20px; margin-bottom: 15px;">
           <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Over-3 Win-Space Density (Gated to ≥60%)</label>
@@ -185,6 +199,19 @@
     });
   }
 
+  function sendManualExecution(type) {
+    fetch('/api/manual-trade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actionType: type })
+    }).then(async res => {
+      if (!res.ok) {
+        const errorData = await res.json();
+        console.warn(`Execution Rejected: ${errorData.error}`);
+      }
+    });
+  }
+
   function triggerEnvironmentSwap() {
     const nextMode = activeTradingMode === 'demo' ? 'real' : 'demo';
     fetch('/api/control', {
@@ -192,7 +219,7 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'set_mode', mode: nextMode })
     }).then(res => {
-      if(!res.ok) alert("Safety Lockout: Cannot adjust modes while engine loop is active!");
+      if(!res.ok) alert("Safety Lockout: Cannot adjust profile modes while automation core is active!");
     });
   }
 
@@ -228,7 +255,6 @@
       document.getElementById('ui-stake').innerText = `$${parseFloat(state.currentStake).toFixed(2)}`;
       document.getElementById('environment-swap-btn').innerText = `Swap to ${state.tradingMode === 'demo' ? 'REAL PORTFOLIO' : 'DEMO ENVIRONMENT'}`;
 
-      // Update Density Bar visuals
       const densityPercent = state.currentDensity || 0;
       const fillBar = document.getElementById('ui-density-fill');
       fillBar.style.width = `${densityPercent}%`;
@@ -239,7 +265,6 @@
       }
       document.getElementById('ui-density-txt').innerText = `${densityPercent}%`;
 
-      // Update Individual Digit Percentage Elements
       const percentages = state.digitPercentages || Array(10).fill(0);
       for (let i = 0; i <= 9; i++) {
         const pct = percentages[i];
@@ -249,7 +274,6 @@
         
         pctLabel.innerText = `${pct.toFixed(1)}%`;
 
-        // Circle tag allocation overlay logic
         if (i === state.greenCircle) {
           tag.innerText = "Green"; tag.className = "circle-tag tag-green"; tag.style.display = "block";
           card.style.border = "2px solid var(--color-success)";
@@ -262,7 +286,6 @@
         }
       }
 
-      // Update Live 3 Ticker Badges
       const stripContainer = document.getElementById('ui-exhaustion-strip');
       stripContainer.innerHTML = '';
       const last3Digits = state.last3Ticks || [];
@@ -284,14 +307,10 @@
         statePill.innerText = "Portfolio Locked"; statePill.className = "status-pill sp-lock";
         errorBanner.innerText = state.lockReason; errorBanner.style.display = "block";
       } else if (state.active) {
-        if (state.warmupComplete) {
-          statePill.innerText = "Engine Streaming"; statePill.className = "status-pill sp-active";
-        } else {
-          statePill.innerText = "Seeding Rolling Buffer..."; statePill.className = "status-pill sp-warmup";
-        }
+        statePill.innerText = "Automation Core Armed"; statePill.className = "status-pill sp-active";
         errorBanner.style.display = "none";
       } else {
-        statePill.innerText = "Engine Inactive"; statePill.className = "status-pill sp-idle";
+        statePill.innerText = "Data Pipeline Streaming (Idle)"; statePill.className = "status-pill sp-idle";
         errorBanner.style.display = "none";
       }
     }
