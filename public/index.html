@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Over-3 Quant Execution Deck</title>
+  <title>Over-3 Spatial Quant Deck</title>
   <style>
     :root {
       --bg-main: #f8fafc;
@@ -57,32 +57,28 @@
 
     .workspace { display: flex; flex-direction: column; gap: 20px; }
     
-    /* Class-A High Fidelity Distribution Matrix Styling */
     .distribution-matrix { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin: 15px 0; }
     .digit-box { border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; text-align: center; background: #fff; transition: all 0.2s; position: relative; overflow: hidden; }
     .digit-box .num-label { font-size: 20px; font-weight: 800; color: #1e293b; margin-bottom: 2px; }
     .digit-box .pct-val { font-size: 14px; font-weight: 700; font-family: monospace; }
     
-    /* Strict UI Strategy Color Overlays */
-    .db-under { background: var(--color-warn-bg); border-color: #fed7aa; }
-    .db-under .pct-val { color: var(--color-warn); }
+    .db-under { background: #f8fafc; border-color: var(--border-color); }
+    .db-under .pct-val { color: var(--text-muted); }
     .db-over { background: var(--color-primary-bg); border-color: #bfdbfe; }
     .db-over .pct-val { color: var(--color-primary); }
-    .db-under.rule-violated { border: 2px solid var(--color-danger); background: #fef2f2; }
-    .db-over.rule-violated { border: 2px solid var(--color-danger); background: #fef2f2; }
     
-    /* Extreme Circle Identifiers */
-    .circle-tag { position: absolute; top: 0; left: 0; right: 0; font-size: 9px; font-weight: 800; text-transform: uppercase; color: #fff; padding: 2px 0; }
-    .tag-green { background: var(--color-success); }
-    .tag-red { background: var(--color-danger); }
-
     .density-bar-container { background: #e2e8f0; height: 24px; border-radius: 4px; overflow: hidden; position: relative; margin-top: 5px; border: 1px solid var(--border-color); }
-    .density-bar-fill { background: var(--color-primary); height: 100%; width: 0%; transition: width 0.3s ease; }
+    .density-bar-fill { background: var(--color-success); height: 100%; width: 0%; transition: width 0.3s ease; }
+    .density-bar-low { background: var(--color-danger) !important; }
     .density-text { position: absolute; width: 100%; text-align: center; top: 0; line-height: 24px; font-size: 13px; font-weight: 700; color: #0f172a; text-shadow: 0 0 4px #fff; }
 
     .exhaustion-badge-strip { display: flex; gap: 8px; margin-top: 10px; }
     .digit-badge { padding: 6px 12px; border-radius: 4px; border: 1px solid var(--border-color); font-weight: 700; font-family: monospace; background: #f1f5f9; width: 45px; text-align: center; font-size: 14px; }
     .digit-under-alert { background: var(--color-warn-bg); color: var(--color-warn); border-color: #fed7aa; }
+
+    .circle-tag { position: absolute; top: 0; left: 0; right: 0; font-size: 9px; font-weight: 800; text-transform: uppercase; color: #fff; padding: 2px 0; }
+    .tag-green { background: var(--color-success); }
+    .tag-red { background: var(--color-danger); }
 
     #lock-banner { background-color: var(--color-warn-bg); border: 1px solid #fed7aa; color: var(--color-warn); padding: 15px; border-radius: 6px; font-weight: 700; margin-bottom: 15px; display: none; font-size: 14px; }
 
@@ -102,7 +98,7 @@
 
 <div class="container">
   <header>
-    <h1>⚙️ Over-3 Rolling Buffer Execution Deck</h1>
+    <h1>⚙️ Over-3 Spatial Quant Execution Deck</h1>
     <div class="telemetry-strip">
       <div class="telemetry-item"><span id="network-dot" class="indicator-dot dot-active"></span> Pipeline Sync: <span id="network-status" style="font-weight:700; color:#22c55e;">ONLINE</span></div>
       <div id="engine-state-pill" class="status-pill sp-idle">Engine Offline</div>
@@ -135,10 +131,11 @@
         <h2>Class-A Digit Saturation Matrix (100-Tick Rolling Array)</h2>
         
         <div class="distribution-matrix" id="ui-matrix-grid">
-          </div>
+          <!-- Dynamically generated individual digit telemetry slots from 0 to 9 -->
+        </div>
 
         <div style="margin-top: 20px; margin-bottom: 15px;">
-          <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Over-3 Win-Space Density (Digits 4-9)</label>
+          <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Over-3 Win-Space Density (Gated to ≥60%)</label>
           <div class="density-bar-container">
             <div id="ui-density-fill" class="density-bar-fill"></div>
             <div id="ui-density-txt" class="density-text">0%</div>
@@ -166,7 +163,6 @@
 <script>
   let activeTradingMode = 'demo';
 
-  // Build the unified layout components for digits 0-9 inside the frame
   const matrixGrid = document.getElementById('ui-matrix-grid');
   for (let i = 0; i <= 9; i++) {
     const isUnder = i <= 3;
@@ -232,9 +228,15 @@
       document.getElementById('ui-stake').innerText = `$${parseFloat(state.currentStake).toFixed(2)}`;
       document.getElementById('environment-swap-btn').innerText = `Swap to ${state.tradingMode === 'demo' ? 'REAL PORTFOLIO' : 'DEMO ENVIRONMENT'}`;
 
-      // Update Win Space Density
+      // Update Density Bar visuals
       const densityPercent = state.currentDensity || 0;
-      document.getElementById('ui-density-fill').style.width = `${densityPercent}%`;
+      const fillBar = document.getElementById('ui-density-fill');
+      fillBar.style.width = `${densityPercent}%`;
+      if (densityPercent < 60) {
+        fillBar.classList.add('density-bar-low');
+      } else {
+        fillBar.classList.remove('density-bar-low');
+      }
       document.getElementById('ui-density-txt').innerText = `${densityPercent}%`;
 
       // Update Individual Digit Percentage Elements
@@ -246,11 +248,6 @@
         const tag = document.getElementById(`digit-tag-${i}`);
         
         pctLabel.innerText = `${pct.toFixed(1)}%`;
-        
-        // Dynamic strategy threshold warnings
-        card.classList.remove('rule-violated');
-        if (i <= 3 && pct >= 9.7) card.classList.add('rule-violated');
-        if (i >= 4 && pct < 9.8) card.classList.add('rule-violated');
 
         // Circle tag allocation overlay logic
         if (i === state.greenCircle) {
@@ -275,7 +272,7 @@
       placeholders.forEach(digit => {
         const badge = document.createElement('div');
         badge.className = 'digit-badge';
-        if (digit !== '—' && parseInt(digit) < 3) badge.className = 'digit-badge digit-under-alert';
+        if (digit !== '—' && parseInt(digit) <= 3) badge.className = 'digit-badge digit-under-alert';
         badge.innerText = digit;
         stripContainer.appendChild(badge);
       });
