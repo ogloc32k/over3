@@ -39,9 +39,9 @@ function sanitizeState() {
 }
 
 // ---------- Strategy Parameters & Constants ----------
-const MARKET = { sym: 'R_75', name: 'Volatility 75 Index', dp: 4 }; // UNTOUCHED DECIMAL SETTING
+const MARKET = { sym: 'R_75', name: 'Volatility 75 Index', dp: 4 }; 
 const FIXED_BARRIER = 3;         
-const BUFFER_CAPACITY = 1000; 
+const BUFFER_CAPACITY = 100; 
 
 // Strict Anti-Martingale & Risk Limits
 const RISK_PERCENT = 1;   
@@ -58,12 +58,10 @@ class OverThreeRollingEngine {
     this.metrics = null;
   }
 
-  // Parses prices directly to extract single digits, explicitly supporting 0
   extractDigit(price) {
     return parseInt(parseFloat(price).toFixed(MARKET.dp).slice(-1));
   }
 
-  // Instantly seeds the rolling buffer with 100 fresh historical ticks on network restoration
   seedHistory(prices) {
     this.ticks = prices.map(p => this.extractDigit(p));
     if (this.ticks.length > BUFFER_CAPACITY) {
@@ -72,7 +70,6 @@ class OverThreeRollingEngine {
     return this.analyze();
   }
 
-  // Appends new streaming ticks and shifts out stale historical data
   feedLive(price) {
     const digit = this.extractDigit(price);
     this.ticks.push(digit);
@@ -83,7 +80,7 @@ class OverThreeRollingEngine {
   analyze() {
     if (this.ticks.length < BUFFER_CAPACITY) return null;
 
-    // 1. Structural Distribution Mapping (0-9 accurately indexed)
+    // 1. Structural Distribution Mapping
     const freqCounts = Array(10).fill(0);
     this.ticks.forEach(d => freqCounts[d]++);
 
@@ -106,32 +103,29 @@ class OverThreeRollingEngine {
       }
     }
 
-    // 3. Strategy Core Validation Rules
-    const circlesInRange = (greenCircle >= 6 && redCircle >= 6);
-    const greenInFront = (greenCircle > redCircle);
+    // 3. New Strategy Spatial Filtering Mechanics
+    const diff = greenCircle - redCircle;
+    
+    // Circles must be above 4, red cannot be 5 (so red >= 6), green in front of red, green cannot be 9, max separation distance of 1
+    const circlesValid = (greenCircle > redCircle && greenCircle !== 9 && redCircle >= 6 && diff <= 1);
 
-    let under3Valid = true;
-    for (let i = 0; i <= 3; i++) {
-      if (freqCounts[i] >= 9.7) { under3Valid = false; break; }
-    }
+    // Over-3 Density validation (Must be 60% or higher)
+    const currentDensity = this.getCurrentDensity();
+    const densityValid = (currentDensity >= 60);
 
-    let over3Valid = true;
-    for (let i = 4; i <= 9; i++) {
-      if (freqCounts[i] < 9.8) { over3Valid = false; break; }
-    }
+    const setupValid = circlesValid && densityValid;
 
-    const setupValid = circlesInRange && greenInFront && under3Valid && over3Valid;
-
-    // 4. Extract Real-Time Entry Micro-Triggers
+    // 4. Sequential Micro-Trigger Chains
     const last3 = this.ticks.slice(-3);
     const currentDigit = last3[last3.length - 1];
     const prevDigit = last3.length >= 2 ? last3[last3.length - 2] : null;
 
     let triggerFired = false;
-    if (currentDigit === 1) {
-      triggerFired = true; 
-    } else if (currentDigit < 3 && prevDigit !== null && prevDigit < 3) {
-      triggerFired = true; 
+    if (setupValid && prevDigit !== null && prevDigit <= 3) {
+      // Trigger lands if current digit touches Red circle OR lands directly between Red and Green
+      if (currentDigit === redCircle || (currentDigit > redCircle && currentDigit < greenCircle)) {
+        triggerFired = true;
+      }
     }
 
     this.metrics = { setupValid, triggerFired, greenCircle, redCircle, literalDigit: currentDigit };
@@ -141,7 +135,6 @@ class OverThreeRollingEngine {
   getPercentages() {
     const freq = Array(10).fill(0);
     this.ticks.forEach(d => freq[d]++);
-    // Returns clean percentages directly computed from the 100 rolling slots
     return freq.map(count => Math.round((count / BUFFER_CAPACITY) * 1000) / 10);
   }
 
@@ -249,7 +242,6 @@ function processTick(price) {
     return;
   }
 
-  // Stream directly feeds the rolling analysis window
   const metrics = engine.feedLive(price);
 
   if (state.cooldownTicksLeft > 0) { state.cooldownTicksLeft--; return; }
@@ -262,7 +254,7 @@ function processTick(price) {
     const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
     state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-    addLog(`🎯 Executing Over-3 Trade | Stake: $${state.currentStake} | Last Digit: ${metrics.literalDigit}`);
+    addLog(`🎯 Strategy Target Verified | Stake: $${state.currentStake} | Trigger Digit: ${metrics.literalDigit}`);
     state.activeRealTrade = { stake: state.currentStake, balanceBefore: state.balance };
     
     send({
@@ -294,14 +286,13 @@ function disconnectDeriv() {
     try { derivWs.terminate(); } catch(e) {} 
     derivWs = null; 
   }
-  // Hard network clearing: resets subscription states to prevent execution lockups or freezes
   state.liveSubscribed = false;
   state.warmupComplete = false;
 }
 
 async function connectDeriv() {
   if (!state.active || state.locked) return;
-  disconnectDeriv(); // Clears any legacy hung pipelines
+  disconnectDeriv(); 
 
   const appId = (process.env.DERIV_APP_ID || '').trim();
   const token = (process.env.DERIV_PAT || '').trim();
@@ -340,8 +331,6 @@ async function connectDeriv() {
     derivWs.on('open', () => {
       addLog(`Secure Socket Established. Synchronizing Capital: $${state.balance.toFixed(2)}`);
       send({ balance: 1, subscribe: 1, req_id: ++reqId });
-      
-      // Pulls down exactly 100 historical ticks to initialize the rolling engine instantly
       send({ ticks_history: MARKET.sym, count: BUFFER_CAPACITY, end: 'latest', req_id: ++reqId });
 
       keepAliveLoop = setInterval(() => {
@@ -387,7 +376,6 @@ function handleMessage(msg) {
     state.balance = parseFloat(msg.balance.balance);
     broadcastSSE({ state: sanitizeState() });
   } else if (msg.msg_type === 'history') {
-    // Seeds the rolling buffer with 100 pure ticks all at once
     engine.seedHistory(msg.history.prices);
     state.warmupComplete = true; 
     
@@ -424,7 +412,7 @@ app.post('/api/control', (req, res) => {
   }
   if (action === 'start') {
     state.active = true; state.locked = false; state.dailyStartBalance = null; state.dailyPnl = 0;
-    addLog(`🚀 Core Rolling Engine Armed. Mapping V75 Matrix.`);
+    addLog(`🚀 Core Rolling Engine Armed. Monitoring spatial metrics.`);
     connectDeriv(); saveState();
   } else if (action === 'stop') {
     state.active = false; disconnectDeriv();
