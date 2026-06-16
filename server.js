@@ -43,7 +43,6 @@ const MARKET = { sym: 'R_75', name: 'Volatility 75 Index', dp: 4 };
 const FIXED_BARRIER = 3;         
 const BUFFER_CAPACITY = 100; 
 
-// Strict Anti-Martingale & Risk Limits
 const RISK_PERCENT = 1;   
 const TP_PERCENT = 2;     
 const SL_PERCENT = 4;     
@@ -80,11 +79,9 @@ class OverThreeRollingEngine {
   analyze() {
     if (this.ticks.length < BUFFER_CAPACITY) return null;
 
-    // 1. Structural Distribution Mapping
     const freqCounts = Array(10).fill(0);
     this.ticks.forEach(d => freqCounts[d]++);
 
-    // 2. Identify Extreme Boundary Deviations
     let greenCircle = 0;
     let maxCount = -1;
     for (let i = 0; i <= 9; i++) {
@@ -103,32 +100,27 @@ class OverThreeRollingEngine {
       }
     }
 
-    // 3. New Strategy Spatial Filtering Mechanics
+    // UPDATED BOTTLE-NECK 1: Expanded boundaries to accept 3, 4, 5, 6 floors & spatial differences up to 2
     const diff = greenCircle - redCircle;
-    
-    // Circles must be above 4, red cannot be 5 (so red >= 6), green in front of red, green cannot be 9, max separation distance of 1
-    const circlesValid = (greenCircle > redCircle && greenCircle !== 9 && redCircle >= 6 && diff <= 1);
+    const circlesValid = (greenCircle > redCircle && redCircle >= 3 && diff <= 2);
 
-    // Over-3 Density validation (Must be 60% or higher)
     const currentDensity = this.getCurrentDensity();
     const densityValid = (currentDensity >= 60);
-
     const setupValid = circlesValid && densityValid;
 
-    // 4. Sequential Micro-Trigger Chains
     const last3 = this.ticks.slice(-3);
     const currentDigit = last3[last3.length - 1];
     const prevDigit = last3.length >= 2 ? last3[last3.length - 2] : null;
 
+    // UPDATED BOTTLE-NECK 3: Sequential Momentum Trigger Logic
     let triggerFired = false;
     if (setupValid && prevDigit !== null && prevDigit <= 3) {
-      // Trigger lands if current digit touches Red circle OR lands directly between Red and Green
-      if (currentDigit === redCircle || (currentDigit > redCircle && currentDigit < greenCircle)) {
+      if (currentDigit >= redCircle && currentDigit < greenCircle) {
         triggerFired = true;
       }
     }
 
-    this.metrics = { setupValid, triggerFired, greenCircle, redCircle, literalDigit: currentDigit };
+    this.metrics = { setupValid, triggerFired, greenCircle, redCircle, literalDigit: currentDigit, prevDigit };
     return this.metrics;
   }
 
@@ -151,7 +143,7 @@ class OverThreeRollingEngine {
 const engine = new OverThreeRollingEngine();
 
 const state = {
-  active: false,
+  active: false, // Tracks automated trading execution loop status only
   tradingMode: 'demo', 
   balance: null,
   currency: 'USD',
@@ -208,12 +200,12 @@ function checkDailyLimits() {
   if (state.dailyPnl >= tpLimit) {
     state.locked = true; state.active = false;
     state.lockReason = `🎯 Target hit! Secured +$${state.dailyPnl.toFixed(2)} (2% Cap).`;
-    addLog(state.lockReason); disconnectDeriv(); return true;
+    addLog(state.lockReason); return true;
   }
   if (state.dailyPnl <= -slLimit) {
     state.locked = true; state.active = false;
     state.lockReason = `🛑 Risk Limit hit. Portfolio preserved at -$${Math.abs(state.dailyPnl).toFixed(2)} (4% Max Loss).`;
-    addLog(state.lockReason); disconnectDeriv(); return true;
+    addLog(state.lockReason); return true;
   }
   return false;
 }
@@ -223,7 +215,7 @@ function settleRealTrade() {
   const profit = state.balance - state.activeRealTrade.balanceBefore;
   state.dailyPnl += profit;
   
-  addLog(`[${state.tradingMode.toUpperCase()}] Settlement complete: ${profit >= 0 ? 'WIN (+$' : 'LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session Net: ${state.dailyPnl.toFixed(2)}`);
+  addLog(`[Settlement] Result: ${profit >= 0 ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Portfolio Net: $${state.dailyPnl.toFixed(2)}`);
   
   state.tradeInProgress = false; state.activeRealTrade = null; state.settleTicksRemaining = 0;
   state.cooldownTicksLeft = COOLDOWN_TICKS;
@@ -234,6 +226,7 @@ function settleRealTrade() {
   checkDailyLimits(); saveState(); broadcastSSE({ state: sanitizeState() });
 }
 
+// High-speed sequential evaluation loop
 function processTick(price) {
   if (state.settleTicksRemaining > 0) {
     state.settleTicksRemaining--;
@@ -243,18 +236,32 @@ function processTick(price) {
   }
 
   const metrics = engine.feedLive(price);
-
-  if (state.cooldownTicksLeft > 0) { state.cooldownTicksLeft--; return; }
-  if (!state.active || state.locked || !state.warmupComplete || state.tradeInProgress) return;
   if (!metrics) return;
 
-  if (metrics.setupValid && metrics.triggerFired) {
-    state.tradeInProgress = true;
+  // Step-by-Step Granular Analytics Logging Matrix
+  let marketStatusMsg = `📊 Tick Digit: [${metrics.literalDigit}] | Density: ${engine.getCurrentDensity()}% (R:${metrics.redCircle} G:${metrics.greenCircle})`;
+  
+  if (state.locked) {
+    // Structural block bypass
+  } else if (state.tradeInProgress) {
+    marketStatusMsg += ` | ⏳ Awaiting active 3-tick contract settlement...`;
+  } else if (state.cooldownTicksLeft > 0) {
+    state.cooldownTicksLeft--;
+    marketStatusMsg += ` | 🕒 Cooldown Active (${state.cooldownTicksLeft} ticks remaining)`;
+  } else if (!state.active) {
+    marketStatusMsg += ` | 💤 Automated Core Disarmed (Manual mode operational)`;
+  } else if (!metrics.setupValid) {
+    marketStatusMsg += ` | ❌ Setup Rejected (Required: Red>=3, Diff<=2, Density>=60%)`;
+  } else if (metrics.setupValid && !metrics.triggerFired) {
+    marketStatusMsg += ` | ⚡ Setup Valid! Scanning for sequence: (Prev: ${metrics.prevDigit} <= 3) -> (Current: hit inside [${metrics.redCircle} to ${metrics.greenCircle - 1}])`;
+  } else if (metrics.setupValid && metrics.triggerFired) {
+    marketStatusMsg += ` | 🔥 SEQUENCE VERIFIED! Firing automated execution asset...`;
     
+    state.tradeInProgress = true;
     const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
     state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-    addLog(`🎯 Strategy Target Verified | Stake: $${state.currentStake} | Trigger Digit: ${metrics.literalDigit}`);
+    addLog(`🎯 Bot Entry Fired | Stake: $${state.currentStake} | Path: ${metrics.prevDigit} -> ${metrics.literalDigit}`);
     state.activeRealTrade = { stake: state.currentStake, balanceBefore: state.balance };
     
     send({
@@ -263,6 +270,9 @@ function processTick(price) {
       contract_type: 'DIGITOVER', barrier: FIXED_BARRIER, req_id: ++reqId
     });
   }
+
+  // Push market telemetry down the data stream
+  broadcastSSE({ logs: [{ id: logId++, time: new Date().toISOString(), message: marketStatusMsg }], state: sanitizeState() });
 }
 
 function getEATDateString() {
@@ -275,7 +285,9 @@ let keepAliveLoop = null;
 let watchdogTimer = null;
 
 function send(msg) {
-  if (derivWs && derivWs.readyState === WebSocket.OPEN) derivWs.send(JSON.stringify(msg));
+  if (derivWs && derivWs.readyState === WebSocket.OPEN) {
+    derivWs.send(JSON.stringify(msg));
+  }
 }
 
 function disconnectDeriv() {
@@ -290,15 +302,14 @@ function disconnectDeriv() {
   state.warmupComplete = false;
 }
 
+// Automated background pipe management
 async function connectDeriv() {
-  if (!state.active || state.locked) return;
   disconnectDeriv(); 
-
   const appId = (process.env.DERIV_APP_ID || '').trim();
   const token = (process.env.DERIV_PAT || '').trim();
 
   if (!appId || !token) {
-    addLog('Configuration Error: Credentials missing from runtime variables.');
+    addLog('Configuration Error: Runtime system environment variables are completely missing.');
     return;
   }
 
@@ -329,16 +340,16 @@ async function connectDeriv() {
     derivWs = new WebSocket(otpData.data.url);
 
     derivWs.on('open', () => {
-      addLog(`Secure Socket Established. Synchronizing Capital: $${state.balance.toFixed(2)}`);
+      addLog(`🌐 Flawless Pipe Linked. Wallet Synchronized: $${state.balance.toFixed(2)} ${state.currency}`);
       send({ balance: 1, subscribe: 1, req_id: ++reqId });
       send({ ticks_history: MARKET.sym, count: BUFFER_CAPACITY, end: 'latest', req_id: ++reqId });
 
       keepAliveLoop = setInterval(() => {
         send({ ping: 1 });
         watchdogTimer = setTimeout(() => {
-          addLog('🚨 Connection stalled. Forcing network reset to recover rolling buffer...');
+          addLog('🚨 Pipeline latency anomaly detected. Re-spawning socket...');
           if (derivWs) derivWs.terminate();
-        }, 4000);
+        }, 3000);
       }, 15000);
     });
 
@@ -352,17 +363,14 @@ async function connectDeriv() {
 
     derivWs.on('close', () => {
       disconnectDeriv();
-      if (state.active && !state.locked) {
-        addLog('⚠️ Network drop detected. Activating auto-recovery loop in 2s...');
-        setTimeout(connectDeriv, 2000);
-      }
+      setTimeout(connectDeriv, 1500); // Instant auto-recovery bridge
     });
 
     derivWs.on('error', () => { if (derivWs) derivWs.terminate(); });
 
   } catch(e) {
-    addLog(`Network Link Exception: ${e.message}. Retrying in 5s...`);
-    if (state.active && !state.locked) setTimeout(connectDeriv, 5000);
+    addLog(`Network Link Exception: ${e.message}. Attempting recovery step...`);
+    setTimeout(connectDeriv, 4000);
   }
 }
 
@@ -378,7 +386,6 @@ function handleMessage(msg) {
   } else if (msg.msg_type === 'history') {
     engine.seedHistory(msg.history.prices);
     state.warmupComplete = true; 
-    
     if (!state.liveSubscribed) {
       state.liveSubscribed = true;
       addLog('✅ Rolling buffer successfully seeded with 100 past ticks. Subscribing to live ticks.');
@@ -388,7 +395,6 @@ function handleMessage(msg) {
   } else if (msg.msg_type === 'tick') {
     if (msg.tick.symbol !== MARKET.sym) return;
     processTick(parseFloat(msg.tick.quote));
-    broadcastSSE({ state: sanitizeState() });
   } else if (msg.msg_type === 'proposal') {
     send({ buy: msg.proposal.id, price: msg.proposal.ask_price, req_id: ++reqId });
   } else if (msg.msg_type === 'buy') {
@@ -408,18 +414,47 @@ app.post('/api/control', (req, res) => {
   if (action === 'set_mode') {
     if (state.active) return res.status(400).json({ error: 'Engine active.' });
     state.tradingMode = mode; state.dailyStartBalance = null; state.dailyPnl = 0;
-    saveState(); broadcastSSE({ state: sanitizeState() }); return res.json({ success: true });
+    saveState(); 
+    connectDeriv(); // Instantly reconnects pipeline to the alternate account profile
+    return res.json({ success: true });
   }
   if (action === 'start') {
-    state.active = true; state.locked = false; state.dailyStartBalance = null; state.dailyPnl = 0;
-    addLog(`🚀 Core Rolling Engine Armed. Monitoring spatial metrics.`);
-    connectDeriv(); saveState();
+    state.active = true; state.locked = false;
+    addLog(`🚀 Automated Trading Core ARMED. Automation triggers are now processing.`);
   } else if (action === 'stop') {
-    state.active = false; disconnectDeriv();
-    state.tradeInProgress = false; addLog('🚨 Core Engine Disarmed safely.'); saveState();
+    state.active = false; state.tradeInProgress = false; 
+    addLog('🚨 Automated Trading Core DISARMED safely. Pipeline stream remains active for manual executions.');
   }
-  broadcastSSE({ state: sanitizeState() }); res.json({ success: true });
+  saveState(); broadcastSSE({ state: sanitizeState() }); res.json({ success: true });
+});
+
+// Manual Intervention Controller Matrix (Allowed while state.active is false!)
+app.post('/api/manual-trade', (req, res) => {
+  const { actionType } = req.body; 
+  if (state.locked || state.tradeInProgress || !state.warmupComplete) {
+    return res.status(400).json({ error: 'Safety Violation: Core pipeline is locked or offline.' });
+  }
+
+  state.tradeInProgress = true;
+  const contractType = actionType === 'OVER' ? 'DIGITOVER' : 'DIGITUNDER';
+  
+  const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
+  state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
+
+  addLog(`⚡ Manual Intervention Executed: ${contractType} | Stake: $${state.currentStake}`);
+  state.activeRealTrade = { stake: state.currentStake, balanceBefore: state.balance };
+
+  send({
+    proposal: 1, amount: state.currentStake, basis: 'stake', currency: state.currency,
+    duration: 1, duration_unit: 't', underlying_symbol: MARKET.sym,
+    contract_type: contractType, barrier: FIXED_BARRIER, req_id: ++reqId
+  });
+
+  broadcastSSE({ state: sanitizeState() });
+  res.json({ success: true });
 });
 
 loadState();
-server.listen(PORT, () => console.log(`Terminal active on port ${PORT}`));
+// Spin up the market connection loop immediately upon system boot sequence
+connectDeriv();
+server.listen(PORT, () => console.log(`Hybrid Execution Deck active on port ${PORT}`));
