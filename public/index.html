@@ -53,10 +53,8 @@
     .manual-flex-deck { display: flex; gap: 12px; margin-top: 5px; }
     .btn-manual-buy { background: var(--color-success); color: white; font-size: 14px; font-weight: 800; padding: 15px 0; margin-bottom: 0; flex: 1; border: none; border-radius: 6px; cursor: pointer; text-transform: uppercase; }
     .btn-manual-buy:hover { background: #15803d; transform: translateY(-1px); }
-    .btn-manual-buy:active { transform: translateY(0); }
     .btn-manual-sell { background: var(--color-danger); color: white; font-size: 14px; font-weight: 800; padding: 15px 0; margin-bottom: 0; flex: 1; border: none; border-radius: 6px; cursor: pointer; text-transform: uppercase; }
     .btn-manual-sell:hover { background: #b91c1c; transform: translateY(-1px); }
-    .btn-manual-sell:active { transform: translateY(0); }
 
     .registry-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px dashed #e2e8f0; font-size: 14px; }
     .registry-row:last-child { border-bottom: none; }
@@ -75,10 +73,9 @@
     .db-over { background: var(--color-primary-bg); border-color: #bfdbfe; }
     .db-over .pct-val { color: var(--color-primary); }
     
-    .density-bar-container { background: #e2e8f0; height: 24px; border-radius: 4px; overflow: hidden; position: relative; margin-top: 5px; border: 1px solid var(--border-color); }
-    .density-bar-fill { background: var(--color-success); height: 100%; width: 0%; transition: width 0.3s ease; }
-    .density-bar-low { background: var(--color-danger) !important; }
-    .density-text { position: absolute; width: 100%; text-align: center; top: 0; line-height: 24px; font-size: 13px; font-weight: 700; color: #0f172a; text-shadow: 0 0 4px #fff; }
+    .streak-container-bar { background: var(--color-primary-bg); padding: 15px; border: 1px solid #bfdbfe; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+    .streak-headline { font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--color-primary); letter-spacing: 0.5px; }
+    .streak-counter-value { font-size: 24px; font-weight: 900; font-family: monospace; color: var(--color-primary); }
 
     .exhaustion-badge-strip { display: flex; gap: 8px; margin-top: 10px; }
     .digit-badge { padding: 6px 12px; border-radius: 4px; border: 1px solid var(--border-color); font-weight: 700; font-family: monospace; background: #f1f5f9; width: 45px; text-align: center; font-size: 14px; }
@@ -98,7 +95,6 @@
     .status-pill { padding: 4px 12px; font-size: 11px; font-weight: 700; border-radius: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
     .sp-active { background: var(--color-success-bg); color: var(--color-success); border: 1px solid #bbf7d0; }
     .sp-idle { background: var(--color-primary-bg); color: var(--color-primary); border: 1px solid #bfdbfe; }
-    .sp-warmup { background: var(--color-primary-bg); color: var(--color-primary); border: 1px solid #bfdbfe; }
     .sp-lock { background: var(--color-warn-bg); color: var(--color-warn); border: 1px solid #fed7aa; }
   </style>
 </head>
@@ -144,19 +140,16 @@
 
     <div class="workspace">
       <div class="card">
-        <h2>Class-A Digit Saturation Matrix (100-Tick Rolling Array)</h2>
+        <h2>Digit Frequency Saturation (100-Tick Array)</h2>
         
         <div class="distribution-matrix" id="ui-matrix-grid"></div>
 
-        <div style="margin-top: 20px; margin-bottom: 15px;">
-          <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Over-3 Win-Space Density (Gated to ≥60%)</label>
-          <div class="density-bar-container">
-            <div id="ui-density-fill" class="density-bar-fill"></div>
-            <div id="ui-density-txt" class="density-text">0%</div>
-          </div>
+        <div class="streak-container-bar">
+          <div class="streak-headline">Active Consecutive Low Digit Streak (Gated to ≥ 5)</div>
+          <div id="ui-streak-count" class="streak-counter-value">0</div>
         </div>
 
-        <div>
+        <div style="margin-top: 15px;">
           <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Live Stream Tail (Last 3 Digits)</label>
           <div class="exhaustion-badge-strip" id="ui-exhaustion-strip">
             <div class="digit-badge">—</div>
@@ -254,16 +247,7 @@
       
       document.getElementById('ui-stake').innerText = `$${parseFloat(state.currentStake).toFixed(2)}`;
       document.getElementById('environment-swap-btn').innerText = `Swap to ${state.tradingMode === 'demo' ? 'REAL PORTFOLIO' : 'DEMO ENVIRONMENT'}`;
-
-      const densityPercent = state.currentDensity || 0;
-      const fillBar = document.getElementById('ui-density-fill');
-      fillBar.style.width = `${densityPercent}%`;
-      if (densityPercent < 60) {
-        fillBar.classList.add('density-bar-low');
-      } else {
-        fillBar.classList.remove('density-bar-low');
-      }
-      document.getElementById('ui-density-txt').innerText = `${densityPercent}%`;
+      document.getElementById('ui-streak-count').innerText = state.currentStreak || 0;
 
       const percentages = state.digitPercentages || Array(10).fill(0);
       for (let i = 0; i <= 9; i++) {
