@@ -34,7 +34,8 @@ function sanitizeState() {
     last3Ticks: engine ? engine.getLast3() : [],
     digitPercentages: engine ? engine.getPercentages() : Array(10).fill(0),
     greenCircle: engine && engine.metrics ? engine.metrics.greenCircle : '—',
-    redCircle: engine && engine.metrics ? engine.metrics.redCircle : '—'
+    redCircle: engine && engine.metrics ? engine.metrics.redCircle : '—',
+    currentStreak: engine ? engine.lowStreakCount : 0
   };
 }
 
@@ -55,6 +56,7 @@ class OverThreeRollingEngine {
   constructor() {
     this.ticks = [];
     this.metrics = null;
+    this.lowStreakCount = 0; // Tracks consecutive low digits (0, 1, 2, 3)
   }
 
   extractDigit(price) {
@@ -66,19 +68,22 @@ class OverThreeRollingEngine {
     if (this.ticks.length > BUFFER_CAPACITY) {
       this.ticks = this.ticks.slice(-BUFFER_CAPACITY);
     }
-    return this.analyze();
+    // Set initial streak counter based on seed tail
+    this.lowStreakCount = 0;
+    return this.analyze(this.ticks[this.ticks.length - 1]);
   }
 
   feedLive(price) {
     const digit = this.extractDigit(price);
     this.ticks.push(digit);
     if (this.ticks.length > BUFFER_CAPACITY) this.ticks.shift();
-    return this.analyze();
+    return this.analyze(digit);
   }
 
-  analyze() {
+  analyze(currentDigit) {
     if (this.ticks.length < BUFFER_CAPACITY) return null;
 
+    // Calculate Frequencies for Circles
     const freqCounts = Array(10).fill(0);
     this.ticks.forEach(d => freqCounts[d]++);
 
@@ -100,27 +105,24 @@ class OverThreeRollingEngine {
       }
     }
 
-    // UPDATED BOTTLE-NECK 1: Expanded boundaries to accept 3, 4, 5, 6 floors & spatial differences up to 2
-    const diff = greenCircle - redCircle;
-    const circlesValid = (greenCircle > redCircle && redCircle >= 3 && diff <= 2);
+    // SIMPLIFIED RULE 1: Global safety boundary validation
+    const circlesValid = (greenCircle >= 3 && redCircle >= 3);
 
-    const currentDensity = this.getCurrentDensity();
-    const densityValid = (currentDensity >= 60);
-    const setupValid = circlesValid && densityValid;
-
-    const last3 = this.ticks.slice(-3);
-    const currentDigit = last3[last3.length - 1];
-    const prevDigit = last3.length >= 2 ? last3[last3.length - 2] : null;
-
-    // UPDATED BOTTLE-NECK 3: Sequential Momentum Trigger Logic
     let triggerFired = false;
-    if (setupValid && prevDigit !== null && prevDigit <= 3) {
-      if (currentDigit >= redCircle && currentDigit < greenCircle) {
+    let priorStreak = this.lowStreakCount;
+
+    // SIMPLIFIED RULE 2 & 3: Sequential Streak Breakdown Execution Matrix
+    if (currentDigit <= 3) {
+      this.lowStreakCount++;
+    } else {
+      // Streak broken by a higher digit
+      if (priorStreak >= 5 && currentDigit !== 4 && circlesValid) {
         triggerFired = true;
       }
+      this.lowStreakCount = 0; // Wipe counter on high break
     }
 
-    this.metrics = { setupValid, triggerFired, greenCircle, redCircle, literalDigit: currentDigit, prevDigit };
+    this.metrics = { circlesValid, triggerFired, greenCircle, redCircle, literalDigit: currentDigit, priorStreak };
     return this.metrics;
   }
 
@@ -143,7 +145,7 @@ class OverThreeRollingEngine {
 const engine = new OverThreeRollingEngine();
 
 const state = {
-  active: false, // Tracks automated trading execution loop status only
+  active: false, // Purely gates automated execution loops
   tradingMode: 'demo', 
   balance: null,
   currency: 'USD',
@@ -215,7 +217,7 @@ function settleRealTrade() {
   const profit = state.balance - state.activeRealTrade.balanceBefore;
   state.dailyPnl += profit;
   
-  addLog(`[Settlement] Result: ${profit >= 0 ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Portfolio Net: $${state.dailyPnl.toFixed(2)}`);
+  addLog(`[Settlement] Result: ${profit >= 0 ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session Net: $${state.dailyPnl.toFixed(2)}`);
   
   state.tradeInProgress = false; state.activeRealTrade = null; state.settleTicksRemaining = 0;
   state.cooldownTicksLeft = COOLDOWN_TICKS;
@@ -226,7 +228,7 @@ function settleRealTrade() {
   checkDailyLimits(); saveState(); broadcastSSE({ state: sanitizeState() });
 }
 
-// High-speed sequential evaluation loop
+// High-speed simplified logic processor loop
 function processTick(price) {
   if (state.settleTicksRemaining > 0) {
     state.settleTicksRemaining--;
@@ -238,8 +240,9 @@ function processTick(price) {
   const metrics = engine.feedLive(price);
   if (!metrics) return;
 
-  // Step-by-Step Granular Analytics Logging Matrix
-  let marketStatusMsg = `📊 Tick Digit: [${metrics.literalDigit}] | Density: ${engine.getCurrentDensity()}% (R:${metrics.redCircle} G:${metrics.greenCircle})`;
+  // Step-by-Step Granular Market Analytics Matrix Logs
+  const activeStreakDisplay = metrics.literalDigit <= 3 ? engine.lowStreakCount : metrics.priorStreak;
+  let marketStatusMsg = `📊 Digit: [${metrics.literalDigit}] | Consecutive Low Streak: ${activeStreakDisplay} | Circles: (R:${metrics.redCircle} G:${metrics.greenCircle})`;
   
   if (state.locked) {
     // Structural block bypass
@@ -249,19 +252,23 @@ function processTick(price) {
     state.cooldownTicksLeft--;
     marketStatusMsg += ` | 🕒 Cooldown Active (${state.cooldownTicksLeft} ticks remaining)`;
   } else if (!state.active) {
-    marketStatusMsg += ` | 💤 Automated Core Disarmed (Manual mode operational)`;
-  } else if (!metrics.setupValid) {
-    marketStatusMsg += ` | ❌ Setup Rejected (Required: Red>=3, Diff<=2, Density>=60%)`;
-  } else if (metrics.setupValid && !metrics.triggerFired) {
-    marketStatusMsg += ` | ⚡ Setup Valid! Scanning for sequence: (Prev: ${metrics.prevDigit} <= 3) -> (Current: hit inside [${metrics.redCircle} to ${metrics.greenCircle - 1}])`;
-  } else if (metrics.setupValid && metrics.triggerFired) {
-    marketStatusMsg += ` | 🔥 SEQUENCE VERIFIED! Firing automated execution asset...`;
+    marketStatusMsg += ` | 💤 Automation Core Disarmed (Manual mode fully active)`;
+  } else if (!metrics.circlesValid) {
+    marketStatusMsg += ` | ❌ Setup Blocked: Circles out of bounds (Both must be >= 3)`;
+  } else if (metrics.literalDigit <= 3) {
+    marketStatusMsg += ` | 🔋 Accumulating Streak... (${engine.lowStreakCount}/5+)`;
+  } else if (metrics.literalDigit === 4) {
+    marketStatusMsg += ` | ⚠️ Sequence Reset: Digit 4 is explicitly excluded from strategy triggers.`;
+  } else if (metrics.priorStreak < 5) {
+    marketStatusMsg += ` | ❌ Reset: Breakout digit arrived too early (Streak only hit ${metrics.priorStreak})`;
+  } else if (metrics.triggerFired) {
+    marketStatusMsg += ` | 🔥 CONDITIONS VALIDATED! Firing automated execution asset...`;
     
     state.tradeInProgress = true;
     const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
     state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-    addLog(`🎯 Bot Entry Fired | Stake: $${state.currentStake} | Path: ${metrics.prevDigit} -> ${metrics.literalDigit}`);
+    addLog(`🎯 Bot Entry Fired | Stake: $${state.currentStake} | Pattern: ${metrics.priorStreak} Low Ticks -> Broken by ${metrics.literalDigit}`);
     state.activeRealTrade = { stake: state.currentStake, balanceBefore: state.balance };
     
     send({
@@ -271,7 +278,7 @@ function processTick(price) {
     });
   }
 
-  // Push market telemetry down the data stream
+  // Stream structural log downstream
   broadcastSSE({ logs: [{ id: logId++, time: new Date().toISOString(), message: marketStatusMsg }], state: sanitizeState() });
 }
 
@@ -302,14 +309,14 @@ function disconnectDeriv() {
   state.warmupComplete = false;
 }
 
-// Automated background pipe management
+// Perpetual Background Feed Pipe
 async function connectDeriv() {
   disconnectDeriv(); 
   const appId = (process.env.DERIV_APP_ID || '').trim();
   const token = (process.env.DERIV_PAT || '').trim();
 
   if (!appId || !token) {
-    addLog('Configuration Error: Runtime system environment variables are completely missing.');
+    addLog('Configuration Error: App ID or Token credentials missing from runtime variables.');
     return;
   }
 
@@ -323,7 +330,7 @@ async function connectDeriv() {
     const accList = Array.isArray(data.data) ? data.data : [data.data];
     const targetAccount = accList.find(a => a.account_type === state.tradingMode);
     
-    if (!targetAccount) throw new Error(`Profile target unmatched: ${state.tradingMode}`);
+    if (!targetAccount) throw new Error(`Target profile unmatched: ${state.tradingMode}`);
 
     state.balance = parseFloat(targetAccount.balance);
     state.currency = targetAccount.currency || 'USD';
@@ -340,14 +347,14 @@ async function connectDeriv() {
     derivWs = new WebSocket(otpData.data.url);
 
     derivWs.on('open', () => {
-      addLog(`🌐 Flawless Pipe Linked. Wallet Synchronized: $${state.balance.toFixed(2)} ${state.currency}`);
+      addLog(`🌐 Pipeline Online. Sync Balance: $${state.balance.toFixed(2)} ${state.currency}`);
       send({ balance: 1, subscribe: 1, req_id: ++reqId });
       send({ ticks_history: MARKET.sym, count: BUFFER_CAPACITY, end: 'latest', req_id: ++reqId });
 
       keepAliveLoop = setInterval(() => {
         send({ ping: 1 });
         watchdogTimer = setTimeout(() => {
-          addLog('🚨 Pipeline latency anomaly detected. Re-spawning socket...');
+          addLog('🚨 Connection pipeline timeout. Forcing reconnect sequence...');
           if (derivWs) derivWs.terminate();
         }, 3000);
       }, 15000);
@@ -363,13 +370,13 @@ async function connectDeriv() {
 
     derivWs.on('close', () => {
       disconnectDeriv();
-      setTimeout(connectDeriv, 1500); // Instant auto-recovery bridge
+      setTimeout(connectDeriv, 1500); // Flawless automatic bridge loop
     });
 
     derivWs.on('error', () => { if (derivWs) derivWs.terminate(); });
 
   } catch(e) {
-    addLog(`Network Link Exception: ${e.message}. Attempting recovery step...`);
+    addLog(`Network Link Exception: ${e.message}. Re-probing connection...`);
     setTimeout(connectDeriv, 4000);
   }
 }
@@ -388,7 +395,7 @@ function handleMessage(msg) {
     state.warmupComplete = true; 
     if (!state.liveSubscribed) {
       state.liveSubscribed = true;
-      addLog('✅ Rolling buffer successfully seeded with 100 past ticks. Subscribing to live ticks.');
+      addLog('✅ Rolling buffer successfully seeded with 100 past ticks. Stream engaged.');
       send({ ticks: MARKET.sym, req_id: ++reqId });
     }
     broadcastSSE({ state: sanitizeState() });
@@ -415,24 +422,24 @@ app.post('/api/control', (req, res) => {
     if (state.active) return res.status(400).json({ error: 'Engine active.' });
     state.tradingMode = mode; state.dailyStartBalance = null; state.dailyPnl = 0;
     saveState(); 
-    connectDeriv(); // Instantly reconnects pipeline to the alternate account profile
+    connectDeriv(); 
     return res.json({ success: true });
   }
   if (action === 'start') {
     state.active = true; state.locked = false;
-    addLog(`🚀 Automated Trading Core ARMED. Automation triggers are now processing.`);
+    addLog(`🚀 Automated Core ARMED. Sequence scanning engaged.`);
   } else if (action === 'stop') {
     state.active = false; state.tradeInProgress = false; 
-    addLog('🚨 Automated Trading Core DISARMED safely. Pipeline stream remains active for manual executions.');
+    addLog('🚨 Automated Core DISARMED safely. Manual operations remain operational.');
   }
   saveState(); broadcastSSE({ state: sanitizeState() }); res.json({ success: true });
 });
 
-// Manual Intervention Controller Matrix (Allowed while state.active is false!)
+// Manual Intervention Pipeline Execution Bridge (Always available!)
 app.post('/api/manual-trade', (req, res) => {
   const { actionType } = req.body; 
   if (state.locked || state.tradeInProgress || !state.warmupComplete) {
-    return res.status(400).json({ error: 'Safety Violation: Core pipeline is locked or offline.' });
+    return res.status(400).json({ error: 'Execution Rejected: Safety lock active or pipeline offline.' });
   }
 
   state.tradeInProgress = true;
@@ -441,7 +448,7 @@ app.post('/api/manual-trade', (req, res) => {
   const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
   state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-  addLog(`⚡ Manual Intervention Executed: ${contractType} | Stake: $${state.currentStake}`);
+  addLog(`⚡ Manual Trade Dispatched: ${contractType} | Automated Risk Stake Allocation: $${state.currentStake}`);
   state.activeRealTrade = { stake: state.currentStake, balanceBefore: state.balance };
 
   send({
@@ -455,6 +462,5 @@ app.post('/api/manual-trade', (req, res) => {
 });
 
 loadState();
-// Spin up the market connection loop immediately upon system boot sequence
-connectDeriv();
+connectDeriv(); // Connects to the market feed immediately upon server boot
 server.listen(PORT, () => console.log(`Hybrid Execution Deck active on port ${PORT}`));
