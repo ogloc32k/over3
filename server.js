@@ -15,18 +15,30 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 const STATE_FILE = '/var/data/deriv_multimarket_state.json';
 
+// --- DATABASE HEALTH CHECK ---
+async function checkDatabaseConnection() {
+  try {
+    const { count, error } = await supabase
+      .from('trading_ledger')
+      .select('id', { count: 'exact', head: true });
+    if (error) throw error;
+    console.log(`✅ Supabase Database Connected (Total Records: ${count})`);
+    return true;
+  } catch (err) {
+    console.error(`❌ Database Connection Failed: ${err.message}`);
+    return false;
+  }
+}
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
-//
-// --- NEW: Analytics API Endpoint ---
 // --- UPDATED: Analytics API Endpoint (Seamless Pipe) ---
 app.get('/api/ledger/analytics', async (req, res) => {
   const { start, end, mode } = req.query;
 
-  // 1. SESSION / REAL-TIME PULL (Short Memory)
-  // This reads from 'state' which is updated in real-time by your trading engine
+  // 1. SESSION / REAL-TIME PULL
   if (mode === 'session') {
-    const settlements = state.logs.filter(l => l.message.includes('Settlement'));
+    const settlements = state.logs ? state.logs.filter(l => l.message.includes('Settlement')) : [];
     const wins = settlements.filter(l => l.message.includes('WIN')).length;
     const strikeRate = settlements.length > 0 ? ((wins / settlements.length) * 100).toFixed(1) : 0;
 
@@ -34,7 +46,7 @@ app.get('/api/ledger/analytics', async (req, res) => {
       totalProfit: state.dailyPnl || 0,
       strikeRate: strikeRate,
       totalTrades: settlements.length,
-      rawData: [] // Historical data not required for session mode
+      rawData: []
     });
   }
 
@@ -48,17 +60,23 @@ app.get('/api/ledger/analytics', async (req, res) => {
 
     if (error) throw error;
     
+    // Calculate analytics from DB results
     const totalProfit = data.reduce((acc, curr) => acc + (curr.profit_loss || 0), 0);
     const totalTrades = data.length;
     const wins = data.filter(t => t.is_win).length;
     const strikeRate = totalTrades > 0 ? ((wins / totalTrades) * 100).toFixed(1) : 0;
     
-    res.json({ totalProfit, strikeRate, totalTrades, rawData: data });
+    res.json({ 
+      totalProfit: totalProfit.toFixed(2), 
+      strikeRate, 
+      totalTrades, 
+      rawData: data 
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('❌ Analytics Error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch historical data' });
   }
 });
-
 // --- REQUIRED: Live Logging System ---
 // Without these, your dashboard will not receive real-time updates!
 const sseClients = new Set();
@@ -251,14 +269,27 @@ function checkDailyLimits() {
 }
 
 function settleRealTrade() {
-  if (!state.activeRealTrade || state.balance == null) return;
+  // 1. Guard: Ensure trade is valid and was actually purchased
+  if (!state.activeRealTrade || !state.activeRealTrade.contractId || state.balance == null) {
+    // Only reset if we were supposedly in a trade but have no ID
+    if (state.activeRealTrade) {
+      addLog("⚠️ Trade closed or never executed. Resetting state.");
+      state.tradeInProgress = false;
+      state.activeRealTrade = null;
+    }
+    return;
+  }
+
+  // 2. Calculate PnL
   const profit = state.balance - state.activeRealTrade.balanceBefore;
   state.dailyPnl += profit;
   
   const isWin = profit >= 0;
   const grossPayout = isWin ? (state.activeRealTrade.stake + profit) : 0;
 
+  // 3. Log to Cloud
   saveTradeToCloud({
+    contract_id: state.activeRealTrade.contractId, // Added for audit trail
     asset: MARKETS[state.activeRealTrade.symbol]?.name || state.activeRealTrade.symbol,
     contractType: state.activeRealTrade.contractType,
     stake: state.activeRealTrade.stake,
@@ -267,6 +298,24 @@ function settleRealTrade() {
     barrier: state.activeRealTrade.barrier,
     exitTick: state.activeRealTrade.exitTick
   });
+
+  // 4. Log to Dashboard
+  addLog(`[Settlement] Asset: ${state.activeRealTrade.symbol} | Result: ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session Net: $${state.dailyPnl.toFixed(2)}`);
+
+  // 5. Cleanup
+  state.tradeInProgress = false; 
+  state.activeRealTrade = null; 
+  state.settleTicksRemaining = 0;
+  state.cooldownTicksLeft = COOLDOWN_TICKS;
+
+  // 6. Refresh System State
+  const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
+  state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
+
+  checkDailyLimits(); 
+  saveState(); 
+  broadcastSSE({ state: sanitizeState() });
+}
   
   addLog(`[Settlement] Asset: ${state.activeRealTrade.symbol} | Result: ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session Net: $${state.dailyPnl.toFixed(2)}`);
   
@@ -322,20 +371,19 @@ function processLiveFeed(symbol, price) {
         contractType: "DIGITOVER",
         barrier: 3
       };
-//autobuy payload
+// --- UPDATED: Auto-trade Proposal Request ---
+      addLog(`🔥 Trigger Fired: ${topMarket.symbol}. Requesting proposal...`);
+      
       send({
-        buy: 1,
-        price: 100, // CHANGE THIS: Use a high ceiling (e.g., 100)
-        parameters: {
-          amount: state.currentStake,
-          basis: "stake",
-          contract_type: "DIGITOVER",
-          currency: state.currency,
-          duration: 1,
-          duration_unit: "t",
-          symbol: topMarket.symbol,
-          barrier: 3 
-        },
+        proposal: 1,
+        amount: state.currentStake,
+        basis: 'stake',
+        contract_type: "DIGITOVER",
+        currency: state.currency || 'USD',
+        duration: 1,
+        duration_unit: 't',
+        underlying_symbol: topMarket.symbol,
+        barrier: 3,
         req_id: ++reqId
       });
     }
@@ -415,6 +463,7 @@ async function connectDeriv() {
 }
 
 function handleMessage(msg) {
+  // 1. Global API Error Catch
   if (msg.error) {
     addLog(`API Error: ${msg.error.message}`);
     state.tradeInProgress = false; 
@@ -423,13 +472,13 @@ function handleMessage(msg) {
     return;
   }
 
-  // --- ADD THIS "HANDSHAKE" BLOCK HERE ---
+  // 2. Proposal Handshake (The gatekeeper)
   if (msg.msg_type === 'proposal') {
     if (msg.error) {
       addLog(`❌ Proposal Error: ${msg.error.message}`);
       state.tradeInProgress = false;
+      state.activeRealTrade = null; // Clean up the pending trade object
     } else {
-      // SUCCESS: The handshake is complete, now send the BUY order
       send({
         buy: msg.proposal.id,
         price: msg.proposal.ask_price,
@@ -437,10 +486,10 @@ function handleMessage(msg) {
       });
       addLog(`✅ Proposal confirmed: ${msg.proposal.ask_price}. Executing buy...`);
     }
-    return; // Stop processing further for this message
+    return;
   }
-  // ----------------------------------------
 
+  // 3. System States
   if (msg.msg_type === 'balance') { 
     state.balance = parseFloat(msg.balance.balance); 
     broadcastSSE({ state: sanitizeState() }); 
@@ -454,9 +503,13 @@ function handleMessage(msg) {
   else if (msg.msg_type === 'tick') { 
     processLiveFeed(msg.tick.symbol, parseFloat(msg.tick.quote)); 
   }
+  // 4. Buy Confirmation (Capture Contract ID)
   else if (msg.msg_type === 'buy') { 
-    if (state.activeRealTrade) state.settleTicksRemaining = SETTLE_TICKS; 
-    addLog(`💰 Trade Executed: Contract ID ${msg.buy.contract_id}`); // Added for visibility
+    if (state.activeRealTrade) {
+      state.activeRealTrade.contractId = msg.buy.contract_id; // Capture ID for settlement
+      state.settleTicksRemaining = SETTLE_TICKS;
+      addLog(`💰 Trade Executed: Contract ID ${msg.buy.contract_id}`);
+    }
   }
 }
 //------------------MANUAL TRADING PAYLOAD..............//
@@ -505,5 +558,9 @@ app.post('/api/manual-trade', (req, res) => {
   res.json({ success: true, message: 'Proposal requested' });
 });
 
-loadState(); connectDeriv();
-server.listen(PORT, () => console.log(`Pipeline executing on port ${PORT}`));
+// At the very bottom of your file
+loadState(); // Ensure this exists to load your current session data
+checkDatabaseConnection().then(() => {
+  connectDeriv();
+  server.listen(PORT, () => console.log(`🚀 System Armed on port ${PORT}`));
+});
