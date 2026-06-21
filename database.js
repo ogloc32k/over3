@@ -1,26 +1,38 @@
 const { createClient } = require('@supabase/supabase-js');
-const WebSocket = require('ws'); // 1. Add this import
+const WebSocket = require('ws');
 
-// No more secrets in your code! Node.js pulls these from the server environment.
+// --- DEBUGGER: Verify Environment Variables ---
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 
-// Fail-safe check
+console.log("🔍 [DEBUG] Starting Database Initialization...");
+console.log(`🔍 [DEBUG] SUPABASE_URL: ${SUPABASE_URL ? 'PRESENT' : 'MISSING'}`);
+console.log(`🔍 [DEBUG] SUPABASE_KEY: ${SUPABASE_KEY ? 'PRESENT' : 'MISSING'}`);
+
 if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.error('❌ CRITICAL ERROR: Database credentials are missing from environment variables!');
+  console.error('❌ [DEBUG] FATAL: Credentials missing!');
 }
 
-// 2. Initialize with the transport option
+// --- Initialize with transport ---
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   realtime: {
     transport: WebSocket,
   },
 });
 
+// --- DEBUGGER: Verify Configuration ---
+if (supabase.realtime && supabase.realtime.transport) {
+    console.log("✅ [DEBUG] Realtime transport successfully configured.");
+} else {
+    console.error("❌ [DEBUG] FATAL: Realtime transport FAILED to configure.");
+}
+
 /**
- * Non-blocking, fire-and-forget background push to the cloud database server.
+ * Non-blocking, fire-and-forget background push.
  */
 function saveTradeToCloud(tradeData) {
+  console.log("🔍 [DEBUG] Attempting to save trade to cloud...");
+  
   const netProfitLoss = tradeData.isWin 
     ? (tradeData.payout - tradeData.stake) 
     : -tradeData.stake;
@@ -39,14 +51,14 @@ function saveTradeToCloud(tradeData) {
     }])
     .then(({ error }) => {
       if (error) {
-        console.error('⚠️ Cloud Ledger Link Error:', error.message);
+        console.error('❌ [DEBUG] Cloud Ledger Insert Error:', error.message);
       } else {
-        console.log(`✅ Cloud Ledger Synced | Net Margin: $${netProfitLoss.toFixed(2)}`);
+        console.log(`✅ [DEBUG] Cloud Ledger Synced successfully.`);
       }
     })
     .catch(err => {
-      console.error('⚠️ Network Exception on Ledger Channel:', err.message);
+      console.error('❌ [DEBUG] Exception in saveTradeToCloud:', err.message);
     });
 }
 
-module.exports = { saveTradeToCloud };
+module.exports = { supabase, saveTradeToCloud };
