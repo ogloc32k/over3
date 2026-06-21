@@ -80,7 +80,6 @@ app.get('/api/ledger/analytics', async (req, res) => {
 });
 
 // --- REQUIRED: Live Logging System ---
-// Without these, your dashboard will not receive real-time updates!
 const sseClients = new Set();
 let logId = 1;
 
@@ -94,6 +93,56 @@ function addLog(msg) {
 function broadcastSSE(payload) {
   sseClients.forEach(c => c.write(`data: ${JSON.stringify(payload)}\n\n`));
 }
+
+// ---------- SSE ENDPOINT (NEW) ----------
+app.get('/api/logs', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const client = res;
+  sseClients.add(client);
+
+  req.on('close', () => {
+    sseClients.delete(client);
+    client.end();
+  });
+});
+
+// ---------- CONTROL ENDPOINT (NEW) ----------
+app.post('/api/control', (req, res) => {
+  const { action, mode } = req.body;
+
+  if (action === 'start') {
+    if (state.locked) {
+      return res.status(400).json({ error: 'System is locked due to limit breach.' });
+    }
+    state.active = true;
+    addLog('🔓 Automation matrix ARMED by user.');
+    return res.json({ success: true });
+  }
+
+  if (action === 'stop') {
+    state.active = false;
+    addLog('🔒 Automation matrix DISARMED by user.');
+    return res.json({ success: true });
+  }
+
+  if (action === 'set_mode') {
+    if (!mode || !['demo', 'real'].includes(mode)) {
+      return res.status(400).json({ error: 'Invalid mode. Use "demo" or "real".' });
+    }
+    state.tradingMode = mode;
+    state.active = false; // disarm when switching
+    addLog(`🔄 Switching to ${mode.toUpperCase()} account. Reconnecting...`);
+    disconnectDeriv();
+    setTimeout(connectDeriv, 1000);
+    return res.json({ success: true });
+  }
+
+  res.status(400).json({ error: 'Unknown action.' });
+});
 
 // ---------- Markets Configuration ----------
 const MARKETS = {
@@ -217,7 +266,7 @@ const RISK_PERCENT = 1;
 const TP_PERCENT = 2;
 const SL_PERCENT = 4;
 const MIN_STAKE = 0.35;
-const COOLDOWN_TICKS = 1; //changed cooldown
+const COOLDOWN_TICKS = 1;
 const SETTLE_TICKS = 3;
 
 function saveState() {
@@ -270,11 +319,8 @@ function checkDailyLimits() {
   return false;
 }
 
-// --- FIXED: Removed duplicate settlement block ---
 function settleRealTrade() {
-  // 1. Guard: Ensure trade is valid and was actually purchased
   if (!state.activeRealTrade || !state.activeRealTrade.contractId || state.balance == null) {
-    // Only reset if we were supposedly in a trade but have no ID
     if (state.activeRealTrade) {
       addLog("⚠️ Trade closed or never executed. Resetting state.");
       state.tradeInProgress = false;
@@ -283,16 +329,14 @@ function settleRealTrade() {
     return;
   }
 
-  // 2. Calculate PnL
   const profit = state.balance - state.activeRealTrade.balanceBefore;
   state.dailyPnl += profit;
 
   const isWin = profit >= 0;
   const grossPayout = isWin ? (state.activeRealTrade.stake + profit) : 0;
 
-  // 3. Log to Cloud
   saveTradeToCloud({
-    contract_id: state.activeRealTrade.contractId, // Added for audit trail
+    contract_id: state.activeRealTrade.contractId,
     asset: MARKETS[state.activeRealTrade.symbol]?.name || state.activeRealTrade.symbol,
     contractType: state.activeRealTrade.contractType,
     stake: state.activeRealTrade.stake,
@@ -302,16 +346,13 @@ function settleRealTrade() {
     exitTick: state.activeRealTrade.exitTick
   });
 
-  // 4. Log to Dashboard
   addLog(`[Settlement] Asset: ${state.activeRealTrade.symbol} | Result: ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session Net: $${state.dailyPnl.toFixed(2)}`);
 
-  // 5. Cleanup
   state.tradeInProgress = false;
   state.activeRealTrade = null;
   state.settleTicksRemaining = 0;
   state.cooldownTicksLeft = COOLDOWN_TICKS;
 
-  // 6. Refresh System State
   const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
   state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
@@ -363,7 +404,7 @@ function processLiveFeed(symbol, price) {
         contractType: "DIGITOVER",
         barrier: 3
       };
-      // --- UPDATED: Auto-trade Proposal Request ---
+
       addLog(`🔥 Trigger Fired: ${topMarket.symbol}. Requesting proposal...`);
 
       send({
@@ -456,7 +497,6 @@ async function connectDeriv() {
 }
 
 function handleMessage(msg) {
-  // 1. Global API Error Catch
   if (msg.error) {
     addLog(`API Error: ${msg.error.message}`);
     state.tradeInProgress = false;
@@ -465,12 +505,11 @@ function handleMessage(msg) {
     return;
   }
 
-  // 2. Proposal Handshake (The gatekeeper)
   if (msg.msg_type === 'proposal') {
     if (msg.error) {
       addLog(`❌ Proposal Error: ${msg.error.message}`);
       state.tradeInProgress = false;
-      state.activeRealTrade = null; // Clean up the pending trade object
+      state.activeRealTrade = null;
     } else {
       send({
         buy: msg.proposal.id,
@@ -482,7 +521,6 @@ function handleMessage(msg) {
     return;
   }
 
-  // 3. System States
   if (msg.msg_type === 'balance') {
     state.balance = parseFloat(msg.balance.balance);
     broadcastSSE({ state: sanitizeState() });
@@ -496,17 +534,16 @@ function handleMessage(msg) {
   else if (msg.msg_type === 'tick') {
     processLiveFeed(msg.tick.symbol, parseFloat(msg.tick.quote));
   }
-  // 4. Buy Confirmation (Capture Contract ID)
   else if (msg.msg_type === 'buy') {
     if (state.activeRealTrade) {
-      state.activeRealTrade.contractId = msg.buy.contract_id; // Capture ID for settlement
+      state.activeRealTrade.contractId = msg.buy.contract_id;
       state.settleTicksRemaining = SETTLE_TICKS;
       addLog(`💰 Trade Executed: Contract ID ${msg.buy.contract_id}`);
     }
   }
 }
 
-// ------------------ MANUAL TRADING PAYLOAD (FIXED: single handler) ------------------ //
+// ------------------ MANUAL TRADING PAYLOAD ------------------ //
 app.post('/api/manual-trade', (req, res) => {
   const { symbol, contractType } = req.body;
 
@@ -517,11 +554,9 @@ app.post('/api/manual-trade', (req, res) => {
     return res.status(400).json({ error: 'Invalid symbol.' });
   }
 
-  // 1. Calculate stake
   const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
   state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-  // 2. Set internal tracking
   state.tradeInProgress = true;
   state.activeRealTrade = {
     symbol,
@@ -531,7 +566,6 @@ app.post('/api/manual-trade', (req, res) => {
     barrier: 3
   };
 
-  // 3. Send PROPOSAL instead of BUY
   send({
     proposal: 1,
     amount: state.currentStake,
@@ -550,7 +584,7 @@ app.post('/api/manual-trade', (req, res) => {
 });
 
 // At the very bottom of your file
-loadState(); // Ensure this exists to load your current session data
+loadState();
 checkDatabaseConnection().then(() => {
   connectDeriv();
   server.listen(PORT, () => console.log(`🚀 System Armed on port ${PORT}`));
