@@ -32,6 +32,7 @@ async function checkDatabaseConnection() {
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
+
 // --- UPDATED: Analytics API Endpoint (Seamless Pipe) ---
 app.get('/api/ledger/analytics', async (req, res) => {
   const { start, end, mode } = req.query;
@@ -77,8 +78,8 @@ app.get('/api/ledger/analytics', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch historical data' });
   }
 });
+
 // --- REQUIRED: Live Logging System ---
-// Without these, your dashboard will not receive real-time updates!
 const sseClients = new Set();
 let logId = 1;
 
@@ -215,7 +216,7 @@ const RISK_PERCENT = 1;
 const TP_PERCENT = 2;
 const SL_PERCENT = 4;
 const MIN_STAKE = 0.35;
-const COOLDOWN_TICKS = 1; //changed cooldown 
+const COOLDOWN_TICKS = 1;
 const SETTLE_TICKS = 3;
 
 function saveState() {
@@ -289,7 +290,7 @@ function settleRealTrade() {
 
   // 3. Log to Cloud
   saveTradeToCloud({
-    contract_id: state.activeRealTrade.contractId, // Added for audit trail
+    contract_id: state.activeRealTrade.contractId,
     asset: MARKETS[state.activeRealTrade.symbol]?.name || state.activeRealTrade.symbol,
     contractType: state.activeRealTrade.contractType,
     stake: state.activeRealTrade.stake,
@@ -315,17 +316,6 @@ function settleRealTrade() {
   checkDailyLimits(); 
   saveState(); 
   broadcastSSE({ state: sanitizeState() });
-}
-  
-  addLog(`[Settlement] Asset: ${state.activeRealTrade.symbol} | Result: ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session Net: $${state.dailyPnl.toFixed(2)}`);
-  
-  state.tradeInProgress = false; state.activeRealTrade = null; state.settleTicksRemaining = 0;
-  state.cooldownTicksLeft = COOLDOWN_TICKS;
-
-  const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
-  state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
-
-  checkDailyLimits(); saveState(); broadcastSSE({ state: sanitizeState() });
 }
 
 function processLiveFeed(symbol, price) {
@@ -371,7 +361,7 @@ function processLiveFeed(symbol, price) {
         contractType: "DIGITOVER",
         barrier: 3
       };
-// --- UPDATED: Auto-trade Proposal Request ---
+
       addLog(`🔥 Trigger Fired: ${topMarket.symbol}. Requesting proposal...`);
       
       send({
@@ -396,22 +386,38 @@ let reqId = 0;
 let keepAliveLoop = null;
 let watchdogTimer = null;
 
-function send(msg) { if (derivWs && derivWs.readyState === WebSocket.OPEN) derivWs.send(JSON.stringify(msg)); }
+function send(msg) { 
+  if (derivWs && derivWs.readyState === WebSocket.OPEN) 
+    derivWs.send(JSON.stringify(msg)); 
+}
+
 function disconnectDeriv() {
   clearInterval(keepAliveLoop);
   clearTimeout(watchdogTimer);
-  if (derivWs) { derivWs.removeAllListeners(); try { derivWs.terminate(); } catch(e) {} derivWs = null; }
+  if (derivWs) { 
+    derivWs.removeAllListeners(); 
+    try { derivWs.terminate(); } catch(e) {} 
+    derivWs = null; 
+  }
 }
 
 async function connectDeriv() {
   disconnectDeriv();
   const appId = (process.env.DERIV_APP_ID || '').trim();
   const token = (process.env.DERIV_PAT || '').trim();
-  if (!appId || !token) { addLog('System Configuration Halt: Credentials missing.'); return; }
+  if (!appId || !token) { 
+    addLog('System Configuration Halt: Credentials missing.'); 
+    return; 
+  }
 
   try {
     const accRes = await fetch('https://api.derivws.com/trading/v1/options/accounts', {
-      method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' }
+      method: 'GET', 
+      headers: { 
+        'Authorization': `Bearer ${token}`, 
+        'Deriv-App-ID': appId, 
+        'Content-Type': 'application/json' 
+      }
     });
     if (!accRes.ok) throw new Error('Authentication Denied.');
 
@@ -427,7 +433,11 @@ async function connectDeriv() {
 
     const otpRes = await fetch(`https://api.derivws.com/trading/v1/options/accounts/${targetAccount.account_id}/otp`, {
       method: 'POST', 
-      headers: { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' },
+      headers: { 
+        'Authorization': `Bearer ${token}`, 
+        'Deriv-App-ID': appId, 
+        'Content-Type': 'application/json' 
+      },
       body: JSON.stringify({})
     });
     if (!otpRes.ok) throw new Error('Security allocation failure.');
@@ -438,24 +448,37 @@ async function connectDeriv() {
     derivWs.on('open', () => {
       addLog(`🌐 Pipeline Connected. Balance: $${state.balance.toFixed(2)}`);
       send({ balance: 1, subscribe: 1, req_id: ++reqId });
-      for (const key in MARKETS) send({ ticks_history: key, count: BUFFER_CAPACITY, end: 'latest', req_id: ++reqId });
+      for (const key in MARKETS) {
+        send({ ticks_history: key, count: BUFFER_CAPACITY, end: 'latest', req_id: ++reqId });
+      }
 
       keepAliveLoop = setInterval(() => {
         send({ ping: 1 });
-        watchdogTimer = setTimeout(() => { if (derivWs) derivWs.terminate(); }, 3000);
+        watchdogTimer = setTimeout(() => { 
+          if (derivWs) derivWs.terminate(); 
+        }, 3000);
       }, 15000);
     });
 
     derivWs.on('message', raw => {
       try {
         const msg = JSON.parse(raw);
-        if (msg.msg_type === 'ping') { clearTimeout(watchdogTimer); return; }
+        if (msg.msg_type === 'ping') { 
+          clearTimeout(watchdogTimer); 
+          return; 
+        }
         handleMessage(msg);
       } catch(e) {}
     });
 
-    derivWs.on('close', () => { disconnectDeriv(); setTimeout(connectDeriv, 2000); });
-    derivWs.on('error', () => { if (derivWs) derivWs.terminate(); });
+    derivWs.on('close', () => { 
+      disconnectDeriv(); 
+      setTimeout(connectDeriv, 2000); 
+    });
+    
+    derivWs.on('error', () => { 
+      if (derivWs) derivWs.terminate(); 
+    });
   } catch(e) {
     addLog(`Network Exception: ${e.message}.`);
     setTimeout(connectDeriv, 5000);
@@ -477,7 +500,7 @@ function handleMessage(msg) {
     if (msg.error) {
       addLog(`❌ Proposal Error: ${msg.error.message}`);
       state.tradeInProgress = false;
-      state.activeRealTrade = null; // Clean up the pending trade object
+      state.activeRealTrade = null;
     } else {
       send({
         buy: msg.proposal.id,
@@ -506,29 +529,27 @@ function handleMessage(msg) {
   // 4. Buy Confirmation (Capture Contract ID)
   else if (msg.msg_type === 'buy') { 
     if (state.activeRealTrade) {
-      state.activeRealTrade.contractId = msg.buy.contract_id; // Capture ID for settlement
+      state.activeRealTrade.contractId = msg.buy.contract_id;
       state.settleTicksRemaining = SETTLE_TICKS;
       addLog(`💰 Trade Executed: Contract ID ${msg.buy.contract_id}`);
     }
   }
 }
-//------------------MANUAL TRADING PAYLOAD..............//
+
+// --- FIXED: MANUAL TRADING PAYLOAD ---
 app.post('/api/manual-trade', (req, res) => {
-  const { symbol, contractType } = req.body;
-  if (state.locked || state.tradeInProgress || !MARKETS[symbol]) return res.status(400).json({ error: 'Rejected.' });
-  state.tradeInProgress = true;
-  const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
-  state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
-  state.activeRealTrade = { symbol, stake: state.currentStake, balanceBefore: state.balance, contractType: contractType === 'OVER' ? 'DIGITOVER' : 'DIGITUNDER', barrier: 3 };
-  app.post('/api/manual-trade', (req, res) => {
   const { symbol, contractType } = req.body;
   
   if (state.locked || state.tradeInProgress) {
     return res.status(400).json({ error: 'System locked or trade in progress.' });
   }
 
+  if (!MARKETS[symbol]) {
+    return res.status(400).json({ error: 'Invalid symbol.' });
+  }
+
   // 1. Calculate stake
-  const rawStake = Math.max(0.35, state.balance * (0.01)); // Example 1% risk
+  const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
   state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
   
   // 2. Set internal tracking
@@ -536,12 +557,12 @@ app.post('/api/manual-trade', (req, res) => {
   state.activeRealTrade = { 
     symbol, 
     stake: state.currentStake, 
+    balanceBefore: state.balance,
     contractType: contractType === 'OVER' ? 'DIGITOVER' : 'DIGITUNDER', 
     barrier: 3 
   };
 
   // 3. Send PROPOSAL instead of BUY
-  // This verifies the trade parameters BEFORE sending money
   send({
     proposal: 1,
     amount: state.currentStake,
@@ -551,15 +572,16 @@ app.post('/api/manual-trade', (req, res) => {
     duration: 1,
     duration_unit: 't',
     underlying_symbol: symbol,
-    barrier: 3
+    barrier: 3,
+    req_id: ++reqId
   });
 
-  addLog(`Requesting proposal for ${symbol}...`);
+  addLog(`📝 Manual trade requested: ${symbol} ${contractType}`);
   res.json({ success: true, message: 'Proposal requested' });
 });
 
 // At the very bottom of your file
-loadState(); // Ensure this exists to load your current session data
+loadState();
 checkDatabaseConnection().then(() => {
   connectDeriv();
   server.listen(PORT, () => console.log(`🚀 System Armed on port ${PORT}`));
