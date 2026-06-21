@@ -1,4 +1,4 @@
-const { createClient } = require('@supabase/supabase-client');
+const { createClient } = require('@supabase/supabase-js');
 
 // No more secrets in your code! Node.js pulls these from the server environment.
 const SUPABASE_URL = process.env.SUPABASE_URL;
