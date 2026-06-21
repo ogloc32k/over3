@@ -4,19 +4,14 @@ const http = require('http');
 const WebSocket = require('ws');
 const path = require('path');
 const fs = require('fs');
-const { saveTradeToCloud } = require('./database'); 
+
+// --- CLEANED IMPORTS ---
+// Remove the two old lines and replace them with this single line:
+const { supabase, saveTradeToCloud } = require('./database.js'); 
 
 const app = express();
 const server = http.createServer(app);
-const PORT = process.env.PORT || 3000;
-const STATE_FILE = '/var/data/deriv_multimarket_state.json';
-
-// Import the pre-configured database client
-const { supabase, saveTradeToCloud } = require('./database.js');
-
-app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.json());
-
+//
 // --- NEW: Analytics API Endpoint ---
 app.get('/api/ledger/analytics', async (req, res) => {
   const { start, end } = req.query;
