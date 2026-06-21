@@ -658,22 +658,41 @@
       updateUIElements(metrics, chartData, lineLabels);
     }
 
-    function applyManualDateFilter() {
+   async function applyManualDateFilter() {
       const startDateVal = document.getElementById('date-picker-start').value;
       const endDateVal = document.getElementById('date-picker-end').value;
 
       document.querySelectorAll('.btn-preset').forEach(btn => btn.classList.remove('active-preset'));
-      renderPrototypeCharts();
 
       if (new Date(startDateVal) > new Date(endDateVal)) {
         alert("Institutional Boundary Error: Start date cannot be greater than End date.");
         return;
       }
 
-      const customMetrics = { profit: '+$265.80', pf: '1.92', strike: '65.4%', drawdown: '-0.92%' };
-      const customChartData = { winLoss: [68, 36], assets: [8, 4, 12, 38, 14], equity: [10150, 10120, 10230, 10310, 10290, 10432] };
+      try {
+        const response = await fetch(`/api/ledger/analytics?start=${startDateVal}&end=${endDateVal}`);
+        const data = await response.json();
 
-      updateUIElements(customMetrics, customChartData, null);
+        if (data.error) throw new Error(data.error);
+
+        const metrics = {
+          profit: `+$${data.totalProfit.toFixed(2)}`,
+          pf: 'N/A', 
+          strike: `${data.strikeRate}%`,
+          drawdown: '0.0%' 
+        };
+
+        const chartData = { 
+          winLoss: [data.strikeRate, 100 - data.strikeRate], 
+          assets: [0, 0, 0, data.totalTrades, 0], 
+          equity: data.rawData.map(t => t.payout || 0)
+        };
+
+        updateUIElements(metrics, chartData, null);
+      } catch (err) {
+        console.error("Analytics Fetch Error:", err);
+        alert("Failed to sync Institutional Ledger from Database.");
+      }
     }
 
     function updateUIElements(metrics, chartData, customLineLabels) {
