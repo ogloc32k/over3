@@ -181,9 +181,9 @@
 
     /* AUDIT PANEL & ALERTS */
     .audit-log-panel { height: 140px; background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 4px; margin-top: 15px; padding: 12px; display: flex; flex-direction: column; }
-    .log-stream { background: #04060b; border: 1px solid #0d121c; flex: 1; border-radius: 2px; padding: 8px; overflow-y: auto; font-size: 11px; display: flex; flex-direction: column-reverse; }
+    .log-stream { background: #04060b; border: 1px solid #0d121c; flex: 1; border-radius: 2px; padding: 8px; overflow-y: auto; font-size: 11px; display: flex; flex-direction: column; }
     .log-entry { margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #131a26; display: flex; }
-    .log-ts { color: var(--neon-blue); margin-right: 10px; }
+    .log-ts { color: var(--neon-blue); margin-right: 10px; flex-shrink: 0; }
     #lock-alert-banner { background: rgba(255,59,48,0.15); border: 1px solid var(--neon-red); color: var(--neon-red); padding: 12px; border-radius: 4px; font-size: 12px; font-weight: bold; display: none; margin-bottom: 15px; }
 
     /* ==================== VIEW 2: INSTITUTIONAL ANALYTICS DECK ==================== */
@@ -233,6 +233,23 @@
     .charts-matrix-grid { display: grid; grid-template-columns: 320px 320px 1fr; gap: 15px; flex: 1; min-height: 380px; }
     .chart-container-panel { background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; display: flex; flex-direction: column; }
     .chart-canvas-wrapper { flex: 1; position: relative; display: flex; justify-content: center; align-items: center; min-height: 0; }
+
+    /* ==================== SYSTEM CLOCK ==================== */
+    #sys-clock {
+      position: fixed;
+      bottom: 15px;
+      right: 20px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-glow);
+      padding: 6px 14px;
+      border-radius: 4px;
+      font-size: 13px;
+      color: var(--text-dim);
+      font-family: 'Consolas', monospace;
+      z-index: 999;
+      letter-spacing: 1px;
+    }
+    #sys-clock span { color: var(--neon-blue); }
   </style>
 </head>
 <body>
@@ -364,19 +381,19 @@
       <div class="summary-metrics-ribbon">
         <div class="metric-ribbon-card">
           <div class="m-lbl">Total Accumulated Net Profit</div>
-          <div class="m-val" id="meta-net-profit" style="color:var(--neon-green);">+$418.50</div>
+          <div class="m-val" id="meta-net-profit" style="color:var(--neon-green);">$0.00</div>
         </div>
         <div class="metric-ribbon-card">
           <div class="m-lbl">Institutional Profit Factor</div>
-          <div class="m-val" id="meta-profit-factor" style="color:var(--neon-blue);">1.84</div>
+          <div class="m-val" id="meta-profit-factor" style="color:var(--neon-blue);">N/A</div>
         </div>
         <div class="metric-ribbon-card">
           <div class="m-lbl">Strategy Hit Strike Rate</div>
-          <div class="m-val" id="meta-strike-rate" style="color:var(--text-bright);">63.8%</div>
+          <div class="m-val" id="meta-strike-rate" style="color:var(--text-bright);">0.0%</div>
         </div>
         <div class="metric-ribbon-card">
           <div class="m-lbl">Peak Execution Session Drawdown</div>
-          <div class="m-val" id="meta-drawdown" style="color:var(--neon-red);">-1.14%</div>
+          <div class="m-val" id="meta-drawdown" style="color:var(--neon-red);">0.0%</div>
         </div>
       </div>
 
@@ -407,6 +424,9 @@
 
     </div>
   </div>
+
+  <!-- ==================== SYSTEM CLOCK HTML ==================== -->
+  <div id="sys-clock"><span id="clock-display">00:00:00</span> EAT</div>
 
   <script>
     // =========================================================================
@@ -473,9 +493,10 @@
           const r = document.createElement('div'); 
           r.className = 'log-entry';
           r.innerHTML = `<span class="log-ts">[${new Date(log.time).toLocaleTimeString()}]</span><span class="log-text">${log.message}</span>`;
-          box.insertBefore(r, box.firstChild);
+          box.appendChild(r);
         });
-        while (box.children.length > 150) box.removeChild(box.lastChild);
+        while (box.children.length > 150) box.removeChild(box.firstChild);
+        box.scrollTop = box.scrollHeight;
       }
     };
 
@@ -589,7 +610,7 @@
     }
 
     // =========================================================================
-    // 2. SPA VIEW & INSTITUTIONAL ANALYTICS ENGINE (DYNAMIC)
+    // 2. SPA VIEW & INSTITUTIONAL ANALYTICS ENGINE (UPDATED)
     // =========================================================================
     function changeSpaView(target) {
       document.getElementById('view-ops').classList.remove('active-view');
@@ -624,47 +645,34 @@
       activeCharts.equity = new Chart(ctxLine, { type: 'line', data: { labels: [], datasets: [{ label: 'Liquidity Scale ($)', data: [0], borderColor: '#00d2ff', backgroundColor: 'rgba(0, 210, 255, 0.03)', fill: true, tension: 0.15, borderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText } }, y: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText } } }, plugins: { legend: { display: false } } } });
     }
 
-    // Helper: compute metrics from rawData
     function computeFromRawData(rawData) {
-      let wins = 0, losses = 0;
-      let grossProfit = 0, grossLoss = 0;
+      let wins = 0, losses = 0, grossProfit = 0, grossLoss = 0;
       const assetMap = {};
       const sortedTrades = rawData.slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
       const equityCurve = [];
       let cumProfit = 0;
-
       sortedTrades.forEach(t => {
         const pnl = t.profit_loss || 0;
         cumProfit += pnl;
         equityCurve.push(cumProfit);
-        if (pnl > 0) {
-          wins++;
-          grossProfit += pnl;
-        } else if (pnl < 0) {
-          losses++;
-          grossLoss += Math.abs(pnl);
-        }
+        if (pnl > 0) { wins++; grossProfit += pnl; }
+        else if (pnl < 0) { losses++; grossLoss += Math.abs(pnl); }
         const asset = t.asset || 'Unknown';
         assetMap[asset] = (assetMap[asset] || 0) + pnl;
       });
-
       const assetLabels = ['V10', 'V25', 'V50', 'V75', 'V100'];
       const assetData = assetLabels.map(label => {
         const found = Object.keys(assetMap).find(k => k.includes(label));
         return found ? assetMap[found] : 0;
       });
-
       if (wins + losses === 0) {
         wins = 0; losses = 0;
-        equityCurve.length = 0;
-        equityCurve.push(0);
+        equityCurve.length = 0; equityCurve.push(0);
         assetData.fill(0);
       }
-
       const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? Infinity : 0);
       const totalTrades = wins + losses;
       const strikeRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
-
       return { wins, losses, profitFactor, strikeRate, assetData, equityCurve };
     }
 
@@ -675,7 +683,7 @@
       }
 
       if (presetMode === 'clear') {
-        updateUIElements({ profit: '$0.00', pf: '0.00', strike: '0.0%', drawdown: '0.00%' }, { winLoss: [0, 0], assets: [0, 0, 0, 0, 0], equity: [0] }, null);
+        updateUIElements({ profit: '$0.00', pf: 'N/A', strike: '0.0%', drawdown: '0.00%' }, { winLoss: [0, 0], assets: [0,0,0,0,0], equity: [0] }, null);
         return;
       }
 
@@ -684,32 +692,34 @@
         const data = await response.json();
         if (data.error) throw new Error(data.error);
 
-        let winLoss, assets, equity, pf, strike;
+        let winLoss, assets, equity, pf, strike, drawdown;
         if (presetMode === 'session') {
           const totalTrades = data.totalTrades || 0;
           const strikeNum = parseFloat(data.strikeRate) || 0;
           const wins = Math.round((strikeNum / 100) * totalTrades);
           const losses = totalTrades - wins;
           winLoss = [wins, losses];
-          assets = [0, 0, 0, 0, 0];
+          assets = [0,0,0,0,0];
           equity = [data.totalProfit || 0];
           pf = 'N/A';
           strike = data.strikeRate || '0.0%';
+          drawdown = '0.0%';
         } else {
           const raw = data.rawData || [];
           const computed = computeFromRawData(raw);
           winLoss = [computed.wins, computed.losses];
           assets = computed.assetData;
           equity = computed.equityCurve;
-          pf = computed.profitFactor.toFixed(2);
-          strike = computed.strikeRate.toFixed(1) + '%';
+          pf = data.profitFactor || '0.00';
+          strike = data.strikeRate + '%';
+          drawdown = data.drawdown + '%';
         }
 
         updateUIElements({
-          profit: `+$${(data.totalProfit || 0).toFixed(2)}`,
+          profit: `$${parseFloat(data.totalProfit).toFixed(2)}`,
           pf: pf,
           strike: strike,
-          drawdown: '0.0%'
+          drawdown: drawdown
         }, { winLoss, assets, equity }, null);
       } catch (err) {
         console.error("Fetch Error:", err);
@@ -727,14 +737,15 @@
         const winLoss = [computed.wins, computed.losses];
         const assets = computed.assetData;
         const equity = computed.equityCurve;
-        const pf = computed.profitFactor.toFixed(2);
-        const strike = computed.strikeRate.toFixed(1) + '%';
+        const pf = data.profitFactor || '0.00';
+        const strike = data.strikeRate + '%';
+        const drawdown = data.drawdown + '%';
 
         updateUIElements({
-          profit: `+$${(data.totalProfit || 0).toFixed(2)}`,
+          profit: `$${parseFloat(data.totalProfit).toFixed(2)}`,
           pf: pf,
           strike: strike,
-          drawdown: '0.0%'
+          drawdown: drawdown
         }, { winLoss, assets, equity }, null);
       } catch (err) { console.error("Filter Error:", err); }
     }
@@ -755,6 +766,18 @@
       activeCharts.assets.update();
       activeCharts.equity.update();
     }
+
+    // =========================================================================
+    // 3. SYSTEM CLOCK (East African Time)
+    // =========================================================================
+    function updateClock() {
+      const now = new Date();
+      const options = { timeZone: 'Africa/Nairobi', hour12: false };
+      const timeStr = now.toLocaleTimeString('en-US', options);
+      document.getElementById('clock-display').textContent = timeStr;
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
   </script>
 </body>
 </html>
