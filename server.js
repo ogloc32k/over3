@@ -5,12 +5,18 @@ const WebSocket = require('ws');
 const path = require('path');
 const fs = require('fs');
 
-// --- CLEANED IMPORTS ---
-// Remove the two old lines and replace them with this single line:
+// --- SINGLE SOURCE OF TRUTH ---
 const { supabase, saveTradeToCloud } = require('./database.js'); 
 
 const app = express();
 const server = http.createServer(app);
+
+// --- VARIABLE DEFINITIONS ---
+const PORT = process.env.PORT || 3000;
+const STATE_FILE = '/var/data/deriv_multimarket_state.json';
+
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json());
 //
 // --- NEW: Analytics API Endpoint ---
 app.get('/api/ledger/analytics', async (req, res) => {
