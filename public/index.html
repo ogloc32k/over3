@@ -1,3 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QUANTCORE // DESKTOP PROTO-INTERFACE</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  
+  <style>
+    /* =========================================================================
+       CORE VARIABLES & RESET
+       ========================================================================= */
+    :root {
+      --bg-terminal: #05070a;
+      --bg-panel: #0a0d14;
+      --bg-card: #101524;
+      --bg-card-hover: #161d30;
+      --border-glow: #1e293b;
+      --neon-blue: #00d2ff;
+      --neon-green: #00ff88;
+      --neon-orange: #ff9500;
+      --neon-red: #ff3b30;
+      --text-bright: #e2e8f0;
+      --text-dim: #64748b;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    body {
+      background-color: var(--bg-terminal);
+      color: var(--text-bright);
+      font-family: 'Consolas', 'Courier New', monospace;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 15px;
+    }
+
+    /* =========================================================================
+       HEADER NAVIGATION
+       ========================================================================= */
+    .master-nav-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-glow);
+      border-radius: 4px;
+      padding: 10px 20px;
+      margin-bottom: 15px;
+    }
+
+    .brand-title { font-size: 14px; font-weight: bold; letter-spacing: 2px; }
+    .brand-title span { color: var(--neon-blue); margin: 0 6px; }
+
+    .nav-tabs-wrapper { display: flex; gap: 10px; }
+
+    .nav-tab-btn {
       background: var(--bg-card);
       border: 1px solid var(--border-glow);
       color: var(--text-dim);
@@ -20,11 +79,15 @@
       box-shadow: 0 0 10px rgba(0, 210, 255, 0.15);
     }
 
-    /* VIEW MANAGEMENT WRAPPERS */
+    /* =========================================================================
+       VIEW MANAGEMENT WRAPPERS
+       ========================================================================= */
     .spa-view { display: none; flex: 1; min-height: 0; }
     .spa-view.active-view { display: flex; }
 
-    /* LAYOUT: VIEW 1 - LIVE OPERATIONS CONSOLE */
+    /* =========================================================================
+       LAYOUT: VIEW 1 - LIVE OPERATIONS CONSOLE
+       ========================================================================= */
     .dashboard-grid {
       display: grid;
       grid-template-columns: 310px 1fr 360px;
@@ -109,7 +172,6 @@
     .btn-manual-over { background: var(--neon-green); color: #05070a; width: 48%; }
     .btn-manual-under { background: var(--neon-red); color: #ffffff; width: 48%; }
     
-    /* Swap Profile Button Add-on */
     .btn-swap-profile { background: #19243a; color: var(--text-bright); border: 1px solid var(--border-glow); }
 
     .ledger-table { display: flex; flex-direction: column; gap: 10px; }
@@ -117,18 +179,15 @@
     .ledger-lbl { color: var(--text-dim); }
     .ledger-val { font-weight: bold; }
 
-    /* AUDIT PANEL */
+    /* AUDIT PANEL & ALERTS */
     .audit-log-panel { height: 140px; background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 4px; margin-top: 15px; padding: 12px; display: flex; flex-direction: column; }
     .log-stream { background: #04060b; border: 1px solid #0d121c; flex: 1; border-radius: 2px; padding: 8px; overflow-y: auto; font-size: 11px; display: flex; flex-direction: column-reverse; }
     .log-entry { margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #131a26; display: flex; }
     .log-ts { color: var(--neon-blue); margin-right: 10px; }
-
-    /* Alert Banner */
     #lock-alert-banner { background: rgba(255,59,48,0.15); border: 1px solid var(--neon-red); color: var(--neon-red); padding: 12px; border-radius: 4px; font-size: 12px; font-weight: bold; display: none; margin-bottom: 15px; }
 
     /* ==================== VIEW 2: INSTITUTIONAL ANALYTICS DECK ==================== */
     .analytics-layout { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; }
-
     .audit-filter-bar { background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; display: flex; justify-content: space-between; align-items: center; gap: 20px; }
     .filter-inputs-group { display: flex; align-items: center; gap: 12px; }
     .filter-inputs-group label { font-size: 11px; text-transform: uppercase; color: var(--text-dim); font-weight: bold; }
@@ -145,9 +204,7 @@
     }
     .input-date-field:focus { border-color: var(--neon-blue); }
 
-    /* Dynamic Horizontal Preset Bar wrapping nicely */
     .preset-buttons-strip { display: flex; gap: 6px; flex-wrap: wrap; }
-
     .btn-preset {
       background: var(--bg-card);
       border: 1px solid var(--border-glow);
@@ -160,7 +217,6 @@
       transition: all 0.2s ease;
     }
     .btn-preset:hover { background: var(--bg-card-hover); border-color: var(--text-dim); }
-
     .btn-preset.active-preset {
       background: var(--neon-blue);
       color: #000;
