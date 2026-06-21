@@ -569,8 +569,8 @@
     }
 
 
-    // =========================================================================
-    // 2. SPA VIEW & INSTITUTIONAL ANALYTICS ENGINE (Untouched original logic)
+// =========================================================================
+    // 2. SPA VIEW & INSTITUTIONAL ANALYTICS ENGINE (DYNAMIC)
     // =========================================================================
     function changeSpaView(target) {
       document.getElementById('view-ops').classList.remove('active-view');
@@ -585,170 +585,67 @@
         document.getElementById('view-analytics').classList.add('active-view');
         document.getElementById('tab-link-analytics').classList.add('active');
         renderPrototypeCharts();
+        // Optional: Auto-load session data when switching to analytics
+        applyTimeframePreset(document.getElementById('preset-session'), 'session');
       }
     }
 
     let activeCharts = {};
     function renderPrototypeCharts() {
       if (activeCharts.winLoss) return;
-
       const darkThemeText = '#64748b';
       const gridBorderColor = '#232f48';
 
+      // Initialize empty charts
       const ctxPie = document.getElementById('chart-pie-winloss').getContext('2d');
-      activeCharts.winLoss = new Chart(ctxPie, {
-        type: 'pie',
-        data: {
-          labels: ['Wins', 'Losses'],
-          datasets: [{
-            data: [95, 54],
-            backgroundColor: ['#00ff88', '#ff3b30'],
-            borderColor: '#101524',
-            borderWidth: 2
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { position: 'bottom', labels: { color: darkThemeText, font: { family: 'Consolas' } } }
-          }
-        }
-      });
+      activeCharts.winLoss = new Chart(ctxPie, { type: 'pie', data: { labels: ['Wins', 'Losses'], datasets: [{ data: [0, 0], backgroundColor: ['#00ff88', '#ff3b30'], borderColor: '#101524', borderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: darkThemeText, font: { family: 'Consolas' } } } } } });
 
       const ctxDonut = document.getElementById('chart-donut-assets').getContext('2d');
-      activeCharts.assets = new Chart(ctxDonut, {
-        type: 'doughnut',
-        data: {
-          labels: ['V10', 'V25', 'V50', 'V75', 'V100'],
-          datasets: [{
-            data: [12, 8, 15, 45, 20],
-            backgroundColor: ['#00d2ff', '#ff9500', '#94a3b8', '#00ff88', '#a855f7'],
-            borderColor: '#101524',
-            borderWidth: 2
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { position: 'bottom', labels: { color: darkThemeText, font: { family: 'Consolas' } } }
-          }
-        }
-      });
+      activeCharts.assets = new Chart(ctxDonut, { type: 'doughnut', data: { labels: ['V10', 'V25', 'V50', 'V75', 'V100'], datasets: [{ data: [0, 0, 0, 0, 0], backgroundColor: ['#00d2ff', '#ff9500', '#94a3b8', '#00ff88', '#a855f7'], borderColor: '#101524', borderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: darkThemeText, font: { family: 'Consolas' } } } } } });
 
       const ctxLine = document.getElementById('chart-line-equity').getContext('2d');
-      activeCharts.equity = new Chart(ctxLine, {
-        type: 'line',
-        data: {
-          labels: ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10'],
-          datasets: [{
-            label: 'Liquidity Scale ($)',
-            data: [10000, 10104, 10070, 10174, 10278, 10243, 10347, 10451, 10416, 10432],
-            borderColor: '#00d2ff',
-            backgroundColor: 'rgba(0, 210, 255, 0.03)',
-            fill: true,
-            tension: 0.15,
-            borderWidth: 2,
-            pointRadius: 2,
-            pointHoverRadius: 5
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            x: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText, font: { family: 'Consolas' } } },
-            y: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText, font: { family: 'Consolas' } } }
-          },
-          plugins: { legend: { display: false } }
-        }
-      });
+      activeCharts.equity = new Chart(ctxLine, { type: 'line', data: { labels: [], datasets: [{ label: 'Liquidity Scale ($)', data: [0], borderColor: '#00d2ff', backgroundColor: 'rgba(0, 210, 255, 0.03)', fill: true, tension: 0.15, borderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText } }, y: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText } } }, plugins: { legend: { display: false } } } });
     }
 
-    // EXPANDED TIME PRESET TIMELINE CONTROLLER
-    function applyTimeframePreset(clickedButton, presetMode) {
-      document.querySelectorAll('.btn-preset').forEach(btn => btn.classList.remove('active-preset'));
-      clickedButton.classList.add('active-preset');
-
-      renderPrototypeCharts();
-
-      let metrics = {};
-      let chartData = {};
-      let lineLabels = null;
-
-      switch(presetMode) {
-        case 'hour':
-          metrics = { profit: '+$42.10', pf: '2.45', strike: '72.7%', drawdown: '-0.38%' };
-          chartData = { winLoss: [16, 6], assets: [2, 1, 3, 15, 1], equity: [10390, 10402, 10395, 10412, 10425, 10420, 10432] };
-          break;
-        case 'session':
-          metrics = { profit: '+$418.50', pf: '1.84', strike: '63.8%', drawdown: '-1.14%' };
-          chartData = { winLoss: [95, 54], assets: [12, 8, 15, 45, 20], equity: [10000, 10104, 10070, 10174, 10278, 10243, 10347, 10451, 10416, 10432] };
-          break;
-        case '24h':
-          metrics = { profit: '+$912.40', pf: '1.61', strike: '58.2%', drawdown: '-2.85%' };
-          chartData = { winLoss: [210, 151], assets: [45, 32, 50, 110, 74], equity: [9520, 9640, 9590, 9780, 9710, 9890, 10120, 10310, 10290, 10432] };
-          break;
-        case 'month':
-          metrics = { profit: '+$2,450.00', pf: '1.72', strike: '61.5%', drawdown: '-4.20%' };
-          chartData = { winLoss: [640, 401], assets: [110, 95, 130, 420, 286], equity: [8000, 8400, 8900, 8750, 9200, 9600, 10100, 10432] };
-          lineLabels = ['Wk 1', 'Wk 2', 'Wk 3', 'Wk 4', 'Wk 5', 'Wk 6', 'Wk 7', 'Wk 8'];
-          break;
-        case '6months':
-          metrics = { profit: '+$14,820.00', pf: '1.68', strike: '59.8%', drawdown: '-6.50%' };
-          chartData = { winLoss: [3820, 2568], assets: [710, 620, 890, 2450, 1718], equity: [3000, 4200, 5100, 4800, 6400, 7800, 8900, 10432] };
-          lineLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug'];
-          break;
-        case '1year':
-          metrics = { profit: '+$32,400.00', pf: '1.75', strike: '62.1%', drawdown: '-8.12%' };
-          chartData = { winLoss: [8120, 4950], assets: [1500, 1320, 1940, 5200, 3110], equity: [1500, 2800, 5100, 7300, 6900, 9400, 10100, 10432] };
-          lineLabels = ['Q1', 'Q2', 'Q3', 'Q4', 'Q1_26', 'Q2_26'];
-          break;
-        case 'clear':
-          metrics = { profit: '$0.00', pf: '0.00', strike: '0.0%', drawdown: '0.00%' };
-          chartData = { winLoss: [0, 0], assets: [0, 0, 0, 0, 0], equity: [10432, 10432, 10432] };
-          break;
+    async function applyTimeframePreset(clickedButton, presetMode) {
+      if (clickedButton) {
+        document.querySelectorAll('.btn-preset').forEach(btn => btn.classList.remove('active-preset'));
+        clickedButton.classList.add('active-preset');
       }
 
-      updateUIElements(metrics, chartData, lineLabels);
-    }
-
-   async function applyManualDateFilter() {
-      const startDateVal = document.getElementById('date-picker-start').value;
-      const endDateVal = document.getElementById('date-picker-end').value;
-
-      document.querySelectorAll('.btn-preset').forEach(btn => btn.classList.remove('active-preset'));
-
-      if (new Date(startDateVal) > new Date(endDateVal)) {
-        alert("Institutional Boundary Error: Start date cannot be greater than End date.");
+      if (presetMode === 'clear') {
+        updateUIElements({ profit: '$0.00', pf: '0.00', strike: '0.0%', drawdown: '0.00%' }, { winLoss: [0, 0], assets: [0, 0, 0, 0, 0], equity: [0] }, null);
         return;
       }
 
       try {
-        const response = await fetch(`/api/ledger/analytics?start=${startDateVal}&end=${endDateVal}`);
+        const response = await fetch(`/api/ledger/analytics?mode=${presetMode}`);
         const data = await response.json();
-
         if (data.error) throw new Error(data.error);
 
-        const metrics = {
+        updateUIElements({
           profit: `+$${data.totalProfit.toFixed(2)}`,
-          pf: 'N/A', 
+          pf: data.profitFactor || '0.00',
           strike: `${data.strikeRate}%`,
-          drawdown: '0.0%' 
-        };
-
-        const chartData = { 
-          winLoss: [data.strikeRate, 100 - data.strikeRate], 
-          assets: [0, 0, 0, data.totalTrades, 0], 
-          equity: data.rawData.map(t => t.payout || 0)
-        };
-
-        updateUIElements(metrics, chartData, null);
+          drawdown: '0.0%'
+        }, {
+          winLoss: [data.wins || 0, data.losses || 0],
+          assets: data.assetDistribution || [0, 0, 0, 0, 0],
+          equity: data.equityCurve || [0]
+        }, data.labels);
       } catch (err) {
-        console.error("Analytics Fetch Error:", err);
-        alert("Failed to sync Institutional Ledger from Database.");
+        console.error("Fetch Error:", err);
       }
+    }
+
+    async function applyManualDateFilter() {
+      const start = document.getElementById('date-picker-start').value;
+      const end = document.getElementById('date-picker-end').value;
+      try {
+        const response = await fetch(`/api/ledger/analytics?start=${start}&end=${end}`);
+        const data = await response.json();
+        updateUIElements({ profit: `+$${data.totalProfit.toFixed(2)}`, pf: 'N/A', strike: `${data.strikeRate}%`, drawdown: '0.0%' }, { winLoss: [data.wins, data.losses], assets: [0, 0, 0, data.totalTrades, 0], equity: data.rawData.map(t => t.payout || 0) }, null);
+      } catch (err) { console.error("Filter Error:", err); }
     }
 
     function updateUIElements(metrics, chartData, customLineLabels) {
@@ -758,17 +655,13 @@
       document.getElementById('meta-drawdown').innerText = metrics.drawdown;
 
       activeCharts.winLoss.data.datasets[0].data = chartData.winLoss;
-      activeCharts.winLoss.update();
-
       activeCharts.assets.data.datasets[0].data = chartData.assets;
-      activeCharts.assets.update();
-
       activeCharts.equity.data.datasets[0].data = chartData.equity;
-      if (customLineLabels) {
-        activeCharts.equity.data.labels = customLineLabels;
-      } else {
-        activeCharts.equity.data.labels = chartData.equity.map((_, i) => `T${i + 1}`);
-      }
+      
+      if (customLineLabels) activeCharts.equity.data.labels = customLineLabels;
+      
+      activeCharts.winLoss.update();
+      activeCharts.assets.update();
       activeCharts.equity.update();
     }
   </script>
