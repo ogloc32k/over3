@@ -4,7 +4,6 @@ const http = require('http');
 const WebSocket = require('ws');
 const path = require('path');
 const fs = require('fs');
-const { createClient } = require('@supabase/supabase-js');
 const { saveTradeToCloud } = require('./database'); 
 
 const app = express();
