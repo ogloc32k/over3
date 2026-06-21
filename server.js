@@ -19,24 +19,48 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 //
 // --- NEW: Analytics API Endpoint ---
+// --- UPDATED: Analytics API Endpoint (Seamless Pipe) ---
 app.get('/api/ledger/analytics', async (req, res) => {
-  const { start, end } = req.query;
-  const { data, error } = await supabase
-    .from('trading_ledger')
-    .select('*')
-    .gte('created_at', start)
-    .lte('created_at', end);
+  const { start, end, mode } = req.query;
 
-  if (error) return res.status(500).json({ error: error.message });
-  
-  const totalProfit = data.reduce((acc, curr) => acc + (curr.profit_loss || 0), 0);
-  const totalTrades = data.length;
-  const wins = data.filter(t => t.is_win).length;
-  const strikeRate = totalTrades > 0 ? ((wins / totalTrades) * 100).toFixed(1) : 0;
-  
-  res.json({ totalProfit, strikeRate, totalTrades, rawData: data });
+  // 1. SESSION / REAL-TIME PULL (Short Memory)
+  // This reads from 'state' which is updated in real-time by your trading engine
+  if (mode === 'session') {
+    const settlements = state.logs.filter(l => l.message.includes('Settlement'));
+    const wins = settlements.filter(l => l.message.includes('WIN')).length;
+    const strikeRate = settlements.length > 0 ? ((wins / settlements.length) * 100).toFixed(1) : 0;
+
+    return res.json({
+      totalProfit: state.dailyPnl || 0,
+      strikeRate: strikeRate,
+      totalTrades: settlements.length,
+      rawData: [] // Historical data not required for session mode
+    });
+  }
+
+  // 2. HISTORICAL / DATABASE PULL
+  try {
+    const { data, error } = await supabase
+      .from('trading_ledger')
+      .select('*')
+      .gte('created_at', start)
+      .lte('created_at', end);
+
+    if (error) throw error;
+    
+    const totalProfit = data.reduce((acc, curr) => acc + (curr.profit_loss || 0), 0);
+    const totalTrades = data.length;
+    const wins = data.filter(t => t.is_win).length;
+    const strikeRate = totalTrades > 0 ? ((wins / totalTrades) * 100).toFixed(1) : 0;
+    
+    res.json({ totalProfit, strikeRate, totalTrades, rawData: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
+// --- REQUIRED: Live Logging System ---
+// Without these, your dashboard will not receive real-time updates!
 const sseClients = new Set();
 let logId = 1;
 
@@ -173,7 +197,7 @@ const RISK_PERCENT = 1;
 const TP_PERCENT = 2;
 const SL_PERCENT = 4;
 const MIN_STAKE = 0.35;
-const COOLDOWN_TICKS = 6;
+const COOLDOWN_TICKS = 1; //changed cooldown 
 const SETTLE_TICKS = 3;
 
 function saveState() {
