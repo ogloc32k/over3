@@ -1,22 +1,20 @@
 const { createClient } = require('@supabase/supabase-js');
+const ws = require('ws');                    // <-- Add this
 require('dotenv').config();
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 
-// Create the client with 'realtime: false' to bypass the WebSocket/Node 20 issue.
-// This forces the client to use standard HTTP(S) requests.
+// Create client with explicit WebSocket transport
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   realtime: {
-    enabled: false
+    transport: ws,                          // <-- Provide ws package
+    enabled: false                          // Keep it disabled (optional)
   }
 });
 
-console.log("✅ [DEBUG] Database module loaded and client initialized (REST-only mode).");
+console.log("✅ [DEBUG] Database module loaded (REST-only mode with ws transport).");
 
-/**
- * Non-blocking, fire-and-forget background push.
- */
 function saveTradeToCloud(tradeData) {
   const netProfitLoss = tradeData.isWin 
     ? (tradeData.payout - tradeData.stake) 
@@ -25,7 +23,7 @@ function saveTradeToCloud(tradeData) {
   supabase
     .from('trading_ledger')
     .insert([{
-      contract_id: tradeData.contract_id, // Added this field
+      contract_id: tradeData.contract_id,
       asset: tradeData.asset,
       contract_type: tradeData.contractType,
       stake: tradeData.stake,
