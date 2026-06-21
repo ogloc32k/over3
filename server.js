@@ -298,10 +298,10 @@ function processLiveFeed(symbol, price) {
         contractType: "DIGITOVER",
         barrier: 3
       };
-
+//autobuy payload
       send({
         buy: 1,
-        price: state.currentStake,
+        price: 100, // CHANGE THIS: Use a high ceiling (e.g., 100)
         parameters: {
           amount: state.currentStake,
           basis: "stake",
@@ -310,7 +310,7 @@ function processLiveFeed(symbol, price) {
           duration: 1,
           duration_unit: "t",
           symbol: topMarket.symbol,
-          barrier: "3"
+          barrier: 3 
         },
         req_id: ++reqId
       });
@@ -432,7 +432,22 @@ app.post('/api/manual-trade', (req, res) => {
   const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
   state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
   state.activeRealTrade = { symbol, stake: state.currentStake, balanceBefore: state.balance, contractType: contractType === 'OVER' ? 'DIGITOVER' : 'DIGITUNDER', barrier: 3 };
-  send({ buy: 1, price: state.currentStake, parameters: { amount: state.currentStake, basis: "stake", contract_type: state.activeRealTrade.contractType, currency: state.currency, duration: 1, duration_unit: "t", symbol, barrier: "3" }, req_id: ++reqId });
+  // manual trades payload
+  send({ 
+    buy: 1, 
+    price: 100, // UPDATE: Change from state.currentStake to 100
+    parameters: { 
+      amount: state.currentStake, 
+      basis: "stake", 
+      contract_type: state.activeRealTrade.contractType, 
+      currency: state.currency, 
+      duration: 1, 
+      duration_unit: "t", 
+      symbol, 
+      barrier: 3 // UPDATE: Change from "3" to 3 (remove quotes)
+    }, 
+    req_id: ++reqId 
+  });
   broadcastSSE({ state: sanitizeState() }); res.json({ success: true });
 });
 
