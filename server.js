@@ -94,7 +94,7 @@ function broadcastSSE(payload) {
   sseClients.forEach(c => c.write(`data: ${JSON.stringify(payload)}\n\n`));
 }
 
-// ---------- SSE ENDPOINT (NEW) ----------
+// ---------- SSE ENDPOINT ----------
 app.get('/api/logs', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -104,13 +104,16 @@ app.get('/api/logs', (req, res) => {
   const client = res;
   sseClients.add(client);
 
+  // Send initial state and logs immediately
+  client.write(`data: ${JSON.stringify({ state: sanitizeState(), logs: state.logs.slice(0, 50) })}\n\n`);
+
   req.on('close', () => {
     sseClients.delete(client);
     client.end();
   });
 });
 
-// ---------- CONTROL ENDPOINT (NEW) ----------
+// ---------- CONTROL ENDPOINT ----------
 app.post('/api/control', (req, res) => {
   const { action, mode } = req.body;
 
@@ -458,6 +461,9 @@ async function connectDeriv() {
     state.balance = parseFloat(targetAccount.balance);
     state.currency = targetAccount.currency || 'USD';
     if (state.dailyStartBalance === null) state.dailyStartBalance = state.balance;
+
+    // Push initial balance to UI
+    broadcastSSE({ state: sanitizeState() });
 
     const otpRes = await fetch(`https://api.derivws.com/trading/v1/options/accounts/${targetAccount.account_id}/otp`, {
       method: 'POST',
