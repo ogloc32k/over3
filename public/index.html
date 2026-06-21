@@ -461,7 +461,6 @@
           r.innerHTML = `<span class="log-ts">[${new Date(log.time).toLocaleTimeString()}]</span><span class="log-text">${log.message}</span>`;
           box.insertBefore(r, box.firstChild);
         });
-        // Auto-clean UI logs memory
         while (box.children.length > 150) box.removeChild(box.lastChild);
       }
     };
@@ -469,7 +468,6 @@
     function renderOpsUI(state) {
       serverMode = state.tradingMode;
 
-      // Update Ledger
       document.getElementById('ui-ledger-mode').innerText = state.tradingMode.toUpperCase();
       document.getElementById('ui-ledger-bal').innerText = state.balance ? `$${parseFloat(state.balance).toFixed(2)} ${state.currency}` : 'Synchronizing...';
       const pnlEl = document.getElementById('ui-ledger-pnl');
@@ -477,7 +475,6 @@
       pnlEl.style.color = state.dailyPnl >= 0 ? 'var(--neon-green)' : 'var(--neon-red)';
       document.getElementById('ui-ledger-stake').innerText = `$${parseFloat(state.currentStake).toFixed(2)}`;
 
-      // Update Top Status Pill & Lock Banner
       const statusPill = document.getElementById('ui-sys-status');
       const alertBanner = document.getElementById('lock-alert-banner');
       if (state.locked) {
@@ -494,14 +491,12 @@
         alertBanner.style.display = "none";
       }
 
-      // Rebuild Left Sidebar Cluster Cards
       const clusterBox = document.getElementById('ui-cluster-list');
-      clusterBox.innerHTML = ''; // Clear hardcoded
+      clusterBox.innerHTML = '';
       for (const sym in MARKETS_CFG) {
         const mMetric = state.marketMetrics[sym];
         const isReady = mMetric && mMetric.filtersValidated;
         const isActive = sym === currentFocus;
-        const priceMock = mMetric && mMetric.last3 ? mMetric.last3[2] : "0"; // Placeholder for active parsing
         const gapVal = mMetric ? mMetric.totalGap.toFixed(1) : "0.0";
         const gapColor = mMetric && mMetric.totalGap >= 0 ? 'var(--neon-green)' : 'var(--neon-red)';
         
@@ -519,7 +514,6 @@
         `;
       }
 
-      // Update Central Analytics Screen for the Selected Market
       const currentMetric = state.marketMetrics[currentFocus];
       document.getElementById('ui-focused-title').innerText = `Active Focus Cluster Array: ${MARKETS_CFG[currentFocus]}`;
       
@@ -541,7 +535,6 @@
           densityFill.style.boxShadow = '0 0 8px var(--neon-blue)';
         }
 
-        // 0-9 Matrix Grid Update
         for (let i = 0; i <= 9; i++) {
           document.getElementById(`ui-pct-${i}`).innerText = `${currentMetric.pcts[i].toFixed(1)}%`;
           const nodeCard = document.getElementById(`ui-pct-${i}`).parentElement;
@@ -552,7 +545,6 @@
           }
         }
 
-        // Tail Strip Sequence Update
         const tailBox = document.getElementById('ui-tail-strip');
         tailBox.innerHTML = '';
         const paddedTicks = [...currentMetric.last3];
@@ -568,8 +560,7 @@
       }
     }
 
-
-// =========================================================================
+    // =========================================================================
     // 2. SPA VIEW & INSTITUTIONAL ANALYTICS ENGINE (DYNAMIC)
     // =========================================================================
     function changeSpaView(target) {
@@ -585,7 +576,6 @@
         document.getElementById('view-analytics').classList.add('active-view');
         document.getElementById('tab-link-analytics').classList.add('active');
         renderPrototypeCharts();
-        // Optional: Auto-load session data when switching to analytics
         applyTimeframePreset(document.getElementById('preset-session'), 'session');
       }
     }
@@ -596,7 +586,6 @@
       const darkThemeText = '#64748b';
       const gridBorderColor = '#232f48';
 
-      // Initialize empty charts
       const ctxPie = document.getElementById('chart-pie-winloss').getContext('2d');
       activeCharts.winLoss = new Chart(ctxPie, { type: 'pie', data: { labels: ['Wins', 'Losses'], datasets: [{ data: [0, 0], backgroundColor: ['#00ff88', '#ff3b30'], borderColor: '#101524', borderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: darkThemeText, font: { family: 'Consolas' } } } } } });
 
@@ -605,6 +594,51 @@
 
       const ctxLine = document.getElementById('chart-line-equity').getContext('2d');
       activeCharts.equity = new Chart(ctxLine, { type: 'line', data: { labels: [], datasets: [{ label: 'Liquidity Scale ($)', data: [0], borderColor: '#00d2ff', backgroundColor: 'rgba(0, 210, 255, 0.03)', fill: true, tension: 0.15, borderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText } }, y: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText } } }, plugins: { legend: { display: false } } } });
+    }
+
+    // Helper: compute metrics from rawData
+    function computeFromRawData(rawData) {
+      let wins = 0, losses = 0;
+      let grossProfit = 0, grossLoss = 0;
+      const assetMap = {};
+      const sortedTrades = rawData.slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      const equityCurve = [];
+      let cumProfit = 0;
+
+      sortedTrades.forEach(t => {
+        const pnl = t.profit_loss || 0;
+        cumProfit += pnl;
+        equityCurve.push(cumProfit);
+        if (pnl > 0) {
+          wins++;
+          grossProfit += pnl;
+        } else if (pnl < 0) {
+          losses++;
+          grossLoss += Math.abs(pnl);
+        }
+        const asset = t.asset || 'Unknown';
+        assetMap[asset] = (assetMap[asset] || 0) + pnl;
+      });
+
+      const assetLabels = ['V10', 'V25', 'V50', 'V75', 'V100'];
+      const assetData = assetLabels.map(label => {
+        const found = Object.keys(assetMap).find(k => k.includes(label));
+        return found ? assetMap[found] : 0;
+      });
+
+      // Fallback if no trades
+      if (wins + losses === 0) {
+        wins = 0; losses = 0;
+        equityCurve.length = 0;
+        equityCurve.push(0);
+        assetData.fill(0);
+      }
+
+      const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? Infinity : 0);
+      const totalTrades = wins + losses;
+      const strikeRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
+
+      return { wins, losses, profitFactor, strikeRate, assetData, equityCurve };
     }
 
     async function applyTimeframePreset(clickedButton, presetMode) {
@@ -623,16 +657,35 @@
         const data = await response.json();
         if (data.error) throw new Error(data.error);
 
+        let winLoss, assets, equity, pf, strike;
+        if (presetMode === 'session') {
+          // Session mode: only totalProfit and strikeRate available, no rawData
+          const totalTrades = data.totalTrades || 0;
+          const strikeNum = parseFloat(data.strikeRate) || 0;
+          const wins = Math.round((strikeNum / 100) * totalTrades);
+          const losses = totalTrades - wins;
+          winLoss = [wins, losses];
+          assets = [0, 0, 0, 0, 0]; // cannot distribute
+          equity = [data.totalProfit || 0];
+          pf = 'N/A';
+          strike = data.strikeRate || '0.0%';
+        } else {
+          // Historical: compute from rawData
+          const raw = data.rawData || [];
+          const computed = computeFromRawData(raw);
+          winLoss = [computed.wins, computed.losses];
+          assets = computed.assetData;
+          equity = computed.equityCurve;
+          pf = computed.profitFactor.toFixed(2);
+          strike = computed.strikeRate.toFixed(1) + '%';
+        }
+
         updateUIElements({
-          profit: `+$${data.totalProfit.toFixed(2)}`,
-          pf: data.profitFactor || '0.00',
-          strike: `${data.strikeRate}%`,
-          drawdown: '0.0%'
-        }, {
-          winLoss: [data.wins || 0, data.losses || 0],
-          assets: data.assetDistribution || [0, 0, 0, 0, 0],
-          equity: data.equityCurve || [0]
-        }, data.labels);
+          profit: `+$${(data.totalProfit || 0).toFixed(2)}`,
+          pf: pf,
+          strike: strike,
+          drawdown: '0.0%' // not computed yet
+        }, { winLoss, assets, equity }, null);
       } catch (err) {
         console.error("Fetch Error:", err);
       }
@@ -644,18 +697,20 @@
       try {
         const response = await fetch(`/api/ledger/analytics?start=${start}&end=${end}`);
         const data = await response.json();
-        
-        // Ensure this matches the structure updateUIElements expects
-        updateUIElements({ 
-          profit: `+$${(data.totalProfit || 0).toFixed(2)}`, 
-          pf: 'N/A', 
-          strike: `${data.strikeRate}%`, 
-          drawdown: '0.0%' 
-        }, { 
-          winLoss: [data.wins || 0, data.losses || 0], 
-          assets: [0, 0, 0, data.totalTrades || 0, 0], // Safe fallback
-          equity: [data.totalProfit || 0] // Ensure this is an array
-        }, null);
+        const raw = data.rawData || [];
+        const computed = computeFromRawData(raw);
+        const winLoss = [computed.wins, computed.losses];
+        const assets = computed.assetData;
+        const equity = computed.equityCurve;
+        const pf = computed.profitFactor.toFixed(2);
+        const strike = computed.strikeRate.toFixed(1) + '%';
+
+        updateUIElements({
+          profit: `+$${(data.totalProfit || 0).toFixed(2)}`,
+          pf: pf,
+          strike: strike,
+          drawdown: '0.0%'
+        }, { winLoss, assets, equity }, null);
       } catch (err) { console.error("Filter Error:", err); }
     }
 
@@ -675,6 +730,6 @@
       activeCharts.assets.update();
       activeCharts.equity.update();
     }
-  </script>
+</script>
 </body>
 </html>
