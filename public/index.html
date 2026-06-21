@@ -644,7 +644,18 @@
       try {
         const response = await fetch(`/api/ledger/analytics?start=${start}&end=${end}`);
         const data = await response.json();
-        updateUIElements({ profit: `+$${data.totalProfit.toFixed(2)}`, pf: 'N/A', strike: `${data.strikeRate}%`, drawdown: '0.0%' }, { winLoss: [data.wins, data.losses], assets: [0, 0, 0, data.totalTrades, 0], equity: data.rawData.map(t => t.payout || 0) }, null);
+        
+        // Ensure this matches the structure updateUIElements expects
+        updateUIElements({ 
+          profit: `+$${(data.totalProfit || 0).toFixed(2)}`, 
+          pf: 'N/A', 
+          strike: `${data.strikeRate}%`, 
+          drawdown: '0.0%' 
+        }, { 
+          winLoss: [data.wins || 0, data.losses || 0], 
+          assets: [0, 0, 0, data.totalTrades || 0, 0], // Safe fallback
+          equity: [data.totalProfit || 0] // Ensure this is an array
+        }, null);
       } catch (err) { console.error("Filter Error:", err); }
     }
 
