@@ -254,10 +254,7 @@
           <span style="color:var(--neon-green); font-size:9px;">● LIVE SCANNING</span>
         </div>
         <div class="cluster-list" id="ui-cluster-list">
-          <div class="cluster-card active">
-            <div class="cluster-meta"><span class="cluster-name">Volatility 75 Index</span><span class="cluster-badge badge-ready">READY</span></div>
-            <div class="cluster-data"><span class="cluster-price">Loading...</span><span class="cluster-gap-mini">+0.0%</span></div>
-          </div>
+          <!-- dynamically populated -->
         </div>
       </div>
 
@@ -433,16 +430,33 @@
     }
 
     function sendControl(action) {
-      fetch('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) });
+      fetch('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) })
+        .then(res => res.json())
+        .then(data => {
+          if (data.error) alert('Error: ' + data.error);
+        });
     }
 
     function swapEnvironment() {
       const targetMode = serverMode === 'demo' ? 'real' : 'demo';
-      fetch('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'set_mode', mode: targetMode }) });
+      fetch('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'set_mode', mode: targetMode }) })
+        .then(res => res.json())
+        .then(data => {
+          if (data.error) alert('Error: ' + data.error);
+        });
     }
 
     function fireManual(type) {
-      fetch('/api/manual-trade', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: currentFocus, contractType: type }) });
+      fetch('/api/manual-trade', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: currentFocus, contractType: type }) })
+        .then(res => res.json())
+        .then(data => {
+          if (data.error) {
+            alert('Manual trade failed: ' + data.error);
+          } else {
+            console.log('Manual trade request sent:', data.message);
+          }
+        })
+        .catch(err => alert('Network error: ' + err.message));
     }
 
     const sse = new EventSource('/api/logs');
@@ -468,6 +482,7 @@
     function renderOpsUI(state) {
       serverMode = state.tradingMode;
 
+      // Update Ledger
       document.getElementById('ui-ledger-mode').innerText = state.tradingMode.toUpperCase();
       document.getElementById('ui-ledger-bal').innerText = state.balance ? `$${parseFloat(state.balance).toFixed(2)} ${state.currency}` : 'Synchronizing...';
       const pnlEl = document.getElementById('ui-ledger-pnl');
@@ -475,6 +490,7 @@
       pnlEl.style.color = state.dailyPnl >= 0 ? 'var(--neon-green)' : 'var(--neon-red)';
       document.getElementById('ui-ledger-stake').innerText = `$${parseFloat(state.currentStake).toFixed(2)}`;
 
+      // Status & Lock
       const statusPill = document.getElementById('ui-sys-status');
       const alertBanner = document.getElementById('lock-alert-banner');
       if (state.locked) {
@@ -491,10 +507,11 @@
         alertBanner.style.display = "none";
       }
 
+      // Rebuild Left Sidebar – show ALL markets
       const clusterBox = document.getElementById('ui-cluster-list');
       clusterBox.innerHTML = '';
       for (const sym in MARKETS_CFG) {
-        const mMetric = state.marketMetrics[sym];
+        const mMetric = state.marketMetrics && state.marketMetrics[sym] ? state.marketMetrics[sym] : null;
         const isReady = mMetric && mMetric.filtersValidated;
         const isActive = sym === currentFocus;
         const gapVal = mMetric ? mMetric.totalGap.toFixed(1) : "0.0";
@@ -514,7 +531,8 @@
         `;
       }
 
-      const currentMetric = state.marketMetrics[currentFocus];
+      // Central Analytics for focused market
+      const currentMetric = state.marketMetrics && state.marketMetrics[currentFocus] ? state.marketMetrics[currentFocus] : null;
       document.getElementById('ui-focused-title').innerText = `Active Focus Cluster Array: ${MARKETS_CFG[currentFocus]}`;
       
       if (currentMetric) {
@@ -557,6 +575,16 @@
           }
           tailBox.innerHTML += `<span class="tail-node ${extraClass}">${t}</span>`;
         });
+      } else {
+        // No metric yet – show placeholders
+        document.getElementById('ui-gap-score').innerText = '—';
+        document.getElementById('ui-density-pct').innerText = '0%';
+        document.getElementById('ui-density-fill').style.width = '0%';
+        for (let i = 0; i <= 9; i++) {
+          document.getElementById(`ui-pct-${i}`).innerText = '0.0%';
+          document.getElementById(`ui-pct-${i}`).parentElement.className = 'digit-card';
+        }
+        document.getElementById('ui-tail-strip').innerHTML = '<span class="tail-node">—</span><span class="tail-node">—</span><span class="tail-node">—</span>';
       }
     }
 
@@ -626,7 +654,6 @@
         return found ? assetMap[found] : 0;
       });
 
-      // Fallback if no trades
       if (wins + losses === 0) {
         wins = 0; losses = 0;
         equityCurve.length = 0;
@@ -659,18 +686,16 @@
 
         let winLoss, assets, equity, pf, strike;
         if (presetMode === 'session') {
-          // Session mode: only totalProfit and strikeRate available, no rawData
           const totalTrades = data.totalTrades || 0;
           const strikeNum = parseFloat(data.strikeRate) || 0;
           const wins = Math.round((strikeNum / 100) * totalTrades);
           const losses = totalTrades - wins;
           winLoss = [wins, losses];
-          assets = [0, 0, 0, 0, 0]; // cannot distribute
+          assets = [0, 0, 0, 0, 0];
           equity = [data.totalProfit || 0];
           pf = 'N/A';
           strike = data.strikeRate || '0.0%';
         } else {
-          // Historical: compute from rawData
           const raw = data.rawData || [];
           const computed = computeFromRawData(raw);
           winLoss = [computed.wins, computed.losses];
@@ -684,7 +709,7 @@
           profit: `+$${(data.totalProfit || 0).toFixed(2)}`,
           pf: pf,
           strike: strike,
-          drawdown: '0.0%' // not computed yet
+          drawdown: '0.0%'
         }, { winLoss, assets, equity }, null);
       } catch (err) {
         console.error("Fetch Error:", err);
@@ -730,6 +755,6 @@
       activeCharts.assets.update();
       activeCharts.equity.update();
     }
-</script>
+  </script>
 </body>
 </html>
