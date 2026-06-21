@@ -417,38 +417,49 @@ async function connectDeriv() {
 function handleMessage(msg) {
   if (msg.error) {
     addLog(`API Error: ${msg.error.message}`);
-    state.tradeInProgress = false; state.activeRealTrade = null; state.settleTicksRemaining = 0;
+    state.tradeInProgress = false; 
+    state.activeRealTrade = null; 
+    state.settleTicksRemaining = 0;
     return;
   }
-  if (msg.msg_type === 'balance') { state.balance = parseFloat(msg.balance.balance); broadcastSSE({ state: sanitizeState() }); }
+
+  // --- ADD THIS "HANDSHAKE" BLOCK HERE ---
+  if (msg.msg_type === 'proposal') {
+    if (msg.error) {
+      addLog(`❌ Proposal Error: ${msg.error.message}`);
+      state.tradeInProgress = false;
+    } else {
+      // SUCCESS: The handshake is complete, now send the BUY order
+      send({
+        buy: msg.proposal.id,
+        price: msg.proposal.ask_price,
+        req_id: ++reqId
+      });
+      addLog(`✅ Proposal confirmed: ${msg.proposal.ask_price}. Executing buy...`);
+    }
+    return; // Stop processing further for this message
+  }
+  // ----------------------------------------
+
+  if (msg.msg_type === 'balance') { 
+    state.balance = parseFloat(msg.balance.balance); 
+    broadcastSSE({ state: sanitizeState() }); 
+  }
   else if (msg.msg_type === 'history') {
     const symbol = msg.echo_req.ticks_history;
     engine.seed(symbol, msg.history.prices);
     addLog(`✅ History synchronized for ${symbol}`);
     send({ ticks: symbol, req_id: ++reqId });
-  } else if (msg.msg_type === 'tick') { processLiveFeed(msg.tick.symbol, parseFloat(msg.tick.quote)); }
-  else if (msg.msg_type === 'buy') { if (state.activeRealTrade) state.settleTicksRemaining = SETTLE_TICKS; }
-}
-
-app.get('/api/logs', (req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-  sseClients.add(res);
-  res.write(`data: ${JSON.stringify({ state: sanitizeState(), logs: state.logs })}\n\n`);
-  req.on('close', () => sseClients.delete(res));
-});
-
-app.post('/api/control', (req, res) => {
-  const { action, mode } = req.body;
-  if (action === 'set_mode') {
-    if (state.active) return res.status(400).json({ error: 'Engine active.' });
-    state.tradingMode = mode; state.dailyStartBalance = null; state.dailyPnl = 0;
-    saveState(); connectDeriv(); return res.json({ success: true });
+  } 
+  else if (msg.msg_type === 'tick') { 
+    processLiveFeed(msg.tick.symbol, parseFloat(msg.tick.quote)); 
   }
-  if (action === 'start') { state.active = true; state.locked = false; addLog('🚀 Core Armed.'); }
-  else if (action === 'stop') { state.active = false; state.tradeInProgress = false; addLog('🚨 Core Disarmed.'); }
-  saveState(); broadcastSSE({ state: sanitizeState() }); res.json({ success: true });
-});
-
+  else if (msg.msg_type === 'buy') { 
+    if (state.activeRealTrade) state.settleTicksRemaining = SETTLE_TICKS; 
+    addLog(`💰 Trade Executed: Contract ID ${msg.buy.contract_id}`); // Added for visibility
+  }
+}
+//------------------MANUAL TRADING PAYLOAD..............//
 app.post('/api/manual-trade', (req, res) => {
   const { symbol, contractType } = req.body;
   if (state.locked || state.tradeInProgress || !MARKETS[symbol]) return res.status(400).json({ error: 'Rejected.' });
@@ -456,23 +467,42 @@ app.post('/api/manual-trade', (req, res) => {
   const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
   state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
   state.activeRealTrade = { symbol, stake: state.currentStake, balanceBefore: state.balance, contractType: contractType === 'OVER' ? 'DIGITOVER' : 'DIGITUNDER', barrier: 3 };
-  // manual trades payload
-  send({ 
-    buy: 1, 
-    price: 100, // UPDATE: Change from state.currentStake to 100
-    parameters: { 
-      amount: state.currentStake, 
-      basis: "stake", 
-      contract_type: state.activeRealTrade.contractType, 
-      currency: state.currency, 
-      duration: 1, 
-      duration_unit: "t", 
-      symbol, 
-      barrier: 3 // UPDATE: Change from "3" to 3 (remove quotes)
-    }, 
-    req_id: ++reqId 
+  app.post('/api/manual-trade', (req, res) => {
+  const { symbol, contractType } = req.body;
+  
+  if (state.locked || state.tradeInProgress) {
+    return res.status(400).json({ error: 'System locked or trade in progress.' });
+  }
+
+  // 1. Calculate stake
+  const rawStake = Math.max(0.35, state.balance * (0.01)); // Example 1% risk
+  state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
+  
+  // 2. Set internal tracking
+  state.tradeInProgress = true;
+  state.activeRealTrade = { 
+    symbol, 
+    stake: state.currentStake, 
+    contractType: contractType === 'OVER' ? 'DIGITOVER' : 'DIGITUNDER', 
+    barrier: 3 
+  };
+
+  // 3. Send PROPOSAL instead of BUY
+  // This verifies the trade parameters BEFORE sending money
+  send({
+    proposal: 1,
+    amount: state.currentStake,
+    basis: 'stake',
+    contract_type: state.activeRealTrade.contractType,
+    currency: state.currency || 'USD',
+    duration: 1,
+    duration_unit: 't',
+    underlying_symbol: symbol,
+    barrier: 3
   });
-  broadcastSSE({ state: sanitizeState() }); res.json({ success: true });
+
+  addLog(`Requesting proposal for ${symbol}...`);
+  res.json({ success: true, message: 'Proposal requested' });
 });
 
 loadState(); connectDeriv();
