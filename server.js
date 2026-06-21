@@ -12,8 +12,8 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 const STATE_FILE = '/var/data/deriv_multimarket_state.json';
 
-// Initialize Supabase Client
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+// Import the pre-configured database client
+const { supabase, saveTradeToCloud } = require('./database.js');
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
