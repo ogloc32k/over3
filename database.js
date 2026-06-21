@@ -1,20 +1,23 @@
 const { createClient } = require('@supabase/supabase-js');
-const ws = require('ws');                    // <-- Add this
+const ws = require('ws');                    // ✅ FIX: provide ws package for Node.js 20
 require('dotenv').config();
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 
-// Create client with explicit WebSocket transport
+// Create the client with explicit WebSocket transport to bypass Node.js 20 issue
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   realtime: {
-    transport: ws,                          // <-- Provide ws package
-    enabled: false                          // Keep it disabled (optional)
+    transport: ws,                          // ✅ FIX: use ws instead of native WebSocket
+    enabled: false                          // Keep REST-only mode
   }
 });
 
 console.log("✅ [DEBUG] Database module loaded (REST-only mode with ws transport).");
 
+/**
+ * Non-blocking, fire-and-forget background push.
+ */
 function saveTradeToCloud(tradeData) {
   const netProfitLoss = tradeData.isWin 
     ? (tradeData.payout - tradeData.stake) 
