@@ -1,15 +1,21 @@
 const { createClient } = require('@supabase/supabase-js');
+const WebSocket = require('ws'); // 1. Add this import
 
 // No more secrets in your code! Node.js pulls these from the server environment.
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 
-// Fail-safe check: If you forget to set the variables, the server warns you immediately
+// Fail-safe check
 if (!SUPABASE_URL || !SUPABASE_KEY) {
   console.error('❌ CRITICAL ERROR: Database credentials are missing from environment variables!');
 }
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+// 2. Initialize with the transport option
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+  realtime: {
+    transport: WebSocket,
+  },
+});
 
 /**
  * Non-blocking, fire-and-forget background push to the cloud database server.
