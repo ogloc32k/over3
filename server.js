@@ -15,6 +15,33 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 const STATE_FILE = '/var/data/deriv_multimarket_state.json';
 
+// ---------- SCHEDULED RESTART (03:00 East African Time) ----------
+function scheduleRestart() {
+  const now = new Date();
+  // Get current time in East Africa (UTC+3)
+  const eatOffset = 3 * 60 * 60 * 1000; // 3 hours in ms
+  const nowEAT = new Date(now.getTime() + eatOffset);
+  
+  // Create a date for today's 03:00 EAT
+  const nextRestart = new Date(nowEAT);
+  nextRestart.setHours(3, 0, 0, 0);
+  
+  // If 03:00 has already passed today, schedule for tomorrow
+  if (nowEAT > nextRestart) {
+    nextRestart.setDate(nextRestart.getDate() + 1);
+  }
+  
+  // Convert back to UTC milliseconds for setTimeout
+  const delay = nextRestart.getTime() - now.getTime();
+  
+  setTimeout(() => {
+    console.log('🔄 Scheduled restart at 03:00 EAT. Restarting...');
+    process.exit(0);
+  }, delay);
+}
+// Schedule the first restart and re‑schedule every time it fires (but process exits, so only once)
+scheduleRestart();
+
 // --- DATABASE HEALTH CHECK ---
 async function checkDatabaseConnection() {
   try {
@@ -33,7 +60,7 @@ async function checkDatabaseConnection() {
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
-// --- UPDATED: Analytics API Endpoint (Seamless Pipe) ---
+// ---------- ANALYTICS API (with preset handling & full metrics) ----------
 app.get('/api/ledger/analytics', async (req, res) => {
   const { start, end, mode } = req.query;
 
@@ -42,7 +69,6 @@ app.get('/api/ledger/analytics', async (req, res) => {
     const settlements = state.logs ? state.logs.filter(l => l.message.includes('Settlement')) : [];
     const wins = settlements.filter(l => l.message.includes('WIN')).length;
     const strikeRate = settlements.length > 0 ? ((wins / settlements.length) * 100).toFixed(1) : 0;
-
     return res.json({
       totalProfit: state.dailyPnl || 0,
       strikeRate: strikeRate,
@@ -51,26 +77,79 @@ app.get('/api/ledger/analytics', async (req, res) => {
     });
   }
 
-  // 2. HISTORICAL / DATABASE PULL
+  // 2. PRESET MODES → compute date range
+  let startDate = start;
+  let endDate = end;
+  const now = new Date();
+
+  if (mode === 'hour') {
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    startDate = oneHourAgo.toISOString();
+    endDate = now.toISOString();
+  } else if (mode === '24h') {
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    startDate = oneDayAgo.toISOString();
+    endDate = now.toISOString();
+  } else if (mode === 'month') {
+    const oneMonthAgo = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+    startDate = oneMonthAgo.toISOString();
+    endDate = now.toISOString();
+  } else if (mode === '6months') {
+    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+    startDate = sixMonthsAgo.toISOString();
+    endDate = now.toISOString();
+  } else if (mode === '1year') {
+    const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+    startDate = oneYearAgo.toISOString();
+    endDate = now.toISOString();
+  }
+
+  // If still no valid dates, return error
+  if (!startDate || !endDate) {
+    return res.status(400).json({ error: 'Invalid date range. Please provide start and end dates.' });
+  }
+
+  // 3. HISTORICAL / DATABASE PULL
   try {
     const { data, error } = await supabase
       .from('trading_ledger')
       .select('*')
-      .gte('created_at', start)
-      .lte('created_at', end);
+      .gte('created_at', startDate)
+      .lte('created_at', endDate);
 
     if (error) throw error;
 
-    // Calculate analytics from DB results
     const totalProfit = data.reduce((acc, curr) => acc + (curr.profit_loss || 0), 0);
     const totalTrades = data.length;
     const wins = data.filter(t => t.is_win).length;
     const strikeRate = totalTrades > 0 ? ((wins / totalTrades) * 100).toFixed(1) : 0;
 
+    // Profit factor
+    let grossProfit = 0, grossLoss = 0;
+    data.forEach(t => {
+      const pnl = t.profit_loss || 0;
+      if (pnl > 0) grossProfit += pnl;
+      else if (pnl < 0) grossLoss += Math.abs(pnl);
+    });
+    const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? Infinity : 0);
+
+    // Peak drawdown from equity curve
+    const sorted = data.slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    let peak = 0, maxDrawdown = 0, cum = 0;
+    sorted.forEach(t => {
+      cum += (t.profit_loss || 0);
+      if (cum > peak) peak = cum;
+      const drawdown = peak - cum;
+      if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+    });
+    const drawdownPercent = (peak > 0) ? (maxDrawdown / peak) * 100 : 0;
+
     res.json({
       totalProfit: totalProfit.toFixed(2),
       strikeRate,
       totalTrades,
+      profitFactor: profitFactor.toFixed(2),
+      drawdown: drawdownPercent.toFixed(2),
       rawData: data
     });
   } catch (err) {
