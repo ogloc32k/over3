@@ -37,9 +37,6 @@
       padding: 15px;
     }
 
-    /* =========================================================================
-       HEADER NAVIGATION
-       ========================================================================= */
     .master-nav-header {
       display: flex;
       justify-content: space-between;
@@ -79,15 +76,9 @@
       box-shadow: 0 0 10px rgba(0, 210, 255, 0.15);
     }
 
-    /* =========================================================================
-       VIEW MANAGEMENT WRAPPERS
-       ========================================================================= */
     .spa-view { display: none; flex: 1; min-height: 0; }
     .spa-view.active-view { display: flex; }
 
-    /* =========================================================================
-       LAYOUT: VIEW 1 - LIVE OPERATIONS CONSOLE
-       ========================================================================= */
     .dashboard-grid {
       display: grid;
       grid-template-columns: 310px 1fr 360px;
@@ -120,7 +111,6 @@
       align-items: center;
     }
 
-    /* LEFT SIDEBAR */
     .cluster-list { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; flex: 1; }
     .cluster-card { background: var(--bg-card); border: 1px solid var(--border-glow); border-radius: 4px; padding: 12px; cursor: pointer; }
     .cluster-card.active { border-color: var(--neon-blue); box-shadow: inset 4px 0 0 var(--neon-blue); background: #19243a; }
@@ -133,7 +123,6 @@
     .cluster-price { font-size: 15px; font-weight: bold; }
     .cluster-gap-mini { font-size: 11px; color: var(--neon-green); }
 
-    /* CENTER FRAME */
     .main-matrix-view { display: flex; flex-direction: column; gap: 15px; overflow-y: auto; flex: 1; }
     .matrix-title-bar { display: flex; justify-content: space-between; align-items: center; background: var(--bg-card); border: 1px solid var(--border-glow); padding: 12px 15px; border-radius: 4px; }
     .matrix-title-bar h1 { font-size: 14px; color: var(--neon-blue); }
@@ -162,7 +151,6 @@
     .tail-node.low-alert { border-color: var(--neon-orange); color: var(--neon-orange); background: rgba(255, 149, 0, 0.08); }
     .tail-node.trigger-digit { border-color: var(--neon-blue); color: var(--neon-blue); background: rgba(0, 210, 255, 0.12); }
 
-    /* RIGHT PANEL */
     .deck-group { background: var(--bg-card); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; margin-bottom: 15px; }
     .deck-group:last-child { margin-bottom: 0; flex: 1; }
     
@@ -171,7 +159,6 @@
     .btn-disarm { background: var(--neon-red); color: #ffffff; margin-bottom: 0; }
     .btn-manual-over { background: var(--neon-green); color: #05070a; width: 48%; }
     .btn-manual-under { background: var(--neon-red); color: #ffffff; width: 48%; }
-    
     .btn-swap-profile { background: #19243a; color: var(--text-bright); border: 1px solid var(--border-glow); }
 
     .ledger-table { display: flex; flex-direction: column; gap: 10px; }
@@ -179,19 +166,16 @@
     .ledger-lbl { color: var(--text-dim); }
     .ledger-val { font-weight: bold; }
 
-    /* AUDIT PANEL & ALERTS */
     .audit-log-panel { height: 140px; background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 4px; margin-top: 15px; padding: 12px; display: flex; flex-direction: column; }
     .log-stream { background: #04060b; border: 1px solid #0d121c; flex: 1; border-radius: 2px; padding: 8px; overflow-y: auto; font-size: 11px; display: flex; flex-direction: column; }
     .log-entry { margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #131a26; display: flex; }
     .log-ts { color: var(--neon-blue); margin-right: 10px; flex-shrink: 0; }
     #lock-alert-banner { background: rgba(255,59,48,0.15); border: 1px solid var(--neon-red); color: var(--neon-red); padding: 12px; border-radius: 4px; font-size: 12px; font-weight: bold; display: none; margin-bottom: 15px; }
 
-    /* ==================== VIEW 2: INSTITUTIONAL ANALYTICS DECK ==================== */
     .analytics-layout { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; }
     .audit-filter-bar { background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; display: flex; justify-content: space-between; align-items: center; gap: 20px; }
     .filter-inputs-group { display: flex; align-items: center; gap: 12px; }
     .filter-inputs-group label { font-size: 11px; text-transform: uppercase; color: var(--text-dim); font-weight: bold; }
-    
     .input-date-field {
       background: var(--bg-card);
       border: 1px solid var(--border-glow);
@@ -234,7 +218,6 @@
     .chart-container-panel { background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; display: flex; flex-direction: column; }
     .chart-canvas-wrapper { flex: 1; position: relative; display: flex; justify-content: center; align-items: center; min-height: 0; }
 
-    /* ==================== SYSTEM CLOCK ==================== */
     #sys-clock {
       position: fixed;
       bottom: 15px;
@@ -270,9 +253,7 @@
           <span>Pipeline Cluster Array</span>
           <span style="color:var(--neon-green); font-size:9px;">● LIVE SCANNING</span>
         </div>
-        <div class="cluster-list" id="ui-cluster-list">
-          <!-- dynamically populated -->
-        </div>
+        <div class="cluster-list" id="ui-cluster-list"></div>
       </div>
 
       <div class="panel-block">
@@ -425,7 +406,6 @@
     </div>
   </div>
 
-  <!-- ==================== SYSTEM CLOCK HTML ==================== -->
   <div id="sys-clock"><span id="clock-display">00:00:00</span> EAT</div>
 
   <script>
@@ -503,7 +483,6 @@
     function renderOpsUI(state) {
       serverMode = state.tradingMode;
 
-      // Update Ledger
       document.getElementById('ui-ledger-mode').innerText = state.tradingMode.toUpperCase();
       document.getElementById('ui-ledger-bal').innerText = state.balance ? `$${parseFloat(state.balance).toFixed(2)} ${state.currency}` : 'Synchronizing...';
       const pnlEl = document.getElementById('ui-ledger-pnl');
@@ -511,7 +490,6 @@
       pnlEl.style.color = state.dailyPnl >= 0 ? 'var(--neon-green)' : 'var(--neon-red)';
       document.getElementById('ui-ledger-stake').innerText = `$${parseFloat(state.currentStake).toFixed(2)}`;
 
-      // Status & Lock
       const statusPill = document.getElementById('ui-sys-status');
       const alertBanner = document.getElementById('lock-alert-banner');
       if (state.locked) {
@@ -528,7 +506,6 @@
         alertBanner.style.display = "none";
       }
 
-      // Rebuild Left Sidebar – show ALL markets
       const clusterBox = document.getElementById('ui-cluster-list');
       clusterBox.innerHTML = '';
       for (const sym in MARKETS_CFG) {
@@ -552,7 +529,6 @@
         `;
       }
 
-      // Central Analytics for focused market
       const currentMetric = state.marketMetrics && state.marketMetrics[currentFocus] ? state.marketMetrics[currentFocus] : null;
       document.getElementById('ui-focused-title').innerText = `Active Focus Cluster Array: ${MARKETS_CFG[currentFocus]}`;
       
@@ -597,7 +573,6 @@
           tailBox.innerHTML += `<span class="tail-node ${extraClass}">${t}</span>`;
         });
       } else {
-        // No metric yet – show placeholders
         document.getElementById('ui-gap-score').innerText = '—';
         document.getElementById('ui-density-pct').innerText = '0%';
         document.getElementById('ui-density-fill').style.width = '0%';
@@ -610,7 +585,7 @@
     }
 
     // =========================================================================
-    // 2. SPA VIEW & INSTITUTIONAL ANALYTICS ENGINE (UPDATED)
+    // 2. SPA VIEW & INSTITUTIONAL ANALYTICS ENGINE (FIXED)
     // =========================================================================
     function changeSpaView(target) {
       document.getElementById('view-ops').classList.remove('active-view');
@@ -638,17 +613,25 @@
       const ctxPie = document.getElementById('chart-pie-winloss').getContext('2d');
       activeCharts.winLoss = new Chart(ctxPie, { type: 'pie', data: { labels: ['Wins', 'Losses'], datasets: [{ data: [0, 0], backgroundColor: ['#00ff88', '#ff3b30'], borderColor: '#101524', borderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: darkThemeText, font: { family: 'Consolas' } } } } } });
 
+      // Use full asset names as labels (matching database exactly)
+      const assetLabels = ['Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index', 'Volatility 75 Index', 'Volatility 100 Index'];
+      const assetColors = ['#00d2ff', '#ff9500', '#94a3b8', '#00ff88', '#a855f7'];
       const ctxDonut = document.getElementById('chart-donut-assets').getContext('2d');
-      activeCharts.assets = new Chart(ctxDonut, { type: 'doughnut', data: { labels: ['V10', 'V25', 'V50', 'V75', 'V100'], datasets: [{ data: [0, 0, 0, 0, 0], backgroundColor: ['#00d2ff', '#ff9500', '#94a3b8', '#00ff88', '#a855f7'], borderColor: '#101524', borderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: darkThemeText, font: { family: 'Consolas' } } } } } });
+      activeCharts.assets = new Chart(ctxDonut, { type: 'doughnut', data: { labels: assetLabels, datasets: [{ data: [0, 0, 0, 0, 0], backgroundColor: assetColors, borderColor: '#101524', borderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: darkThemeText, font: { family: 'Consolas' } } } } } });
 
       const ctxLine = document.getElementById('chart-line-equity').getContext('2d');
-      activeCharts.equity = new Chart(ctxLine, { type: 'line', data: { labels: [], datasets: [{ label: 'Liquidity Scale ($)', data: [0], borderColor: '#00d2ff', backgroundColor: 'rgba(0, 210, 255, 0.03)', fill: true, tension: 0.15, borderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText } }, y: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText } } }, plugins: { legend: { display: false } } } });
+      activeCharts.equity = new Chart(ctxLine, { type: 'line', data: { labels: [], datasets: [{ label: 'Cumulative P&L ($)', data: [0], borderColor: '#00d2ff', backgroundColor: 'rgba(0, 210, 255, 0.03)', fill: true, tension: 0.15, borderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText } }, y: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText } } }, plugins: { legend: { display: false } } } });
     }
 
     function computeFromRawData(rawData) {
       let wins = 0, losses = 0, grossProfit = 0, grossLoss = 0;
       const assetMap = {};
-      const sortedTrades = rawData.slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      // Sort trades by created_at (handle timezone correctly)
+      const sortedTrades = rawData.slice().sort((a, b) => {
+        const da = new Date(a.created_at);
+        const db = new Date(b.created_at);
+        return da - db;
+      });
       const equityCurve = [];
       let cumProfit = 0;
       sortedTrades.forEach(t => {
@@ -658,21 +641,23 @@
         if (pnl > 0) { wins++; grossProfit += pnl; }
         else if (pnl < 0) { losses++; grossLoss += Math.abs(pnl); }
         const asset = t.asset || 'Unknown';
+        // Accumulate profit per asset (use full name as key)
         assetMap[asset] = (assetMap[asset] || 0) + pnl;
       });
-      const assetLabels = ['V10', 'V25', 'V50', 'V75', 'V100'];
-      const assetData = assetLabels.map(label => {
-        const found = Object.keys(assetMap).find(k => k.includes(label));
-        return found ? assetMap[found] : 0;
-      });
-      if (wins + losses === 0) {
-        wins = 0; losses = 0;
-        equityCurve.length = 0; equityCurve.push(0);
-        assetData.fill(0);
+      
+      // Build asset data array using full names
+      const assetFullNames = ['Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index', 'Volatility 75 Index', 'Volatility 100 Index'];
+      const assetData = assetFullNames.map(name => assetMap[name] || 0);
+      
+      // Ensure at least one point in equity curve even if empty
+      if (equityCurve.length === 0) {
+        equityCurve.push(0);
       }
+      
       const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? Infinity : 0);
       const totalTrades = wins + losses;
       const strikeRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
+      
       return { wins, losses, profitFactor, strikeRate, assetData, equityCurve };
     }
 
