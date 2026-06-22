@@ -15,31 +15,34 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 const STATE_FILE = '/var/data/deriv_multimarket_state.json';
 
-// ---------- SCHEDULED RESTART (03:00 East African Time) ----------
+// ---------- SCHEDULED RESTART (03:00 East African Time = 00:00 UTC) ----------
 function scheduleRestart() {
-  const now = new Date();
-  // Get current time in East Africa (UTC+3)
-  const eatOffset = 3 * 60 * 60 * 1000; // 3 hours in ms
-  const nowEAT = new Date(now.getTime() + eatOffset);
-  
-  // Create a date for today's 03:00 EAT
-  const nextRestart = new Date(nowEAT);
-  nextRestart.setHours(3, 0, 0, 0);
-  
-  // If 03:00 has already passed today, schedule for tomorrow
-  if (nowEAT > nextRestart) {
-    nextRestart.setDate(nextRestart.getDate() + 1);
+  const now = Date.now();
+  const nextMidnightUTC = new Date(now);
+  nextMidnightUTC.setUTCHours(0, 0, 0, 0);
+  // If it's already past midnight, schedule for tomorrow
+  if (nextMidnightUTC.getTime() < now) {
+    nextMidnightUTC.setUTCDate(nextMidnightUTC.getUTCDate() + 1);
   }
-  
-  // Convert back to UTC milliseconds for setTimeout
-  const delay = nextRestart.getTime() - now.getTime();
-  
+  const delay = nextMidnightUTC.getTime() - now;
+
+  console.log(`⏰ Next restart scheduled at ${nextMidnightUTC.toISOString()} (03:00 EAT)`);
   setTimeout(() => {
-    console.log('🔄 Scheduled restart at 03:00 EAT. Restarting...');
+    console.log('🔄 Scheduled restart at 03:00 EAT. Resetting daily state and restarting...');
+    // Reset daily state before exit
+    state.dailyPnl = 0;
+    state.locked = false;
+    state.lockReason = '';
+    // Also reset dailyStartBalance to current balance (if available)
+    if (state.balance !== null) {
+      state.dailyStartBalance = state.balance;
+    }
+    saveState(); // Overwrite state file with clean daily state
     process.exit(0);
   }, delay);
 }
-// Schedule the first restart and re‑schedule every time it fires (but process exits, so only once)
+
+// Schedule on startup
 scheduleRestart();
 
 // --- DATABASE HEALTH CHECK ---
@@ -60,7 +63,7 @@ async function checkDatabaseConnection() {
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
-// ---------- ANALYTICS API (with preset handling & full metrics) ----------
+// ---------- ANALYTICS API ----------
 app.get('/api/ledger/analytics', async (req, res) => {
   const { start, end, mode } = req.query;
 
@@ -104,7 +107,6 @@ app.get('/api/ledger/analytics', async (req, res) => {
     endDate = now.toISOString();
   }
 
-  // If still no valid dates, return error
   if (!startDate || !endDate) {
     return res.status(400).json({ error: 'Invalid date range. Please provide start and end dates.' });
   }
@@ -124,7 +126,6 @@ app.get('/api/ledger/analytics', async (req, res) => {
     const wins = data.filter(t => t.is_win).length;
     const strikeRate = totalTrades > 0 ? ((wins / totalTrades) * 100).toFixed(1) : 0;
 
-    // Profit factor
     let grossProfit = 0, grossLoss = 0;
     data.forEach(t => {
       const pnl = t.profit_loss || 0;
@@ -133,7 +134,6 @@ app.get('/api/ledger/analytics', async (req, res) => {
     });
     const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? Infinity : 0);
 
-    // Peak drawdown from equity curve
     const sorted = data.slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     let peak = 0, maxDrawdown = 0, cum = 0;
     sorted.forEach(t => {
@@ -183,7 +183,6 @@ app.get('/api/logs', (req, res) => {
   const client = res;
   sseClients.add(client);
 
-  // Send initial state and logs immediately
   client.write(`data: ${JSON.stringify({ state: sanitizeState(), logs: state.logs.slice(0, 50) })}\n\n`);
 
   req.on('close', () => {
@@ -216,7 +215,7 @@ app.post('/api/control', (req, res) => {
       return res.status(400).json({ error: 'Invalid mode. Use "demo" or "real".' });
     }
     state.tradingMode = mode;
-    state.active = false; // disarm when switching
+    state.active = false;
     addLog(`🔄 Switching to ${mode.toUpperCase()} account. Reconnecting...`);
     disconnectDeriv();
     setTimeout(connectDeriv, 1000);
@@ -378,6 +377,12 @@ function loadState() {
         state.dailyPnl = saved.dailyPnl || 0;
         state.locked = saved.locked || false;
         state.lockReason = saved.lockReason || '';
+      } else {
+        // New day – reset daily values
+        state.dailyPnl = 0;
+        state.locked = false;
+        state.lockReason = '';
+        state.dailyStartBalance = null; // will be set on connect
       }
     }
   } catch(e) {}
@@ -541,7 +546,6 @@ async function connectDeriv() {
     state.currency = targetAccount.currency || 'USD';
     if (state.dailyStartBalance === null) state.dailyStartBalance = state.balance;
 
-    // Push initial balance to UI
     broadcastSSE({ state: sanitizeState() });
 
     const otpRes = await fetch(`https://api.derivws.com/trading/v1/options/accounts/${targetAccount.account_id}/otp`, {
