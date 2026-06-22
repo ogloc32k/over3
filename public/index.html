@@ -619,8 +619,45 @@
       const ctxDonut = document.getElementById('chart-donut-assets').getContext('2d');
       activeCharts.assets = new Chart(ctxDonut, { type: 'doughnut', data: { labels: assetLabels, datasets: [{ data: [0, 0, 0, 0, 0], backgroundColor: assetColors, borderColor: '#101524', borderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: darkThemeText, font: { family: 'Consolas' } } } } } });
 
+      // ---------- EQUITY CURVE (UPDATED TO MATCH PROTOTYPE) ----------
       const ctxLine = document.getElementById('chart-line-equity').getContext('2d');
-      activeCharts.equity = new Chart(ctxLine, { type: 'line', data: { labels: [], datasets: [{ label: 'Cumulative P&L ($)', data: [0], borderColor: '#00d2ff', backgroundColor: 'rgba(0, 210, 255, 0.03)', fill: true, tension: 0.15, borderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText } }, y: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText } } }, plugins: { legend: { display: false } } } });
+      activeCharts.equity = new Chart(ctxLine, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [{
+            label: 'Cumulative P&L ($)',
+            data: [0],
+            borderColor: '#00ff88',        // bright neon green
+            backgroundColor: 'transparent', // no fill
+            borderWidth: 4,                 // thick line
+            pointRadius: 4,                // visible points
+            pointBackgroundColor: '#00ff88',
+            pointBorderColor: '#ffffff',
+            pointBorderWidth: 1,
+            tension: 0.3,                 // smooth curve
+            showLine: true,
+            fill: false
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              grid: { color: gridBorderColor },
+              ticks: { color: darkThemeText }
+            },
+            y: {
+              grid: { color: gridBorderColor },
+              ticks: { color: darkThemeText }
+            }
+          },
+          plugins: {
+            legend: { display: false }
+          }
+        }
+      });
     }
 
     function computeFromRawData(rawData) {
