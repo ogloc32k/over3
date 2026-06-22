@@ -223,6 +223,33 @@ const MARKETS = {
 };
 const BUFFER_CAPACITY = 1000;
 
+// ---------- NEW STRATEGY PARAMETERS ----------
+const FAST_W = 20;
+const SLOW_W = 100;
+const MIN_TREND = 0.5;
+const MIN_GAP = 12;
+const MAX_LAST_LONG = 4;   // for over 3
+const MIN_LAST_SHORT = 6;  // for under 6 (barrier = 6)
+const MAX_STD = 3.5;
+const MIN_TRIGGER_INTERVAL = 5000; // 5 seconds
+
+// Helper: compute average of last N elements
+function avgLast(arr, n) {
+  if (arr.length < n) return 0;
+  const slice = arr.slice(-n);
+  return slice.reduce((a, b) => a + b, 0) / n;
+}
+
+// Helper: compute standard deviation of last N elements
+function stdLast(arr, n) {
+  if (arr.length < n) return 0;
+  const slice = arr.slice(-n);
+  const mean = slice.reduce((a, b) => a + b, 0) / n;
+  const squaredDiffs = slice.map(x => (x - mean) ** 2);
+  return Math.sqrt(squaredDiffs.reduce((a, b) => a + b, 0) / n);
+}
+
+// ---------- Pipeline Class (unchanged, but we'll use its buffers) ----------
 class MultiMarketPipeline {
   constructor() {
     this.buffers = {};
@@ -301,7 +328,7 @@ class MultiMarketPipeline {
       last3,
       totalGap,
       filtersValidated,
-      triggerFired: filtersValidated && sequencePassed
+      triggerFired: filtersValidated && sequencePassed  // kept for backward compatibility
     };
   }
 }
@@ -324,7 +351,7 @@ const state = {
   cooldownTicksLeft: 0,
   marketMetrics: {},
   logs: [],
-  lastTriggerTime: 0  // <-- added for double-trade prevention
+  lastTriggerTime: 0
 };
 
 function sanitizeState() {
@@ -436,7 +463,11 @@ function settleRealTrade() {
   broadcastSSE({ state: sanitizeState() });
 }
 
+// =====================================================================
+// NEW ENTRY LOGIC (Trend + Bias)
+// =====================================================================
 function processLiveFeed(symbol, price) {
+  // 1. Settle pending trade if any
   if (state.settleTicksRemaining > 0) {
     state.settleTicksRemaining--;
     if (state.settleTicksRemaining === 0) {
@@ -449,63 +480,103 @@ function processLiveFeed(symbol, price) {
     return;
   }
 
+  // 2. Feed the engine (this updates buffers and analysis)
   const analysis = engine.feed(symbol, price);
   if (!analysis) return;
 
   state.marketMetrics[symbol] = analysis;
   if (state.cooldownTicksLeft > 0) state.cooldownTicksLeft--;
 
-  if (state.active && !state.locked && !state.tradeInProgress && state.cooldownTicksLeft === 0) {
-    // Prevent double triggers within 5 seconds
-    const now = Date.now();
-    if (now - state.lastTriggerTime < 5000) {
-      return;
+  // 3. Check if we can trade (armed, not locked, not already in trade, cooldown done)
+  if (!state.active || state.locked || state.tradeInProgress || state.cooldownTicksLeft > 0) {
+    broadcastSSE({ state: sanitizeState() });
+    return;
+  }
+
+  // 4. Prevent duplicate triggers within 5 seconds
+  const now = Date.now();
+  if (now - state.lastTriggerTime < MIN_TRIGGER_INTERVAL) {
+    broadcastSSE({ state: sanitizeState() });
+    return;
+  }
+
+  // 5. Evaluate each market
+  let bestCandidate = null;
+  let bestScore = -Infinity;
+
+  for (const sym in MARKETS) {
+    const buffer = engine.buffers[sym];
+    if (buffer.length < SLOW_W) continue;
+
+    const fastAvg = avgLast(buffer, FAST_W);
+    const slowAvg = avgLast(buffer, SLOW_W);
+    const trend = fastAvg - slowAvg;
+    const std = stdLast(buffer, FAST_W);
+    const lastDigit = buffer[buffer.length - 1];
+    const gap = state.marketMetrics[sym]?.totalGap || 0;
+
+    // LONG condition: trend > MIN_TREND, gap > MIN_GAP, last <= MAX_LAST_LONG, std < MAX_STD
+    if (trend > MIN_TREND && gap > MIN_GAP && lastDigit <= MAX_LAST_LONG && std < MAX_STD) {
+      const score = trend + gap / 10; // combine
+      if (score > bestScore) {
+        bestScore = score;
+        bestCandidate = { symbol: sym, direction: 'OVER', barrier: 3, trend, gap, lastDigit, std };
+      }
     }
 
-    let triggeringMarkets = [];
-    for (const key in MARKETS) {
-      const mAnalysis = state.marketMetrics[key];
-      if (mAnalysis && mAnalysis.triggerFired) triggeringMarkets.push(mAnalysis);
-    }
-
-    if (triggeringMarkets.length > 0) {
-      triggeringMarkets.sort((a, b) => b.totalGap - a.totalGap);
-      const topMarket = triggeringMarkets[0];
-
-      state.tradeInProgress = true;
-      const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
-      state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
-
-      addLog(`🔥 Trigger Fired on Top-Ranked Asset: ${topMarket.symbol} | Gap Score: ${topMarket.totalGap.toFixed(1)}% | Sequence: [${topMarket.last3.join(',')}]`);
-
-      state.activeRealTrade = {
-        symbol: topMarket.symbol,
-        stake: state.currentStake,
-        balanceBefore: state.balance,
-        contractType: "DIGITOVER",
-        barrier: 3
-      };
-
-      addLog(`🔥 Trigger Fired: ${topMarket.symbol}. Requesting proposal...`);
-      state.lastTriggerTime = now;  // record trigger time
-
-      send({
-        proposal: 1,
-        amount: state.currentStake,
-        basis: 'stake',
-        contract_type: "DIGITOVER",
-        currency: state.currency || 'USD',
-        duration: 1,
-        duration_unit: 't',
-        underlying_symbol: topMarket.symbol,
-        barrier: 3,
-        req_id: ++reqId
-      });
+    // SHORT condition: trend < -MIN_TREND, gap < -MIN_GAP, last >= MIN_LAST_SHORT, std < MAX_STD
+    if (trend < -MIN_TREND && gap < -MIN_GAP && lastDigit >= MIN_LAST_SHORT && std < MAX_STD) {
+      const score = -trend + (-gap) / 10;
+      if (score > bestScore) {
+        bestScore = score;
+        bestCandidate = { symbol: sym, direction: 'UNDER', barrier: 6, trend, gap, lastDigit, std };
+      }
     }
   }
+
+  // 6. If we have a candidate, execute the trade
+  if (bestCandidate) {
+    const { symbol, direction, barrier, trend, gap, lastDigit, std } = bestCandidate;
+
+    // Set trade in progress
+    state.tradeInProgress = true;
+    const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
+    state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
+
+    const contractType = direction === 'OVER' ? 'DIGITOVER' : 'DIGITUNDER';
+    addLog(`🔥 ${direction} Signal: ${symbol} | Trend: ${trend.toFixed(2)} | Gap: ${gap.toFixed(1)} | Last: ${lastDigit} | Std: ${std.toFixed(2)}`);
+
+    state.activeRealTrade = {
+      symbol,
+      stake: state.currentStake,
+      balanceBefore: state.balance,
+      contractType: contractType,
+      barrier: barrier,
+      direction: direction
+    };
+
+    state.lastTriggerTime = now;
+
+    // Send proposal
+    addLog(`📤 Requesting proposal for ${symbol} ${direction} with barrier ${barrier}...`);
+    send({
+      proposal: 1,
+      amount: state.currentStake,
+      basis: 'stake',
+      contract_type: contractType,
+      currency: state.currency || 'USD',
+      duration: 1,
+      duration_unit: 't',
+      underlying_symbol: symbol,
+      barrier: barrier,
+      req_id: ++reqId
+    });
+  }
+
   broadcastSSE({ state: sanitizeState() });
 }
 
+// ------------------ WEBSOCKET CONNECTION (unchanged) ------------------
 let derivWs = null;
 let reqId = 0;
 let keepAliveLoop = null;
@@ -627,7 +698,7 @@ function handleMessage(msg) {
   }
 }
 
-// ------------------ MANUAL TRADING PAYLOAD ------------------ //
+// ------------------ MANUAL TRADING PAYLOAD (UPDATED BARRIER FOR UNDER) ------------------ //
 app.post('/api/manual-trade', (req, res) => {
   const { symbol, contractType } = req.body;
 
@@ -642,28 +713,43 @@ app.post('/api/manual-trade', (req, res) => {
   state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
   state.tradeInProgress = true;
+  
+  // Determine barrier and contract type
+  let barrier;
+  let contractTypeApi;
+  if (contractType === 'OVER') {
+    barrier = 3;
+    contractTypeApi = 'DIGITOVER';
+  } else if (contractType === 'UNDER') {
+    barrier = 6;   // <-- Under 6
+    contractTypeApi = 'DIGITUNDER';
+  } else {
+    return res.status(400).json({ error: 'Invalid contract type. Use "OVER" or "UNDER".' });
+  }
+
   state.activeRealTrade = {
     symbol,
     stake: state.currentStake,
     balanceBefore: state.balance,
-    contractType: contractType === 'OVER' ? 'DIGITOVER' : 'DIGITUNDER',
-    barrier: 3
+    contractType: contractTypeApi,
+    barrier: barrier,
+    direction: contractType
   };
 
   send({
     proposal: 1,
     amount: state.currentStake,
     basis: 'stake',
-    contract_type: state.activeRealTrade.contractType,
+    contract_type: contractTypeApi,
     currency: state.currency || 'USD',
     duration: 1,
     duration_unit: 't',
     underlying_symbol: symbol,
-    barrier: 3,
+    barrier: barrier,
     req_id: ++reqId
   });
 
-  addLog(`Requesting proposal for ${symbol}...`);
+  addLog(`📤 Manual ${contractType} request for ${symbol} with barrier ${barrier}...`);
   res.json({ success: true, message: 'Proposal requested' });
 });
 
