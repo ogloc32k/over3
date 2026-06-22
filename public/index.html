@@ -619,7 +619,7 @@
       const ctxDonut = document.getElementById('chart-donut-assets').getContext('2d');
       activeCharts.assets = new Chart(ctxDonut, { type: 'doughnut', data: { labels: assetLabels, datasets: [{ data: [0, 0, 0, 0, 0], backgroundColor: assetColors, borderColor: '#101524', borderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: darkThemeText, font: { family: 'Consolas' } } } } } });
 
-      // ---------- EQUITY CURVE (UPDATED TO MATCH PROTOTYPE) ----------
+      // ---------- EQUITY CURVE ----------
       const ctxLine = document.getElementById('chart-line-equity').getContext('2d');
       activeCharts.equity = new Chart(ctxLine, {
         type: 'line',
@@ -628,14 +628,14 @@
           datasets: [{
             label: 'Cumulative P&L ($)',
             data: [0],
-            borderColor: '#00ff88',        // bright neon green
-            backgroundColor: 'transparent', // no fill
-            borderWidth: 4,                 // thick line
-            pointRadius: 4,                // visible points
+            borderColor: '#00ff88',
+            backgroundColor: 'transparent',
+            borderWidth: 4,
+            pointRadius: 4,
             pointBackgroundColor: '#00ff88',
             pointBorderColor: '#ffffff',
             pointBorderWidth: 1,
-            tension: 0.3,                 // smooth curve
+            tension: 0.3,
             showLine: true,
             fill: false
           }]
@@ -663,7 +663,6 @@
     function computeFromRawData(rawData) {
       let wins = 0, losses = 0, grossProfit = 0, grossLoss = 0;
       const assetMap = {};
-      // Sort trades by created_at (handle timezone correctly)
       const sortedTrades = rawData.slice().sort((a, b) => {
         const da = new Date(a.created_at);
         const db = new Date(b.created_at);
@@ -678,15 +677,12 @@
         if (pnl > 0) { wins++; grossProfit += pnl; }
         else if (pnl < 0) { losses++; grossLoss += Math.abs(pnl); }
         const asset = t.asset || 'Unknown';
-        // Accumulate profit per asset (use full name as key)
         assetMap[asset] = (assetMap[asset] || 0) + pnl;
       });
       
-      // Build asset data array using full names
       const assetFullNames = ['Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index', 'Volatility 75 Index', 'Volatility 100 Index'];
       const assetData = assetFullNames.map(name => assetMap[name] || 0);
       
-      // Ensure at least one point in equity curve even if empty
       if (equityCurve.length === 0) {
         equityCurve.push(0);
       }
@@ -772,21 +768,47 @@
       } catch (err) { console.error("Filter Error:", err); }
     }
 
+    // =========================================================================
+    // FIXED updateUIElements – replaces entire dataset to force line rendering
+    // =========================================================================
     function updateUIElements(metrics, chartData, customLineLabels) {
       document.getElementById('meta-net-profit').innerText = metrics.profit;
       document.getElementById('meta-profit-factor').innerText = metrics.pf;
       document.getElementById('meta-strike-rate').innerText = metrics.strike;
       document.getElementById('meta-drawdown').innerText = metrics.drawdown;
 
+      // Update pie chart
       activeCharts.winLoss.data.datasets[0].data = chartData.winLoss;
+      activeCharts.winLoss.update('none');
+
+      // Update donut chart
       activeCharts.assets.data.datasets[0].data = chartData.assets;
-      activeCharts.equity.data.datasets[0].data = chartData.equity;
-      
-      if (customLineLabels) activeCharts.equity.data.labels = customLineLabels;
-      
-      activeCharts.winLoss.update();
-      activeCharts.assets.update();
-      activeCharts.equity.update();
+      activeCharts.assets.update('none');
+
+      // ---------- FIX: Update equity line chart ----------
+      const equityData = chartData.equity;
+      // Generate labels if not provided (e.g., T1, T2, ...)
+      const labels = customLineLabels || equityData.map((_, i) => `T${i+1}`);
+
+      // Replace the entire dataset to force a re-render
+      activeCharts.equity.data.labels = labels;
+      activeCharts.equity.data.datasets[0] = {
+        label: 'Cumulative P&L ($)',
+        data: equityData,
+        borderColor: '#00ff88',
+        backgroundColor: 'transparent',
+        borderWidth: 4,
+        pointRadius: 4,
+        pointBackgroundColor: '#00ff88',
+        pointBorderColor: '#ffffff',
+        pointBorderWidth: 1,
+        tension: 0.3,
+        showLine: true,
+        fill: false
+      };
+
+      // Force immediate redraw without animation
+      activeCharts.equity.update('none');
     }
 
     // =========================================================================
