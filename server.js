@@ -20,29 +20,23 @@ function scheduleRestart() {
   const now = Date.now();
   const nextMidnightUTC = new Date(now);
   nextMidnightUTC.setUTCHours(0, 0, 0, 0);
-  // If it's already past midnight, schedule for tomorrow
   if (nextMidnightUTC.getTime() < now) {
     nextMidnightUTC.setUTCDate(nextMidnightUTC.getUTCDate() + 1);
   }
   const delay = nextMidnightUTC.getTime() - now;
-
   console.log(`⏰ Next restart scheduled at ${nextMidnightUTC.toISOString()} (03:00 EAT)`);
   setTimeout(() => {
     console.log('🔄 Scheduled restart at 03:00 EAT. Resetting daily state and restarting...');
-    // Reset daily state before exit
     state.dailyPnl = 0;
     state.locked = false;
     state.lockReason = '';
-    // Also reset dailyStartBalance to current balance (if available)
     if (state.balance !== null) {
       state.dailyStartBalance = state.balance;
     }
-    saveState(); // Overwrite state file with clean daily state
+    saveState();
     process.exit(0);
   }, delay);
 }
-
-// Schedule on startup
 scheduleRestart();
 
 // --- DATABASE HEALTH CHECK ---
@@ -67,7 +61,6 @@ app.use(express.json());
 app.get('/api/ledger/analytics', async (req, res) => {
   const { start, end, mode } = req.query;
 
-  // 1. SESSION / REAL-TIME PULL
   if (mode === 'session') {
     const settlements = state.logs ? state.logs.filter(l => l.message.includes('Settlement')) : [];
     const wins = settlements.filter(l => l.message.includes('WIN')).length;
@@ -80,11 +73,8 @@ app.get('/api/ledger/analytics', async (req, res) => {
     });
   }
 
-  // 2. PRESET MODES → compute date range
-  let startDate = start;
-  let endDate = end;
+  let startDate = start, endDate = end;
   const now = new Date();
-
   if (mode === 'hour') {
     const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
     startDate = oneHourAgo.toISOString();
@@ -111,7 +101,6 @@ app.get('/api/ledger/analytics', async (req, res) => {
     return res.status(400).json({ error: 'Invalid date range. Please provide start and end dates.' });
   }
 
-  // 3. HISTORICAL / DATABASE PULL
   try {
     const { data, error } = await supabase
       .from('trading_ledger')
@@ -182,7 +171,6 @@ app.get('/api/logs', (req, res) => {
 
   const client = res;
   sseClients.add(client);
-
   client.write(`data: ${JSON.stringify({ state: sanitizeState(), logs: state.logs.slice(0, 50) })}\n\n`);
 
   req.on('close', () => {
@@ -335,7 +323,8 @@ const state = {
   currentStake: 0.35,
   cooldownTicksLeft: 0,
   marketMetrics: {},
-  logs: []
+  logs: [],
+  lastTriggerTime: 0  // <-- added for double-trade prevention
 };
 
 function sanitizeState() {
@@ -378,11 +367,10 @@ function loadState() {
         state.locked = saved.locked || false;
         state.lockReason = saved.lockReason || '';
       } else {
-        // New day – reset daily values
         state.dailyPnl = 0;
         state.locked = false;
         state.lockReason = '';
-        state.dailyStartBalance = null; // will be set on connect
+        state.dailyStartBalance = null;
       }
     }
   } catch(e) {}
@@ -468,6 +456,12 @@ function processLiveFeed(symbol, price) {
   if (state.cooldownTicksLeft > 0) state.cooldownTicksLeft--;
 
   if (state.active && !state.locked && !state.tradeInProgress && state.cooldownTicksLeft === 0) {
+    // Prevent double triggers within 5 seconds
+    const now = Date.now();
+    if (now - state.lastTriggerTime < 5000) {
+      return;
+    }
+
     let triggeringMarkets = [];
     for (const key in MARKETS) {
       const mAnalysis = state.marketMetrics[key];
@@ -493,6 +487,7 @@ function processLiveFeed(symbol, price) {
       };
 
       addLog(`🔥 Trigger Fired: ${topMarket.symbol}. Requesting proposal...`);
+      state.lastTriggerTime = now;  // record trigger time
 
       send({
         proposal: 1,
