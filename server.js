@@ -364,7 +364,7 @@ const TP_PERCENT = 2;
 const SL_PERCENT = 4;
 const MIN_STAKE = 0.35;
 const COOLDOWN_TICKS = 1;
-const SETTLE_TICKS = 3;
+const SETTLE_TICKS = 5;  // <--- Changed from 3 to 5
 
 function saveState() {
   try {
@@ -431,6 +431,7 @@ function settleRealTrade() {
     return;
   }
 
+  // Compute profit/loss from balance difference
   const profit = state.balance - state.activeRealTrade.balanceBefore;
   state.dailyPnl += profit;
 
