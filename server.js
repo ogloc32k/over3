@@ -15,7 +15,7 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 const STATE_FILE = '/var/data/deriv_multimarket_state.json';
 
-// ---------- SCHEDULED RESTART (03:00 East African Time = 00:00 UTC) ----------
+// ---------- SCHEDULED RESTART (03:00 East African Time) ----------
 function scheduleRestart() {
   const now = Date.now();
   const nextMidnightUTC = new Date(now);
@@ -223,15 +223,20 @@ const MARKETS = {
 };
 const BUFFER_CAPACITY = 1000;
 
-// ---------- NEW STRATEGY PARAMETERS ----------
-const FAST_W = 20;
+// ---------- UPDATED STRATEGY PARAMETERS (tighter) ----------
+const FAST_W = 30;
 const SLOW_W = 100;
-const MIN_TREND = 0.5;
-const MIN_GAP = 12;
-const MAX_LAST_LONG = 4;   // for over 3
-const MIN_LAST_SHORT = 6;  // for under 6 (barrier = 6)
-const MAX_STD = 3.5;
-const MIN_TRIGGER_INTERVAL = 5000; // 5 seconds
+const MIN_TREND = 1.0;          // stronger momentum
+const MIN_GAP = 15;             // clearer bias
+const MAX_LAST_LONG = 4;        // for over 3
+const MIN_LAST_SHORT = 6;       // for under 6
+const MAX_STD = 2.8;            // avoid high volatility
+const MIN_TRIGGER_INTERVAL = 30000; // 30 seconds between automated trades
+
+// Additional: track consecutive losses
+let consecutiveLosses = 0;
+const MAX_CONSECUTIVE_LOSSES = 2;
+const LOSS_COOLDOWN_MS = 120000; // 2 minutes after 2 losses
 
 // Helper: compute average of last N elements
 function avgLast(arr, n) {
@@ -249,7 +254,19 @@ function stdLast(arr, n) {
   return Math.sqrt(squaredDiffs.reduce((a, b) => a + b, 0) / n);
 }
 
-// ---------- Pipeline Class (unchanged, but we'll use its buffers) ----------
+// Helper: check if the last M digits have a consistent slope
+function hasSlope(arr, n, positive) {
+  if (arr.length < n) return false;
+  const recent = arr.slice(-n);
+  let sum = 0;
+  for (let i = 1; i < recent.length; i++) {
+    sum += (recent[i] - recent[i-1]);
+  }
+  const avgSlope = sum / (recent.length - 1);
+  return positive ? avgSlope > 0.5 : avgSlope < -0.5;
+}
+
+// ---------- Pipeline Class ----------
 class MultiMarketPipeline {
   constructor() {
     this.buffers = {};
@@ -286,15 +303,6 @@ class MultiMarketPipeline {
     ticks.forEach(d => freq[d]++);
 
     const pcts = freq.map(count => (count / BUFFER_CAPACITY) * 100);
-    const rule2Passed = (pcts[0] < 10.0) && (pcts[1] < 10.5) && (pcts[2] < 10.5) && (pcts[3] < 10.5);
-
-    let greenCircle = 0;
-    let maxCount = -1;
-    for (let i = 0; i <= 9; i++) {
-      if (freq[i] >= maxCount) { maxCount = freq[i]; greenCircle = i; }
-    }
-    const rule3Passed = (greenCircle === 7 || greenCircle === 8 || greenCircle === 9) && (pcts[greenCircle] >= 11.5);
-
     const over0 = (ticks.filter(d => d > 0).length / BUFFER_CAPACITY) * 100;
     const under9 = (ticks.filter(d => d < 9).length / BUFFER_CAPACITY) * 100;
     const over1 = (ticks.filter(d => d > 1).length / BUFFER_CAPACITY) * 100;
@@ -306,29 +314,22 @@ class MultiMarketPipeline {
     const over4 = (ticks.filter(d => d > 4).length / BUFFER_CAPACITY) * 100;
     const under5 = (ticks.filter(d => d < 5).length / BUFFER_CAPACITY) * 100;
 
-    const biasPassed = (over0 > under9) && (over1 > under8) && (over2 > under7) && (over3 > under6) && (over4 > under5);
     const totalGap = (over0 - under9) + (over1 - under8) + (over2 - under7) + (over3 - under6) + (over4 - under5);
 
+    // For backward compatibility (not used in new logic)
+    const greenCircle = 0;
+    const densityOver3 = Math.round((ticks.filter(d => d > 3).length / BUFFER_CAPACITY) * 100);
     const last3 = ticks.slice(-3);
-    let sequencePassed = false;
-    if (last3.length === 3) {
-      const allowed = [0, 2, 3];
-      if (allowed.includes(last3[0]) && allowed.includes(last3[1]) && last3[2] === 1) {
-        sequencePassed = true;
-      }
-    }
-
-    const filtersValidated = rule2Passed && rule3Passed && biasPassed;
 
     return {
       symbol,
       pcts,
       greenCircle,
-      densityOver3: Math.round((ticks.filter(d => d > 3).length / BUFFER_CAPACITY) * 100),
+      densityOver3,
       last3,
       totalGap,
-      filtersValidated,
-      triggerFired: filtersValidated && sequencePassed  // kept for backward compatibility
+      filtersValidated: false,
+      triggerFired: false
     };
   }
 }
@@ -351,7 +352,8 @@ const state = {
   cooldownTicksLeft: 0,
   marketMetrics: {},
   logs: [],
-  lastTriggerTime: 0
+  lastTriggerTime: 0,
+  lossCooldownUntil: 0  // timestamp when we can trade again after losses
 };
 
 function sanitizeState() {
@@ -364,7 +366,7 @@ const TP_PERCENT = 2;
 const SL_PERCENT = 4;
 const MIN_STAKE = 0.35;
 const COOLDOWN_TICKS = 1;
-const SETTLE_TICKS = 5;  // <--- Changed from 3 to 5
+const SETTLE_TICKS = 5;
 
 function saveState() {
   try {
@@ -431,12 +433,22 @@ function settleRealTrade() {
     return;
   }
 
-  // Compute profit/loss from balance difference
   const profit = state.balance - state.activeRealTrade.balanceBefore;
   state.dailyPnl += profit;
 
   const isWin = profit >= 0;
   const grossPayout = isWin ? (state.activeRealTrade.stake + profit) : 0;
+
+  // Update consecutive losses
+  if (isWin) {
+    consecutiveLosses = 0;
+  } else {
+    consecutiveLosses++;
+    if (consecutiveLosses >= MAX_CONSECUTIVE_LOSSES) {
+      state.lossCooldownUntil = Date.now() + LOSS_COOLDOWN_MS;
+      addLog(`⏳ Two consecutive losses. Cooling down for ${LOSS_COOLDOWN_MS/60000} minutes.`);
+    }
+  }
 
   saveTradeToCloud({
     contract_id: state.activeRealTrade.contractId,
@@ -465,7 +477,7 @@ function settleRealTrade() {
 }
 
 // =====================================================================
-// NEW ENTRY LOGIC (Trend + Bias)
+// NEW ENTRY LOGIC (Trend + Bias + Slope confirmation)
 // =====================================================================
 function processLiveFeed(symbol, price) {
   // 1. Settle pending trade if any
@@ -494,14 +506,20 @@ function processLiveFeed(symbol, price) {
     return;
   }
 
-  // 4. Prevent duplicate triggers within 5 seconds
+  // 4. Check loss cooldown
   const now = Date.now();
+  if (now < state.lossCooldownUntil) {
+    broadcastSSE({ state: sanitizeState() });
+    return;
+  }
+
+  // 5. Prevent too frequent triggers
   if (now - state.lastTriggerTime < MIN_TRIGGER_INTERVAL) {
     broadcastSSE({ state: sanitizeState() });
     return;
   }
 
-  // 5. Evaluate each market
+  // 6. Evaluate each market
   let bestCandidate = null;
   let bestScore = -Infinity;
 
@@ -516,17 +534,17 @@ function processLiveFeed(symbol, price) {
     const lastDigit = buffer[buffer.length - 1];
     const gap = state.marketMetrics[sym]?.totalGap || 0;
 
-    // LONG condition: trend > MIN_TREND, gap > MIN_GAP, last <= MAX_LAST_LONG, std < MAX_STD
-    if (trend > MIN_TREND && gap > MIN_GAP && lastDigit <= MAX_LAST_LONG && std < MAX_STD) {
-      const score = trend + gap / 10; // combine
+    // LONG condition: trend > MIN_TREND, gap > MIN_GAP, last <= MAX_LAST_LONG, std < MAX_STD, and slope positive
+    if (trend > MIN_TREND && gap > MIN_GAP && lastDigit <= MAX_LAST_LONG && std < MAX_STD && hasSlope(buffer, 5, true)) {
+      const score = trend + gap / 10;
       if (score > bestScore) {
         bestScore = score;
         bestCandidate = { symbol: sym, direction: 'OVER', barrier: 3, trend, gap, lastDigit, std };
       }
     }
 
-    // SHORT condition: trend < -MIN_TREND, gap < -MIN_GAP, last >= MIN_LAST_SHORT, std < MAX_STD
-    if (trend < -MIN_TREND && gap < -MIN_GAP && lastDigit >= MIN_LAST_SHORT && std < MAX_STD) {
+    // SHORT condition: trend < -MIN_TREND, gap < -MIN_GAP, last >= MIN_LAST_SHORT, std < MAX_STD, and slope negative
+    if (trend < -MIN_TREND && gap < -MIN_GAP && lastDigit >= MIN_LAST_SHORT && std < MAX_STD && hasSlope(buffer, 5, false)) {
       const score = -trend + (-gap) / 10;
       if (score > bestScore) {
         bestScore = score;
@@ -535,11 +553,10 @@ function processLiveFeed(symbol, price) {
     }
   }
 
-  // 6. If we have a candidate, execute the trade
+  // 7. Execute if candidate found
   if (bestCandidate) {
     const { symbol, direction, barrier, trend, gap, lastDigit, std } = bestCandidate;
 
-    // Set trade in progress
     state.tradeInProgress = true;
     const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
     state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
@@ -551,14 +568,13 @@ function processLiveFeed(symbol, price) {
       symbol,
       stake: state.currentStake,
       balanceBefore: state.balance,
-      contractType: contractType,
-      barrier: barrier,
-      direction: direction
+      contractType,
+      barrier,
+      direction
     };
 
     state.lastTriggerTime = now;
 
-    // Send proposal
     addLog(`📤 Requesting proposal for ${symbol} ${direction} with barrier ${barrier}...`);
     send({
       proposal: 1,
@@ -699,7 +715,7 @@ function handleMessage(msg) {
   }
 }
 
-// ------------------ MANUAL TRADING PAYLOAD (UPDATED BARRIER FOR UNDER) ------------------ //
+// ------------------ MANUAL TRADING PAYLOAD ------------------ //
 app.post('/api/manual-trade', (req, res) => {
   const { symbol, contractType } = req.body;
 
@@ -715,14 +731,12 @@ app.post('/api/manual-trade', (req, res) => {
 
   state.tradeInProgress = true;
   
-  // Determine barrier and contract type
-  let barrier;
-  let contractTypeApi;
+  let barrier, contractTypeApi;
   if (contractType === 'OVER') {
     barrier = 3;
     contractTypeApi = 'DIGITOVER';
   } else if (contractType === 'UNDER') {
-    barrier = 6;   // <-- Under 6
+    barrier = 6;
     contractTypeApi = 'DIGITUNDER';
   } else {
     return res.status(400).json({ error: 'Invalid contract type. Use "OVER" or "UNDER".' });
@@ -733,7 +747,7 @@ app.post('/api/manual-trade', (req, res) => {
     stake: state.currentStake,
     balanceBefore: state.balance,
     contractType: contractTypeApi,
-    barrier: barrier,
+    barrier,
     direction: contractType
   };
 
