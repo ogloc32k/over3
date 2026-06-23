@@ -44,9 +44,9 @@ const CONFIG = {
     MIN_STAKE: 0.35,             // Minimum stake amount in USD
 
     // ---------- Trade Execution ----------
-    COOLDOWN_TICKS: 1,           // Ticks to wait after settlement before next trade
-    SETTLE_TICKS: 5,             // Ticks to wait before checking balance for settlement
-    SETTLEMENT_TIMEOUT_MS: 10000 // Fallback timeout if balance update never arrives
+    COOLDOWN_TICKS: 10,           // Ticks to wait after settlement before next trade
+    SETTLE_TICKS: 10,             // Ticks to wait before checking balance for settlement
+    SETTLEMENT_TIMEOUT_MS: 10000000 // Fallback timeout if balance update never arrives
 };
 // =====================================================================
 
