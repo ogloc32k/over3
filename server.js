@@ -15,6 +15,41 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 const STATE_FILE = '/var/data/deriv_multimarket_state.json';
 
+// =====================================================================
+//  🎯  EASY TWEAK CONFIGURATION – Change numbers here only
+// =====================================================================
+const CONFIG = {
+    // ---------- Technical Indicators ----------
+    FAST_W: 20,                 // Fast moving average window (catches the pulse)
+    SLOW_W: 100,                // Slow moving average window (defines the regime)
+    MIN_TREND: 0.5,             // Minimum trend strength (fast - slow average)
+    MIN_GAP: 12,                // Minimum bias gap from digit distribution
+    MAX_LAST_LONG: 4,           // Max last digit for LONG (OVER) signals
+    MIN_LAST_SHORT: 6,          // Min last digit for SHORT (UNDER) signals
+    MAX_STD: 3.5,               // Maximum standard deviation (filters chaotic noise)
+
+    // ---------- Slope Confirmation ----------
+    SLOPE_WINDOW: 5,            // Number of recent ticks to check for slope
+    SLOPE_THRESHOLD: 0.3,       // Minimum average slope to confirm direction
+
+    // ---------- Timing & Cooldowns ----------
+    MIN_TRIGGER_INTERVAL: 15000, // Minimum ms between automated trades (15 seconds)
+    MAX_CONSECUTIVE_LOSSES: 2,   // Number of losses before cooldown
+    LOSS_COOLDOWN_MS: 120000,    // Cooldown period after max losses (2 minutes)
+
+    // ---------- Risk Management (Daily Limits) ----------
+    RISK_PERCENT: 1,             // Stake as % of balance per trade
+    TP_PERCENT: 5,               // Daily Take Profit % (locks system when reached)
+    SL_PERCENT: 10,              // Daily Stop Loss % (locks system when reached)
+    MIN_STAKE: 0.35,             // Minimum stake amount in USD
+
+    // ---------- Trade Execution ----------
+    COOLDOWN_TICKS: 1,           // Ticks to wait after settlement before next trade
+    SETTLE_TICKS: 5,             // Ticks to wait before checking balance for settlement
+    SETTLEMENT_TIMEOUT_MS: 10000 // Fallback timeout if balance update never arrives
+};
+// =====================================================================
+
 // ---------- SCHEDULED RESTART (03:00 East African Time) ----------
 function scheduleRestart() {
   const now = Date.now();
@@ -223,21 +258,6 @@ const MARKETS = {
 };
 const BUFFER_CAPACITY = 1000;
 
-// ---------- UPDATED STRATEGY PARAMETERS (tighter) ----------
-const FAST_W = 30;
-const SLOW_W = 100;
-const MIN_TREND = 1.0;          // stronger momentum
-const MIN_GAP = 15;             // clearer bias
-const MAX_LAST_LONG = 4;        // for over 3
-const MIN_LAST_SHORT = 6;       // for under 6
-const MAX_STD = 2.8;            // avoid high volatility
-const MIN_TRIGGER_INTERVAL = 30000; // 30 seconds between automated trades
-
-// Additional: track consecutive losses
-let consecutiveLosses = 0;
-const MAX_CONSECUTIVE_LOSSES = 2;
-const LOSS_COOLDOWN_MS = 120000; // 2 minutes after 2 losses
-
 // Helper: compute average of last N elements
 function avgLast(arr, n) {
   if (arr.length < n) return 0;
@@ -254,8 +274,10 @@ function stdLast(arr, n) {
   return Math.sqrt(squaredDiffs.reduce((a, b) => a + b, 0) / n);
 }
 
-// Helper: check if the last M digits have a consistent slope
-function hasSlope(arr, n, positive) {
+// Helper: check if the last N digits have a consistent slope (uses CONFIG)
+function hasSlope(arr, positive) {
+  const n = CONFIG.SLOPE_WINDOW;
+  const threshold = CONFIG.SLOPE_THRESHOLD;
   if (arr.length < n) return false;
   const recent = arr.slice(-n);
   let sum = 0;
@@ -263,7 +285,7 @@ function hasSlope(arr, n, positive) {
     sum += (recent[i] - recent[i-1]);
   }
   const avgSlope = sum / (recent.length - 1);
-  return positive ? avgSlope > 0.5 : avgSlope < -0.5;
+  return positive ? avgSlope > threshold : avgSlope < -threshold;
 }
 
 // ---------- Pipeline Class ----------
@@ -354,20 +376,13 @@ const state = {
   logs: [],
   lastTriggerTime: 0,
   lossCooldownUntil: 0,  // timestamp when we can trade again after losses
-  pendingSettlement: false // NEW: wait for balance update after 5 ticks
+  pendingSettlement: false // wait for balance update after 5 ticks
 };
 
 function sanitizeState() {
   const { logs, ...rest } = state;
   return rest;
 }
-
-const RISK_PERCENT = 1;
-const TP_PERCENT = 2;
-const SL_PERCENT = 4;
-const MIN_STAKE = 0.35;
-const COOLDOWN_TICKS = 1;
-const SETTLE_TICKS = 5;
 
 function saveState() {
   try {
@@ -408,17 +423,17 @@ function loadState() {
 
 function checkDailyLimits() {
   if (!state.dailyStartBalance) return false;
-  const tpLimit = state.dailyStartBalance * (TP_PERCENT / 100);
-  const slLimit = state.dailyStartBalance * (SL_PERCENT / 100);
+  const tpLimit = state.dailyStartBalance * (CONFIG.TP_PERCENT / 100);
+  const slLimit = state.dailyStartBalance * (CONFIG.SL_PERCENT / 100);
 
   if (state.dailyPnl >= tpLimit) {
     state.locked = true; state.active = false;
-    state.lockReason = `🎯 Target Achieved: Session locked up at +$${state.dailyPnl.toFixed(2)} (2% Cap).`;
+    state.lockReason = `🎯 Target Achieved: Session locked up at +$${state.dailyPnl.toFixed(2)} (${CONFIG.TP_PERCENT}% Cap).`;
     addLog(state.lockReason); return true;
   }
   if (state.dailyPnl <= -slLimit) {
     state.locked = true; state.active = false;
-    state.lockReason = `🛑 Risk Limit Breached: Session halted at -$${Math.abs(state.dailyPnl).toFixed(2)} (4% Max Loss).`;
+    state.lockReason = `🛑 Risk Limit Breached: Session halted at -$${Math.abs(state.dailyPnl).toFixed(2)} (${CONFIG.SL_PERCENT}% Max Loss).`;
     addLog(state.lockReason); return true;
   }
   return false;
@@ -431,7 +446,7 @@ function settleRealTrade() {
       state.tradeInProgress = false;
       state.activeRealTrade = null;
     }
-    state.pendingSettlement = false; // clear flag
+    state.pendingSettlement = false;
     return;
   }
 
@@ -446,9 +461,9 @@ function settleRealTrade() {
     consecutiveLosses = 0;
   } else {
     consecutiveLosses++;
-    if (consecutiveLosses >= MAX_CONSECUTIVE_LOSSES) {
-      state.lossCooldownUntil = Date.now() + LOSS_COOLDOWN_MS;
-      addLog(`⏳ Two consecutive losses. Cooling down for ${LOSS_COOLDOWN_MS/60000} minutes.`);
+    if (consecutiveLosses >= CONFIG.MAX_CONSECUTIVE_LOSSES) {
+      state.lossCooldownUntil = Date.now() + CONFIG.LOSS_COOLDOWN_MS;
+      addLog(`⏳ ${CONFIG.MAX_CONSECUTIVE_LOSSES} consecutive losses. Cooling down for ${CONFIG.LOSS_COOLDOWN_MS/60000} minutes.`);
     }
   }
 
@@ -468,16 +483,19 @@ function settleRealTrade() {
   state.tradeInProgress = false;
   state.activeRealTrade = null;
   state.settleTicksRemaining = 0;
-  state.cooldownTicksLeft = COOLDOWN_TICKS;
-  state.pendingSettlement = false; // clear flag
+  state.cooldownTicksLeft = CONFIG.COOLDOWN_TICKS;
+  state.pendingSettlement = false;
 
-  const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
+  const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
   state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
   checkDailyLimits();
   saveState();
   broadcastSSE({ state: sanitizeState() });
 }
+
+// Track consecutive losses globally (reset on win)
+let consecutiveLosses = 0;
 
 // =====================================================================
 // NEW ENTRY LOGIC (Trend + Bias + Slope confirmation)
@@ -495,15 +513,15 @@ function processLiveFeed(symbol, price) {
     if (state.settleTicksRemaining === 0) {
       // Instead of settling now, set pending flag and wait for balance
       state.pendingSettlement = true;
-      addLog(`⏳ 5 ticks elapsed. Waiting for balance update to settle ${state.activeRealTrade?.symbol}...`);
-      // Fallback: force settlement after 10 seconds if balance never arrives
+      addLog(`⏳ ${CONFIG.SETTLE_TICKS} ticks elapsed. Waiting for balance update to settle ${state.activeRealTrade?.symbol}...`);
+      // Fallback: force settlement after timeout if balance never arrives
       setTimeout(() => {
         if (state.pendingSettlement) {
           addLog(`⚠️ Balance update timeout. Forcing settlement now.`);
           state.pendingSettlement = false;
           settleRealTrade();
         }
-      }, 10000);
+      }, CONFIG.SETTLEMENT_TIMEOUT_MS);
     }
     broadcastSSE({ state: sanitizeState() });
     return;
@@ -530,7 +548,7 @@ function processLiveFeed(symbol, price) {
   }
 
   // 6. Prevent too frequent triggers
-  if (now - state.lastTriggerTime < MIN_TRIGGER_INTERVAL) {
+  if (now - state.lastTriggerTime < CONFIG.MIN_TRIGGER_INTERVAL) {
     broadcastSSE({ state: sanitizeState() });
     return;
   }
@@ -541,17 +559,17 @@ function processLiveFeed(symbol, price) {
 
   for (const sym in MARKETS) {
     const buffer = engine.buffers[sym];
-    if (buffer.length < SLOW_W) continue;
+    if (buffer.length < CONFIG.SLOW_W) continue;
 
-    const fastAvg = avgLast(buffer, FAST_W);
-    const slowAvg = avgLast(buffer, SLOW_W);
+    const fastAvg = avgLast(buffer, CONFIG.FAST_W);
+    const slowAvg = avgLast(buffer, CONFIG.SLOW_W);
     const trend = fastAvg - slowAvg;
-    const std = stdLast(buffer, FAST_W);
+    const std = stdLast(buffer, CONFIG.FAST_W);
     const lastDigit = buffer[buffer.length - 1];
     const gap = state.marketMetrics[sym]?.totalGap || 0;
 
     // LONG condition: trend > MIN_TREND, gap > MIN_GAP, last <= MAX_LAST_LONG, std < MAX_STD, and slope positive
-    if (trend > MIN_TREND && gap > MIN_GAP && lastDigit <= MAX_LAST_LONG && std < MAX_STD && hasSlope(buffer, 5, true)) {
+    if (trend > CONFIG.MIN_TREND && gap > CONFIG.MIN_GAP && lastDigit <= CONFIG.MAX_LAST_LONG && std < CONFIG.MAX_STD && hasSlope(buffer, true)) {
       const score = trend + gap / 10;
       if (score > bestScore) {
         bestScore = score;
@@ -560,7 +578,7 @@ function processLiveFeed(symbol, price) {
     }
 
     // SHORT condition: trend < -MIN_TREND, gap < -MIN_GAP, last >= MIN_LAST_SHORT, std < MAX_STD, and slope negative
-    if (trend < -MIN_TREND && gap < -MIN_GAP && lastDigit >= MIN_LAST_SHORT && std < MAX_STD && hasSlope(buffer, 5, false)) {
+    if (trend < -CONFIG.MIN_TREND && gap < -CONFIG.MIN_GAP && lastDigit >= CONFIG.MIN_LAST_SHORT && std < CONFIG.MAX_STD && hasSlope(buffer, false)) {
       const score = -trend + (-gap) / 10;
       if (score > bestScore) {
         bestScore = score;
@@ -573,9 +591,9 @@ function processLiveFeed(symbol, price) {
   if (bestCandidate) {
     const { symbol, direction, barrier, trend, gap, lastDigit, std } = bestCandidate;
 
-    state.pendingSettlement = false; // ensure cleared
+    state.pendingSettlement = false;
     state.tradeInProgress = true;
-    const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
+    const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
     state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
     const contractType = direction === 'OVER' ? 'DIGITOVER' : 'DIGITUNDER';
@@ -610,7 +628,7 @@ function processLiveFeed(symbol, price) {
   broadcastSSE({ state: sanitizeState() });
 }
 
-// ------------------ WEBSOCKET CONNECTION (unchanged) ------------------
+// ------------------ WEBSOCKET CONNECTION ------------------
 let derivWs = null;
 let reqId = 0;
 let keepAliveLoop = null;
@@ -733,7 +751,7 @@ function handleMessage(msg) {
   else if (msg.msg_type === 'buy') {
     if (state.activeRealTrade) {
       state.activeRealTrade.contractId = msg.buy.contract_id;
-      state.settleTicksRemaining = SETTLE_TICKS;
+      state.settleTicksRemaining = CONFIG.SETTLE_TICKS;
       addLog(`💰 Trade Executed: Contract ID ${msg.buy.contract_id}`);
     }
   }
@@ -750,10 +768,10 @@ app.post('/api/manual-trade', (req, res) => {
     return res.status(400).json({ error: 'Invalid symbol.' });
   }
 
-  const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
+  const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
   state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-  state.pendingSettlement = false; // ensure cleared
+  state.pendingSettlement = false;
   state.tradeInProgress = true;
   
   let barrier, contractTypeApi;
