@@ -353,8 +353,8 @@ const state = {
   marketMetrics: {},
   logs: [],
   lastTriggerTime: 0,
-  lossCooldownUntil: 0,
-  settlementTimeout: null // store timeout handle for deferred settlement
+  lossCooldownUntil: 0,  // timestamp when we can trade again after losses
+  pendingSettlement: false // NEW: wait for balance update after 5 ticks
 };
 
 function sanitizeState() {
@@ -367,8 +367,7 @@ const TP_PERCENT = 2;
 const SL_PERCENT = 4;
 const MIN_STAKE = 0.35;
 const COOLDOWN_TICKS = 1;
-const SETTLE_TICKS = 5; // kept at 5
-const SETTLEMENT_DELAY_MS = 10000; // 10 second delay after ticks end
+const SETTLE_TICKS = 5;
 
 function saveState() {
   try {
@@ -426,15 +425,13 @@ function checkDailyLimits() {
 }
 
 function settleRealTrade() {
-  // Clear timeout handle as we are now performing settlement
-  state.settlementTimeout = null;
-
   if (!state.activeRealTrade || !state.activeRealTrade.contractId || state.balance == null) {
     if (state.activeRealTrade) {
       addLog("⚠️ Trade closed or never executed. Resetting state.");
       state.tradeInProgress = false;
       state.activeRealTrade = null;
     }
+    state.pendingSettlement = false; // clear flag
     return;
   }
 
@@ -472,6 +469,7 @@ function settleRealTrade() {
   state.activeRealTrade = null;
   state.settleTicksRemaining = 0;
   state.cooldownTicksLeft = COOLDOWN_TICKS;
+  state.pendingSettlement = false; // clear flag
 
   const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
   state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
@@ -485,54 +483,59 @@ function settleRealTrade() {
 // NEW ENTRY LOGIC (Trend + Bias + Slope confirmation)
 // =====================================================================
 function processLiveFeed(symbol, price) {
-  // 1. Settle pending trade if any
+  // 1. If pending settlement, wait for balance update – do nothing else
+  if (state.pendingSettlement) {
+    broadcastSSE({ state: sanitizeState() });
+    return;
+  }
+
+  // 2. Settle pending trade if any
   if (state.settleTicksRemaining > 0) {
     state.settleTicksRemaining--;
     if (state.settleTicksRemaining === 0) {
-      if (state.activeRealTrade && MARKETS[symbol]) {
-        state.activeRealTrade.exitTick = engine.extractDigit(price, MARKETS[symbol].dp);
-      }
-      // Clear any existing settlement timeout
-      if (state.settlementTimeout) {
-        clearTimeout(state.settlementTimeout);
-        state.settlementTimeout = null;
-      }
-      // Schedule settlement after a fixed delay (10 seconds) to allow balance update
-      state.settlementTimeout = setTimeout(() => {
-        settleRealTrade();
-      }, SETTLEMENT_DELAY_MS);
+      // Instead of settling now, set pending flag and wait for balance
+      state.pendingSettlement = true;
+      addLog(`⏳ 5 ticks elapsed. Waiting for balance update to settle ${state.activeRealTrade?.symbol}...`);
+      // Fallback: force settlement after 10 seconds if balance never arrives
+      setTimeout(() => {
+        if (state.pendingSettlement) {
+          addLog(`⚠️ Balance update timeout. Forcing settlement now.`);
+          state.pendingSettlement = false;
+          settleRealTrade();
+        }
+      }, 10000);
     }
     broadcastSSE({ state: sanitizeState() });
     return;
   }
 
-  // 2. Feed the engine (this updates buffers and analysis)
+  // 3. Feed the engine (this updates buffers and analysis)
   const analysis = engine.feed(symbol, price);
   if (!analysis) return;
 
   state.marketMetrics[symbol] = analysis;
   if (state.cooldownTicksLeft > 0) state.cooldownTicksLeft--;
 
-  // 3. Check if we can trade (armed, not locked, not already in trade, cooldown done)
+  // 4. Check if we can trade (armed, not locked, not already in trade, cooldown done)
   if (!state.active || state.locked || state.tradeInProgress || state.cooldownTicksLeft > 0) {
     broadcastSSE({ state: sanitizeState() });
     return;
   }
 
-  // 4. Check loss cooldown
+  // 5. Check loss cooldown
   const now = Date.now();
   if (now < state.lossCooldownUntil) {
     broadcastSSE({ state: sanitizeState() });
     return;
   }
 
-  // 5. Prevent too frequent triggers
+  // 6. Prevent too frequent triggers
   if (now - state.lastTriggerTime < MIN_TRIGGER_INTERVAL) {
     broadcastSSE({ state: sanitizeState() });
     return;
   }
 
-  // 6. Evaluate each market
+  // 7. Evaluate each market
   let bestCandidate = null;
   let bestScore = -Infinity;
 
@@ -566,16 +569,11 @@ function processLiveFeed(symbol, price) {
     }
   }
 
-  // 7. Execute if candidate found
+  // 8. Execute if candidate found
   if (bestCandidate) {
-    // Clear any pending settlement timeout (if any)
-    if (state.settlementTimeout) {
-      clearTimeout(state.settlementTimeout);
-      state.settlementTimeout = null;
-    }
-
     const { symbol, direction, barrier, trend, gap, lastDigit, std } = bestCandidate;
 
+    state.pendingSettlement = false; // ensure cleared
     state.tradeInProgress = true;
     const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
     state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
@@ -693,11 +691,7 @@ function handleMessage(msg) {
     state.tradeInProgress = false;
     state.activeRealTrade = null;
     state.settleTicksRemaining = 0;
-    // Clear any pending settlement timeout
-    if (state.settlementTimeout) {
-      clearTimeout(state.settlementTimeout);
-      state.settlementTimeout = null;
-    }
+    state.pendingSettlement = false;
     return;
   }
 
@@ -706,6 +700,7 @@ function handleMessage(msg) {
       addLog(`❌ Proposal Error: ${msg.error.message}`);
       state.tradeInProgress = false;
       state.activeRealTrade = null;
+      state.pendingSettlement = false;
     } else {
       send({
         buy: msg.proposal.id,
@@ -719,6 +714,11 @@ function handleMessage(msg) {
 
   if (msg.msg_type === 'balance') {
     state.balance = parseFloat(msg.balance.balance);
+    // If we're waiting for settlement, finalise it now
+    if (state.pendingSettlement && state.activeRealTrade) {
+      state.pendingSettlement = false;
+      settleRealTrade(); // uses the fresh state.balance
+    }
     broadcastSSE({ state: sanitizeState() });
   }
   else if (msg.msg_type === 'history') {
@@ -753,14 +753,9 @@ app.post('/api/manual-trade', (req, res) => {
   const rawStake = Math.max(MIN_STAKE, state.balance * (RISK_PERCENT / 100));
   state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
+  state.pendingSettlement = false; // ensure cleared
   state.tradeInProgress = true;
   
-  // Clear any pending settlement timeout
-  if (state.settlementTimeout) {
-    clearTimeout(state.settlementTimeout);
-    state.settlementTimeout = null;
-  }
-
   let barrier, contractTypeApi;
   if (contractType === 'OVER') {
     barrier = 3;
