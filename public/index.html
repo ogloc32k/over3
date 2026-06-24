@@ -170,7 +170,7 @@
     .log-stream { background: #04060b; border: 1px solid #0d121c; flex: 1; border-radius: 2px; padding: 8px; overflow-y: auto; font-size: 11px; display: flex; flex-direction: column; }
     .log-entry { margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #131a26; display: flex; }
     .log-ts { color: var(--neon-blue); margin-right: 10px; flex-shrink: 0; }
-    #lock-alert-banner { background: rgba(255,59,48,0.15); border: 1px solid var(--neon-red); color: var(--neon-red); padding: 12px; border-radius: 4px; font-size: 12px; font-weight: bold; display: none; margin-bottom: 15px; }
+    #lock-alert-banner { padding: 12px; border-radius: 4px; font-size: 12px; font-weight: bold; display: none; margin-bottom: 15px; }
 
     .analytics-layout { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; }
     .audit-filter-bar { background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; display: flex; justify-content: space-between; align-items: center; gap: 20px; }
@@ -329,9 +329,7 @@
           <div class="ledger-table">
             <div class="ledger-row"><span class="ledger-lbl">Assigned Profile</span><span class="ledger-val" id="ui-ledger-mode" style="color:var(--neon-blue);">LOADING</span></div>
             <div class="ledger-row"><span class="ledger-lbl">Liquidity Balance</span><span class="ledger-val" id="ui-ledger-bal">---</span></div>
-            <!-- NEW: Session PnL (in‑memory, resets on redeploy) -->
             <div class="ledger-row"><span class="ledger-lbl">Session Realized PnL</span><span class="ledger-val" id="ui-ledger-session-pnl" style="color:var(--neon-green);">$0.00</span></div>
-            <!-- NEW: Daily PnL (24h rolling from DB) -->
             <div class="ledger-row"><span class="ledger-lbl">Daily PnL (24h)</span><span class="ledger-val" id="ui-ledger-daily-pnl" style="color:var(--neon-green);">$0.00</span></div>
             <div class="ledger-row"><span class="ledger-lbl">Dynamically Risk (1%)</span><span class="ledger-val" id="ui-ledger-stake" style="color:var(--neon-orange);">$0.00</span></div>
           </div>
@@ -437,6 +435,7 @@
         .then(res => res.json())
         .then(data => {
           if (data.error) alert('Error: ' + data.error);
+          else if (data.message) console.log(data.message);
         });
     }
 
@@ -489,13 +488,11 @@
       document.getElementById('ui-ledger-mode').innerText = state.tradingMode.toUpperCase();
       document.getElementById('ui-ledger-bal').innerText = state.balance ? `$${parseFloat(state.balance).toFixed(2)} ${state.currency}` : 'Synchronizing...';
       
-      // Session PnL (in‑memory)
       const sessionEl = document.getElementById('ui-ledger-session-pnl');
       const sessionPnl = parseFloat(state.sessionPnl) || 0;
       sessionEl.innerText = `$${sessionPnl.toFixed(2)}`;
       sessionEl.style.color = sessionPnl >= 0 ? 'var(--neon-green)' : 'var(--neon-red)';
       
-      // Daily PnL (24h from DB)
       const dailyEl = document.getElementById('ui-ledger-daily-pnl');
       const dailyPnl = parseFloat(state.dailyPnl) || 0;
       dailyEl.innerText = `$${dailyPnl.toFixed(2)}`;
@@ -505,12 +502,30 @@
 
       const statusPill = document.getElementById('ui-sys-status');
       const alertBanner = document.getElementById('lock-alert-banner');
+
+      // Determine banner style based on locked and active
       if (state.locked) {
-        statusPill.innerText = "HALTED / SYSTEM LOCK"; statusPill.style.color = "var(--neon-red)";
-        statusPill.style.borderColor = "var(--neon-red)"; statusPill.style.background = "rgba(255,59,48,0.1)";
-        alertBanner.innerText = state.lockReason || "Trading paused due to daily limit."; 
-        alertBanner.style.display = "block";
+        if (state.active) {
+          // Green banner – armed but paused until midnight
+          alertBanner.style.display = "block";
+          alertBanner.style.background = "rgba(0,255,136,0.15)";
+          alertBanner.style.borderColor = "var(--neon-green)";
+          alertBanner.style.color = "var(--neon-green)";
+          alertBanner.innerText = `⏳ AUTO ON – RESUMING TRADING AT MIDNIGHT (${state.lockReason || 'Daily limit reached'})`;
+          statusPill.innerText = "PAUSED (ARMED)"; statusPill.style.color = "var(--neon-green)";
+          statusPill.style.borderColor = "var(--neon-green)"; statusPill.style.background = "rgba(0,255,136,0.1)";
+        } else {
+          // Red banner – locked and not armed
+          alertBanner.style.display = "block";
+          alertBanner.style.background = "rgba(255,59,48,0.15)";
+          alertBanner.style.borderColor = "var(--neon-red)";
+          alertBanner.style.color = "var(--neon-red)";
+          alertBanner.innerText = state.lockReason || "Trading paused due to daily limit.";
+          statusPill.innerText = "HALTED / SYSTEM LOCK"; statusPill.style.color = "var(--neon-red)";
+          statusPill.style.borderColor = "var(--neon-red)"; statusPill.style.background = "rgba(255,59,48,0.1)";
+        }
       } else {
+        alertBanner.style.display = "none";
         if (state.active) {
           statusPill.innerText = "CORE AUTOMATION ARMED"; statusPill.style.color = "var(--neon-green)";
           statusPill.style.borderColor = "var(--neon-green)"; statusPill.style.background = "rgba(0,255,136,0.1)";
@@ -518,23 +533,26 @@
           statusPill.innerText = "DATA PIPELINE ACTIVE (IDLE)"; statusPill.style.color = "var(--text-dim)";
           statusPill.style.borderColor = "var(--border-glow)"; statusPill.style.background = "var(--bg-card)";
         }
-        alertBanner.style.display = "none";
       }
 
+      // ----- CLUSTER CARDS – show only data availability (ignoring lock state) -----
       const clusterBox = document.getElementById('ui-cluster-list');
       clusterBox.innerHTML = '';
       for (const sym in MARKETS_CFG) {
         const mMetric = state.marketMetrics && state.marketMetrics[sym] ? state.marketMetrics[sym] : null;
-        // "filtersValidated" is not set in the new backend – we'll just show gap
         const isActive = sym === currentFocus;
         const gapVal = mMetric ? mMetric.totalGap.toFixed(1) : "0.0";
         const gapColor = mMetric && mMetric.totalGap >= 0 ? 'var(--neon-green)' : 'var(--neon-red)';
+
+        // Badge based on data only
+        const badgeText = mMetric ? "READY" : "SCANNING";
+        const badgeClass = mMetric ? "badge-ready" : "badge-scanning";
         
         clusterBox.innerHTML += `
           <div class="cluster-card ${isActive ? 'active' : ''}" onclick="setFocusMarket('${sym}')">
             <div class="cluster-meta">
               <span class="cluster-name">${MARKETS_CFG[sym]}</span>
-              <span class="cluster-badge ${mMetric ? 'badge-ready' : 'badge-scanning'}">${mMetric ? 'READY' : 'SCANNING'}</span>
+              <span class="cluster-badge ${badgeClass}">${badgeText}</span>
             </div>
             <div class="cluster-data">
               <span class="cluster-price" style="font-size:12px; color:var(--text-dim);">Parsing Matrix...</span>
@@ -567,9 +585,7 @@
 
         for (let i = 0; i <= 9; i++) {
           document.getElementById(`ui-pct-${i}`).innerText = `${currentMetric.pcts[i].toFixed(1)}%`;
-          const nodeCard = document.getElementById(`ui-pct-${i}`).parentElement;
-          // greenCircle is not used in new logic – we'll skip glow
-          nodeCard.className = 'digit-card';
+          document.getElementById(`ui-pct-${i}`).parentElement.className = 'digit-card';
         }
 
         const tailBox = document.getElementById('ui-tail-strip');
@@ -712,8 +728,6 @@
 
         let winLoss, assets, equity, pf, strike, drawdown;
         if (presetMode === 'session') {
-          // Session uses the in‑memory P&L from state (if available), but we'll use the data.totalProfit (which may be dailyPnl)
-          // We'll just display what the backend returns.
           const totalTrades = data.totalTrades || 0;
           const strikeNum = parseFloat(data.strikeRate) || 0;
           const wins = Math.round((strikeNum / 100) * totalTrades);
