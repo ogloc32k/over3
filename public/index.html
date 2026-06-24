@@ -329,7 +329,10 @@
           <div class="ledger-table">
             <div class="ledger-row"><span class="ledger-lbl">Assigned Profile</span><span class="ledger-val" id="ui-ledger-mode" style="color:var(--neon-blue);">LOADING</span></div>
             <div class="ledger-row"><span class="ledger-lbl">Liquidity Balance</span><span class="ledger-val" id="ui-ledger-bal">---</span></div>
-            <div class="ledger-row"><span class="ledger-lbl">Session Realized PnL</span><span class="ledger-val" id="ui-ledger-pnl" style="color:var(--neon-green);">$0.00</span></div>
+            <!-- NEW: Session PnL (in‑memory, resets on redeploy) -->
+            <div class="ledger-row"><span class="ledger-lbl">Session Realized PnL</span><span class="ledger-val" id="ui-ledger-session-pnl" style="color:var(--neon-green);">$0.00</span></div>
+            <!-- NEW: Daily PnL (24h rolling from DB) -->
+            <div class="ledger-row"><span class="ledger-lbl">Daily PnL (24h)</span><span class="ledger-val" id="ui-ledger-daily-pnl" style="color:var(--neon-green);">$0.00</span></div>
             <div class="ledger-row"><span class="ledger-lbl">Dynamically Risk (1%)</span><span class="ledger-val" id="ui-ledger-stake" style="color:var(--neon-orange);">$0.00</span></div>
           </div>
         </div>
@@ -485,9 +488,19 @@
 
       document.getElementById('ui-ledger-mode').innerText = state.tradingMode.toUpperCase();
       document.getElementById('ui-ledger-bal').innerText = state.balance ? `$${parseFloat(state.balance).toFixed(2)} ${state.currency}` : 'Synchronizing...';
-      const pnlEl = document.getElementById('ui-ledger-pnl');
-      pnlEl.innerText = `$${parseFloat(state.dailyPnl).toFixed(2)}`;
-      pnlEl.style.color = state.dailyPnl >= 0 ? 'var(--neon-green)' : 'var(--neon-red)';
+      
+      // Session PnL (in‑memory)
+      const sessionEl = document.getElementById('ui-ledger-session-pnl');
+      const sessionPnl = parseFloat(state.sessionPnl) || 0;
+      sessionEl.innerText = `$${sessionPnl.toFixed(2)}`;
+      sessionEl.style.color = sessionPnl >= 0 ? 'var(--neon-green)' : 'var(--neon-red)';
+      
+      // Daily PnL (24h from DB)
+      const dailyEl = document.getElementById('ui-ledger-daily-pnl');
+      const dailyPnl = parseFloat(state.dailyPnl) || 0;
+      dailyEl.innerText = `$${dailyPnl.toFixed(2)}`;
+      dailyEl.style.color = dailyPnl >= 0 ? 'var(--neon-green)' : 'var(--neon-red)';
+      
       document.getElementById('ui-ledger-stake').innerText = `$${parseFloat(state.currentStake).toFixed(2)}`;
 
       const statusPill = document.getElementById('ui-sys-status');
@@ -495,14 +508,16 @@
       if (state.locked) {
         statusPill.innerText = "HALTED / SYSTEM LOCK"; statusPill.style.color = "var(--neon-red)";
         statusPill.style.borderColor = "var(--neon-red)"; statusPill.style.background = "rgba(255,59,48,0.1)";
-        alertBanner.innerText = state.lockReason; alertBanner.style.display = "block";
-      } else if (state.active) {
-        statusPill.innerText = "CORE AUTOMATION ARMED"; statusPill.style.color = "var(--neon-green)";
-        statusPill.style.borderColor = "var(--neon-green)"; statusPill.style.background = "rgba(0,255,136,0.1)";
-        alertBanner.style.display = "none";
+        alertBanner.innerText = state.lockReason || "Trading paused due to daily limit."; 
+        alertBanner.style.display = "block";
       } else {
-        statusPill.innerText = "DATA PIPELINE ACTIVE (IDLE)"; statusPill.style.color = "var(--text-dim)";
-        statusPill.style.borderColor = "var(--border-glow)"; statusPill.style.background = "var(--bg-card)";
+        if (state.active) {
+          statusPill.innerText = "CORE AUTOMATION ARMED"; statusPill.style.color = "var(--neon-green)";
+          statusPill.style.borderColor = "var(--neon-green)"; statusPill.style.background = "rgba(0,255,136,0.1)";
+        } else {
+          statusPill.innerText = "DATA PIPELINE ACTIVE (IDLE)"; statusPill.style.color = "var(--text-dim)";
+          statusPill.style.borderColor = "var(--border-glow)"; statusPill.style.background = "var(--bg-card)";
+        }
         alertBanner.style.display = "none";
       }
 
@@ -510,7 +525,7 @@
       clusterBox.innerHTML = '';
       for (const sym in MARKETS_CFG) {
         const mMetric = state.marketMetrics && state.marketMetrics[sym] ? state.marketMetrics[sym] : null;
-        const isReady = mMetric && mMetric.filtersValidated;
+        // "filtersValidated" is not set in the new backend – we'll just show gap
         const isActive = sym === currentFocus;
         const gapVal = mMetric ? mMetric.totalGap.toFixed(1) : "0.0";
         const gapColor = mMetric && mMetric.totalGap >= 0 ? 'var(--neon-green)' : 'var(--neon-red)';
@@ -519,7 +534,7 @@
           <div class="cluster-card ${isActive ? 'active' : ''}" onclick="setFocusMarket('${sym}')">
             <div class="cluster-meta">
               <span class="cluster-name">${MARKETS_CFG[sym]}</span>
-              <span class="cluster-badge ${isReady ? 'badge-ready' : 'badge-scanning'}">${isReady ? 'READY' : 'SCANNING'}</span>
+              <span class="cluster-badge ${mMetric ? 'badge-ready' : 'badge-scanning'}">${mMetric ? 'READY' : 'SCANNING'}</span>
             </div>
             <div class="cluster-data">
               <span class="cluster-price" style="font-size:12px; color:var(--text-dim);">Parsing Matrix...</span>
@@ -553,22 +568,19 @@
         for (let i = 0; i <= 9; i++) {
           document.getElementById(`ui-pct-${i}`).innerText = `${currentMetric.pcts[i].toFixed(1)}%`;
           const nodeCard = document.getElementById(`ui-pct-${i}`).parentElement;
-          if (i === currentMetric.greenCircle) {
-            nodeCard.className = 'digit-card glow-green-circle';
-          } else {
-            nodeCard.className = 'digit-card';
-          }
+          // greenCircle is not used in new logic – we'll skip glow
+          nodeCard.className = 'digit-card';
         }
 
         const tailBox = document.getElementById('ui-tail-strip');
         tailBox.innerHTML = '';
-        const paddedTicks = [...currentMetric.last3];
-        while(paddedTicks.length < 3) paddedTicks.unshift('—');
+        const paddedTicks = currentMetric.last3 && currentMetric.last3.length === 3 ? currentMetric.last3 : ['—','—','—'];
         paddedTicks.forEach((t, idx) => {
           let extraClass = '';
           if (t !== '—') {
-            if (idx < 2 && [0,2,3].includes(parseInt(t))) extraClass = 'low-alert';
-            if (idx === 2 && t === 1) extraClass = 'trigger-digit';
+            const num = parseInt(t);
+            if (idx < 2 && [0,2,3].includes(num)) extraClass = 'low-alert';
+            if (idx === 2 && num === 1) extraClass = 'trigger-digit';
           }
           tailBox.innerHTML += `<span class="tail-node ${extraClass}">${t}</span>`;
         });
@@ -585,7 +597,7 @@
     }
 
     // =========================================================================
-    // 2. SPA VIEW & INSTITUTIONAL ANALYTICS ENGINE (FIXED)
+    // 2. SPA VIEW & INSTITUTIONAL ANALYTICS ENGINE
     // =========================================================================
     function changeSpaView(target) {
       document.getElementById('view-ops').classList.remove('active-view');
@@ -613,13 +625,11 @@
       const ctxPie = document.getElementById('chart-pie-winloss').getContext('2d');
       activeCharts.winLoss = new Chart(ctxPie, { type: 'pie', data: { labels: ['Wins', 'Losses'], datasets: [{ data: [0, 0], backgroundColor: ['#00ff88', '#ff3b30'], borderColor: '#101524', borderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: darkThemeText, font: { family: 'Consolas' } } } } } });
 
-      // Use full asset names as labels (matching database exactly)
       const assetLabels = ['Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index', 'Volatility 75 Index', 'Volatility 100 Index'];
       const assetColors = ['#00d2ff', '#ff9500', '#94a3b8', '#00ff88', '#a855f7'];
       const ctxDonut = document.getElementById('chart-donut-assets').getContext('2d');
       activeCharts.assets = new Chart(ctxDonut, { type: 'doughnut', data: { labels: assetLabels, datasets: [{ data: [0, 0, 0, 0, 0], backgroundColor: assetColors, borderColor: '#101524', borderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: darkThemeText, font: { family: 'Consolas' } } } } } });
 
-      // ---------- EQUITY CURVE ----------
       const ctxLine = document.getElementById('chart-line-equity').getContext('2d');
       activeCharts.equity = new Chart(ctxLine, {
         type: 'line',
@@ -644,18 +654,10 @@
           responsive: true,
           maintainAspectRatio: false,
           scales: {
-            x: {
-              grid: { color: gridBorderColor },
-              ticks: { color: darkThemeText }
-            },
-            y: {
-              grid: { color: gridBorderColor },
-              ticks: { color: darkThemeText }
-            }
+            x: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText } },
+            y: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText } }
           },
-          plugins: {
-            legend: { display: false }
-          }
+          plugins: { legend: { display: false } }
         }
       });
     }
@@ -683,9 +685,7 @@
       const assetFullNames = ['Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index', 'Volatility 75 Index', 'Volatility 100 Index'];
       const assetData = assetFullNames.map(name => assetMap[name] || 0);
       
-      if (equityCurve.length === 0) {
-        equityCurve.push(0);
-      }
+      if (equityCurve.length === 0) equityCurve.push(0);
       
       const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? Infinity : 0);
       const totalTrades = wins + losses;
@@ -712,6 +712,8 @@
 
         let winLoss, assets, equity, pf, strike, drawdown;
         if (presetMode === 'session') {
+          // Session uses the in‑memory P&L from state (if available), but we'll use the data.totalProfit (which may be dailyPnl)
+          // We'll just display what the backend returns.
           const totalTrades = data.totalTrades || 0;
           const strikeNum = parseFloat(data.strikeRate) || 0;
           const wins = Math.round((strikeNum / 100) * totalTrades);
@@ -768,29 +770,20 @@
       } catch (err) { console.error("Filter Error:", err); }
     }
 
-    // =========================================================================
-    // FIXED updateUIElements – replaces entire dataset to force line rendering
-    // =========================================================================
     function updateUIElements(metrics, chartData, customLineLabels) {
       document.getElementById('meta-net-profit').innerText = metrics.profit;
       document.getElementById('meta-profit-factor').innerText = metrics.pf;
       document.getElementById('meta-strike-rate').innerText = metrics.strike;
       document.getElementById('meta-drawdown').innerText = metrics.drawdown;
 
-      // Update pie chart
       activeCharts.winLoss.data.datasets[0].data = chartData.winLoss;
       activeCharts.winLoss.update('none');
 
-      // Update donut chart
       activeCharts.assets.data.datasets[0].data = chartData.assets;
       activeCharts.assets.update('none');
 
-      // ---------- FIX: Update equity line chart ----------
       const equityData = chartData.equity;
-      // Generate labels if not provided (e.g., T1, T2, ...)
       const labels = customLineLabels || equityData.map((_, i) => `T${i+1}`);
-
-      // Replace the entire dataset to force a re-render
       activeCharts.equity.data.labels = labels;
       activeCharts.equity.data.datasets[0] = {
         label: 'Cumulative P&L ($)',
@@ -806,8 +799,6 @@
         showLine: true,
         fill: false
       };
-
-      // Force immediate redraw without animation
       activeCharts.equity.update('none');
     }
 
