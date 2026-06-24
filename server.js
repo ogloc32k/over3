@@ -42,8 +42,8 @@ const CONFIG = {
 
     // ---------- Trade Execution ----------
     COOLDOWN_TICKS: 1,           // Ticks to wait after settlement before next trade
-    SETTLE_TICKS: 5,             // Ticks to wait before checking balance
-    SETTLEMENT_TIMEOUT_MS: 10000 // Fallback timeout for balance update
+    SETTLE_TICKS: 10,             // Ticks to wait before checking balance
+    SETTLEMENT_TIMEOUT_MS: 1000000 // Fallback timeout for balance update
 };
 // =====================================================================
 
