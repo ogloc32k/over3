@@ -64,7 +64,7 @@ function scheduleRestart() {
   console.log(`⏰ Next restart scheduled at ${nextMidnightUTC.toISOString()} (03:00 EAT)`);
   setTimeout(() => {
     console.log('🔄 Scheduled restart at 03:00 EAT. Resetting and restarting...');
-    // Keep active as is, but reset daily lock – will be re‑evaluated from DB after restart
+    // Reset daily lock – will be re‑evaluated from DB after restart
     state.sessionPnl = 0;
     state.locked = false;
     state.lockReason = '';
@@ -217,13 +217,15 @@ app.post('/api/control', (req, res) => {
   const { action, mode } = req.body;
 
   if (action === 'start') {
-    if (state.locked) {
-      return res.status(400).json({ 
-        error: `System is paused: ${state.lockReason}` 
-      });
-    }
+    // Allow arming even when locked – user can pre‑arm for midnight resume
     state.active = true;
-    addLog('🔓 Automation matrix ARMED by user.');
+    let msg = '🔓 Automation matrix ARMED by user.';
+    if (state.locked) {
+      msg = `🔓 Automation matrix ARMED (paused until midnight): ${state.lockReason}`;
+      addLog(msg);
+      return res.json({ success: true, message: msg });
+    }
+    addLog(msg);
     return res.json({ success: true });
   }
 
