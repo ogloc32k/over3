@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 const STATE_FILE = '/var/data/deriv_multimarket_state.json';
 
 // =====================================================================
-//  🎯  CONFIGURATION – Easy tweaking
+//  🎯  CONFIGURATION
 // =====================================================================
 const CONFIG = {
     // ---------- Aggressive Mode (Pattern) ----------
@@ -30,14 +30,12 @@ const CONFIG = {
     UNDER_LAST3_RANGE: [7, 9],
 
     // ---------- Safe Mode (New) ----------
-    SAFE_WINDOW: 15,                  // last N ticks to check absence
-    SAFE_ABSENT_DIGITS_UNDER8: [0,1,2,3],  // must be absent for Under 8
-    SAFE_ABSENT_DIGITS_OVER1: [7,8,9],     // must be absent for Over 1
-    SAFE_LONG_WINDOW: 1000,           // for least-frequent check
-    SAFE_SHORT_WINDOW: 100,           // for least-frequent check
-    // For Under 8, least frequent must not be 7,8,9
+    SAFE_WINDOW: 15,
+    SAFE_ABSENT_DIGITS_UNDER8: [0,1,2,3],
+    SAFE_ABSENT_DIGITS_OVER1: [7,8,9],
+    SAFE_LONG_WINDOW: 1000,
+    SAFE_SHORT_WINDOW: 100,
     SAFE_UNDER8_FORBIDDEN_LEAST: [7,8,9],
-    // For Over 1, least frequent must not be 0,1,2
     SAFE_OVER1_FORBIDDEN_LEAST: [0,1,2],
 
     // ---------- Timing & Cooldowns ----------
@@ -45,7 +43,7 @@ const CONFIG = {
     MAX_CONSECUTIVE_LOSSES: 2,
     LOSS_COOLDOWN_MS: 120000,
 
-    // ---------- Risk Management (fixed daily reset) ----------
+    // ---------- Risk Management ----------
     RISK_PERCENT: 1,
     TP_PERCENT: 5,
     SL_PERCENT: 10,
@@ -72,8 +70,7 @@ function scheduleRestart() {
   console.log(`⏰ Next restart scheduled at ${nextMidnightUTC.toISOString()} (03:00 EAT)`);
   setTimeout(() => {
     console.log('🔄 Scheduled restart at 03:00 EAT. Resetting daily state...');
-    // We keep sessionPnl, sessionPnlPeak, activeMode because they are session-specific.
-    // They will be saved and restored.
+    // Keep sessionPnl, peak, and mode as they are (persistent)
     state.locked = false;
     state.lockReason = '';
     saveState();
@@ -266,7 +263,7 @@ const MARKETS = {
 };
 const BUFFER_CAPACITY = 1000;
 
-// ---------- Pipeline Class (maintains buffers and computes gap) ----------
+// ---------- Pipeline Class ----------
 class MultiMarketPipeline {
   constructor() {
     this.buffers = {};
@@ -336,7 +333,7 @@ const state = {
   balance: null,
   currency: 'USD',
   sessionPnl: 0,
-  sessionPnlPeak: 0,         // highest session PnL reached (used to switch back to safe)
+  sessionPnlPeak: 0,
   activeMode: 'safe',        // 'safe' or 'aggressive'
   dailyPnl: 0,
   dailyStartBalance: null,
@@ -371,7 +368,6 @@ function checkAggressive(symbol, buffer, metric) {
   const fourthPrev = last4[0];
   const lastThree = last4.slice(1);
 
-  // OVER 3
   if (gap >= CONFIG.MIN_GAP_OVER && gap <= CONFIG.MAX_GAP_OVER) {
     if (CONFIG.OVER_4TH_PREV.includes(fourthPrev)) {
       const allInRange = lastThree.every(d => d >= CONFIG.OVER_LAST3_RANGE[0] && d <= CONFIG.OVER_LAST3_RANGE[1]);
@@ -382,7 +378,6 @@ function checkAggressive(symbol, buffer, metric) {
     }
   }
 
-  // UNDER 6
   if (gap >= CONFIG.MIN_GAP_UNDER && gap <= CONFIG.MAX_GAP_UNDER) {
     if (CONFIG.UNDER_4TH_PREV.includes(fourthPrev)) {
       const allInRange = lastThree.every(d => d >= CONFIG.UNDER_LAST3_RANGE[0] && d <= CONFIG.UNDER_LAST3_RANGE[1]);
@@ -398,62 +393,46 @@ function checkAggressive(symbol, buffer, metric) {
 // --- Safe Mode: Over 1 / Under 8 (new rules) ---
 function checkSafe(symbol, buffer, metric) {
   const len = buffer.length;
-  if (len < CONFIG.SAFE_WINDOW + 1) return null; // need enough ticks
+  if (len < CONFIG.SAFE_WINDOW + 1) return null;
 
   const gap = metric.totalGap;
   if (gap === undefined) return null;
 
-  // We'll check both Over 1 and Under 8 conditions; pick the one that scores better.
-
-  // ----- UNDER 8 -----
-  // Condition: last SAFE_WINDOW ticks must contain none of SAFE_ABSENT_DIGITS_UNDER8 (0,1,2,3)
   const recent = buffer.slice(-CONFIG.SAFE_WINDOW);
+
+  // UNDER 8
   const hasLow = CONFIG.SAFE_ABSENT_DIGITS_UNDER8.some(d => recent.includes(d));
   if (!hasLow) {
-    // Check least frequent in long and short windows
     const longSlice = buffer.slice(-CONFIG.SAFE_LONG_WINDOW);
     const shortSlice = buffer.slice(-CONFIG.SAFE_SHORT_WINDOW);
-    // Compute frequency for digits 0-9
-    const freqLong = Array(10).fill(0); 
-    longSlice.forEach(d => freqLong[d]++);
-    const freqShort = Array(10).fill(0);
-    shortSlice.forEach(d => freqShort[d]++);
-    // Find least frequent digit (tie-breaking: choose the smallest digit that is minimal)
+    const freqLong = Array(10).fill(0); longSlice.forEach(d => freqLong[d]++);
+    const freqShort = Array(10).fill(0); shortSlice.forEach(d => freqShort[d]++);
     const minLong = Math.min(...freqLong);
     const leastLong = freqLong.indexOf(minLong);
     const minShort = Math.min(...freqShort);
     const leastShort = freqShort.indexOf(minShort);
-    // For Under 8, the least frequent digit must NOT be 7,8,9
     if (!CONFIG.SAFE_UNDER8_FORBIDDEN_LEAST.includes(leastLong) && 
         !CONFIG.SAFE_UNDER8_FORBIDDEN_LEAST.includes(leastShort)) {
-      // We have a valid Under 8 signal
-      // Use gap as score (absolute)
       return { direction: 'UNDER', barrier: 8, gap: gap };
     }
   }
 
-  // ----- OVER 1 -----
-  // Condition: last SAFE_WINDOW ticks must contain none of SAFE_ABSENT_DIGITS_OVER1 (7,8,9)
+  // OVER 1
   const hasHigh = CONFIG.SAFE_ABSENT_DIGITS_OVER1.some(d => recent.includes(d));
   if (!hasHigh) {
-    // Check least frequent in long and short windows
     const longSlice = buffer.slice(-CONFIG.SAFE_LONG_WINDOW);
     const shortSlice = buffer.slice(-CONFIG.SAFE_SHORT_WINDOW);
-    const freqLong = Array(10).fill(0);
-    longSlice.forEach(d => freqLong[d]++);
-    const freqShort = Array(10).fill(0);
-    shortSlice.forEach(d => freqShort[d]++);
+    const freqLong = Array(10).fill(0); longSlice.forEach(d => freqLong[d]++);
+    const freqShort = Array(10).fill(0); shortSlice.forEach(d => freqShort[d]++);
     const minLong = Math.min(...freqLong);
     const leastLong = freqLong.indexOf(minLong);
     const minShort = Math.min(...freqShort);
     const leastShort = freqShort.indexOf(minShort);
-    // For Over 1, the least frequent digit must NOT be 0,1,2
     if (!CONFIG.SAFE_OVER1_FORBIDDEN_LEAST.includes(leastLong) &&
         !CONFIG.SAFE_OVER1_FORBIDDEN_LEAST.includes(leastShort)) {
       return { direction: 'OVER', barrier: 1, gap: gap };
     }
   }
-
   return null;
 }
 
@@ -583,35 +562,33 @@ function settleRealTrade() {
     }
   }
 
-  // ---------- MODE SWITCHING LOGIC ----------
+  // ---------- REVISED MODE SWITCHING ----------
   const prevMode = state.activeMode;
   if (state.activeMode === 'safe') {
     if (!isWin) {
-      // Loss in safe mode → switch to aggressive, record peak
+      // Loss in safe → switch to aggressive, record peak as PnL before this loss
       state.activeMode = 'aggressive';
-      state.sessionPnlPeak = oldSessionPnl; // peak before the loss
-      addLog(`🔄 Safe mode loss (${-profit.toFixed(2)}). Switching to Aggressive mode. Peak to beat: $${state.sessionPnlPeak.toFixed(2)}`);
+      state.sessionPnlPeak = oldSessionPnl; // PnL before the loss
+      addLog(`🔄 Safe loss (${-profit.toFixed(2)}). Switching to Aggressive. Peak to beat: $${state.sessionPnlPeak.toFixed(2)}`);
     } else {
-      // Win in safe mode – stay in safe mode
-      // Update peak if current session PnL is higher (though we only switch from safe on loss, but keep peak for safety)
+      // Win in safe – stay safe, update peak if higher (not used in safe but for consistency)
       if (state.sessionPnl > state.sessionPnlPeak) state.sessionPnlPeak = state.sessionPnl;
     }
   } else { // aggressive
     if (isWin) {
-      // Check if we have recovered above the peak
       if (state.sessionPnl > state.sessionPnlPeak) {
         // Recovered – switch back to safe
         state.activeMode = 'safe';
-        addLog(`✅ Aggressive mode recovered to $${state.sessionPnl.toFixed(2)} (peak $${state.sessionPnlPeak.toFixed(2)}). Switching back to Safe mode.`);
+        addLog(`✅ Aggressive win recovered to $${state.sessionPnl.toFixed(2)} (peak $${state.sessionPnlPeak.toFixed(2)}). Switching back to Safe.`);
       } else {
-        // Still below peak, stay in aggressive
-        // Update peak if current session PnL is higher (though unlikely)
-        if (state.sessionPnl > state.sessionPnlPeak) state.sessionPnlPeak = state.sessionPnl;
+        // Still below peak, stay aggressive
+        if (state.sessionPnl > state.sessionPnlPeak) state.sessionPnlPeak = state.sessionPnl; // safety
       }
     } else {
-      // Loss in aggressive mode – stay in aggressive, update peak? No, we only switch back when we recover above the original peak.
-      // Actually, if we lose more, we might want to keep the same peak, so we don't move the goalpost.
-      // So nothing changes.
+      // Loss in aggressive → switch back to safe immediately
+      state.activeMode = 'safe';
+      addLog(`❌ Aggressive loss (${-profit.toFixed(2)}). Switching back to Safe.`);
+      // Do not change peak; it will be reset on next safe loss
     }
   }
 
@@ -651,13 +628,11 @@ let consecutiveLosses = 0;
 // ENTRY LOGIC – Multi-mode
 // =====================================================================
 function processLiveFeed(symbol, price) {
-  // 1. Pending settlement check
   if (state.pendingSettlement) {
     broadcastSSE({ state: sanitizeState() });
     return;
   }
 
-  // 2. Count down settlement ticks
   if (state.settleTicksRemaining > 0) {
     state.settleTicksRemaining--;
     if (state.settleTicksRemaining === 0) {
@@ -675,14 +650,12 @@ function processLiveFeed(symbol, price) {
     return;
   }
 
-  // 3. Feed engine and update metrics
   const analysis = engine.feed(symbol, price);
   if (!analysis) return;
 
   state.marketMetrics[symbol] = analysis;
   if (state.cooldownTicksLeft > 0) state.cooldownTicksLeft--;
 
-  // 4. Can we trade?
   if (!state.active || state.locked || state.tradeInProgress || state.cooldownTicksLeft > 0) {
     broadcastSSE({ state: sanitizeState() });
     return;
@@ -698,7 +671,7 @@ function processLiveFeed(symbol, price) {
     return;
   }
 
-  // 5. Evaluate markets using the ACTIVE mode
+  // Evaluate markets using active mode
   let bestCandidate = null;
   let bestScore = -Infinity;
 
@@ -723,7 +696,6 @@ function processLiveFeed(symbol, price) {
     }
   }
 
-  // 6. Execute
   if (bestCandidate) {
     const { symbol, direction, barrier, gap } = bestCandidate;
 
@@ -800,8 +772,6 @@ async function connectDeriv() {
     state.balance = parseFloat(targetAccount.balance);
     state.currency = targetAccount.currency || 'USD';
 
-    // Reset session PnL only if we are starting fresh? Actually we load from state, so keep.
-    // But we need to sync daily PnL.
     await syncDailyPnlFromDB();
     broadcastSSE({ state: sanitizeState() });
 
@@ -920,10 +890,6 @@ app.post('/api/manual-trade', (req, res) => {
   
   let barrier, contractTypeApi;
   if (contractType === 'OVER') {
-    barrier = 1; // For manual, we allow both? Actually we'll let user choose barrier? For simplicity, we'll keep barrier=3 for over, 6 for under as before.
-    // But we can also allow specifying barrier. Let's keep it simple: if user says OVER, we do Over 3 (aggressive) or we could use active mode? 
-    // We'll just use the current mode's default? Better: we let the manual trade use the active mode's barrier? 
-    // For manual, we can set barrier=3 for OVER, 6 for UNDER, as before.
     barrier = 3;
     contractTypeApi = 'DIGITOVER';
   } else if (contractType === 'UNDER') {
