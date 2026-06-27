@@ -16,27 +16,39 @@ const PORT = process.env.PORT || 3000;
 const STATE_FILE = '/var/data/deriv_multimarket_state.json';
 
 // =====================================================================
-//  🎯  CONFIGURATION
+//  🎯  CONFIGURATION – TIGHTENED
 // =====================================================================
 const CONFIG = {
     // ---------- Aggressive Mode (Pattern) ----------
-    MIN_GAP_OVER: 11,
-    MAX_GAP_OVER: 14,
-    MIN_GAP_UNDER: -14,
-    MAX_GAP_UNDER: -11,
+    MIN_GAP_OVER: 12,
+    MAX_GAP_OVER: 30,
+    MIN_GAP_UNDER: -40,
+    MAX_GAP_UNDER: -12,
     OVER_4TH_PREV: [7, 8, 9],
     OVER_LAST3_RANGE: [0, 3],
     UNDER_4TH_PREV: [0, 1, 2, 3],
     UNDER_LAST3_RANGE: [7, 9],
+    // Additional pattern filter: last digit must be 0 or 1 for OVER, 8 or 9 for UNDER
+    OVER_LAST_DIGIT_ALLOWED: [0, 1],
+    UNDER_LAST_DIGIT_ALLOWED: [8, 9],
 
-    // ---------- Safe Mode (New) ----------
-    SAFE_WINDOW: 15,
+    // ---------- Safe Mode ----------
+    SAFE_WINDOW: 20,                     // increased from 15
     SAFE_ABSENT_DIGITS_UNDER8: [0,1,2,3],
     SAFE_ABSENT_DIGITS_OVER1: [7,8,9],
     SAFE_LONG_WINDOW: 1000,
     SAFE_SHORT_WINDOW: 100,
     SAFE_UNDER8_FORBIDDEN_LEAST: [7,8,9],
     SAFE_OVER1_FORBIDDEN_LEAST: [0,1,2],
+    // Additional: require most frequent digit in short window to be high for Under8, low for Over1
+    SAFE_UNDER8_MOST_FREQ_ALLOWED: [7,8,9],
+    SAFE_OVER1_MOST_FREQ_ALLOWED: [0,1,2],
+    // Minimum absolute gap for Safe Mode (to avoid flat markets)
+    SAFE_MIN_ABS_GAP: 8,
+
+    // ---------- Volatility Filter (both modes) ----------
+    VOLATILITY_WINDOW: 20,
+    MAX_STD: 2.5,                        // maximum standard deviation of digits
 
     // ---------- Timing & Cooldowns ----------
     MIN_TRIGGER_INTERVAL: 20000,
@@ -70,7 +82,6 @@ function scheduleRestart() {
   console.log(`⏰ Next restart scheduled at ${nextMidnightUTC.toISOString()} (03:00 EAT)`);
   setTimeout(() => {
     console.log('🔄 Scheduled restart at 03:00 EAT. Resetting daily state...');
-    // Keep sessionPnl, peak, and mode as they are (persistent)
     state.locked = false;
     state.lockReason = '';
     saveState();
@@ -358,18 +369,34 @@ function sanitizeState() {
 
 // ============ STRATEGY CHECK FUNCTIONS ============
 
-// --- Aggressive Mode: Over 3 / Under 6 (4-digit pattern) ---
+// Helper: compute standard deviation of last N digits
+function stdLast(arr, n) {
+  if (arr.length < n) return 0;
+  const slice = arr.slice(-n);
+  const mean = slice.reduce((a,b) => a+b, 0) / n;
+  const squaredDiffs = slice.map(x => (x - mean) ** 2);
+  return Math.sqrt(squaredDiffs.reduce((a,b) => a+b, 0) / n);
+}
+
+// --- Aggressive Mode: Over 3 / Under 6 (4-digit pattern + extra filters) ---
 function checkAggressive(symbol, buffer, metric) {
   if (buffer.length < 4) return null;
+  // Volatility filter
+  const std = stdLast(buffer, CONFIG.VOLATILITY_WINDOW);
+  if (std > CONFIG.MAX_STD) return null;
+
   const gap = metric.totalGap;
   if (gap === undefined) return null;
 
   const last4 = buffer.slice(-4);
   const fourthPrev = last4[0];
   const lastThree = last4.slice(1);
+  const lastDigit = buffer[buffer.length - 1];
 
+  // OVER
   if (gap >= CONFIG.MIN_GAP_OVER && gap <= CONFIG.MAX_GAP_OVER) {
-    if (CONFIG.OVER_4TH_PREV.includes(fourthPrev)) {
+    if (CONFIG.OVER_4TH_PREV.includes(fourthPrev) &&
+        CONFIG.OVER_LAST_DIGIT_ALLOWED.includes(lastDigit)) {
       const allInRange = lastThree.every(d => d >= CONFIG.OVER_LAST3_RANGE[0] && d <= CONFIG.OVER_LAST3_RANGE[1]);
       const allDistinct = (new Set(lastThree)).size === 3;
       if (allInRange && allDistinct) {
@@ -378,8 +405,10 @@ function checkAggressive(symbol, buffer, metric) {
     }
   }
 
+  // UNDER
   if (gap >= CONFIG.MIN_GAP_UNDER && gap <= CONFIG.MAX_GAP_UNDER) {
-    if (CONFIG.UNDER_4TH_PREV.includes(fourthPrev)) {
+    if (CONFIG.UNDER_4TH_PREV.includes(fourthPrev) &&
+        CONFIG.UNDER_LAST_DIGIT_ALLOWED.includes(lastDigit)) {
       const allInRange = lastThree.every(d => d >= CONFIG.UNDER_LAST3_RANGE[0] && d <= CONFIG.UNDER_LAST3_RANGE[1]);
       const allDistinct = (new Set(lastThree)).size === 3;
       if (allInRange && allDistinct) {
@@ -390,34 +419,49 @@ function checkAggressive(symbol, buffer, metric) {
   return null;
 }
 
-// --- Safe Mode: Over 1 / Under 8 (new rules) ---
+// --- Safe Mode: Over 1 / Under 8 (tightened) ---
 function checkSafe(symbol, buffer, metric) {
   const len = buffer.length;
   if (len < CONFIG.SAFE_WINDOW + 1) return null;
 
+  // Volatility filter
+  const std = stdLast(buffer, CONFIG.VOLATILITY_WINDOW);
+  if (std > CONFIG.MAX_STD) return null;
+
   const gap = metric.totalGap;
   if (gap === undefined) return null;
 
+  // Require a minimum bias (absolute gap) to avoid flat markets
+  if (Math.abs(gap) < CONFIG.SAFE_MIN_ABS_GAP) return null;
+
   const recent = buffer.slice(-CONFIG.SAFE_WINDOW);
 
-  // UNDER 8
+  // --- UNDER 8 ---
   const hasLow = CONFIG.SAFE_ABSENT_DIGITS_UNDER8.some(d => recent.includes(d));
   if (!hasLow) {
+    // Least‑frequent checks
     const longSlice = buffer.slice(-CONFIG.SAFE_LONG_WINDOW);
     const shortSlice = buffer.slice(-CONFIG.SAFE_SHORT_WINDOW);
     const freqLong = Array(10).fill(0); longSlice.forEach(d => freqLong[d]++);
     const freqShort = Array(10).fill(0); shortSlice.forEach(d => freqShort[d]++);
+    // Least frequent
     const minLong = Math.min(...freqLong);
     const leastLong = freqLong.indexOf(minLong);
     const minShort = Math.min(...freqShort);
     const leastShort = freqShort.indexOf(minShort);
-    if (!CONFIG.SAFE_UNDER8_FORBIDDEN_LEAST.includes(leastLong) && 
-        !CONFIG.SAFE_UNDER8_FORBIDDEN_LEAST.includes(leastShort)) {
-      return { direction: 'UNDER', barrier: 8, gap: gap };
+    // Most frequent (for short window)
+    const maxShort = Math.max(...freqShort);
+    const mostShort = freqShort.indexOf(maxShort);
+
+    // Conditions: least frequent not 7,8,9; most frequent in short is 7,8,9
+    if (!CONFIG.SAFE_UNDER8_FORBIDDEN_LEAST.includes(leastLong) &&
+        !CONFIG.SAFE_UNDER8_FORBIDDEN_LEAST.includes(leastShort) &&
+        CONFIG.SAFE_UNDER8_MOST_FREQ_ALLOWED.includes(mostShort)) {
+      return { direction: 'UNDER', barrier: 8, gap };
     }
   }
 
-  // OVER 1
+  // --- OVER 1 ---
   const hasHigh = CONFIG.SAFE_ABSENT_DIGITS_OVER1.some(d => recent.includes(d));
   if (!hasHigh) {
     const longSlice = buffer.slice(-CONFIG.SAFE_LONG_WINDOW);
@@ -428,11 +472,16 @@ function checkSafe(symbol, buffer, metric) {
     const leastLong = freqLong.indexOf(minLong);
     const minShort = Math.min(...freqShort);
     const leastShort = freqShort.indexOf(minShort);
+    const maxShort = Math.max(...freqShort);
+    const mostShort = freqShort.indexOf(maxShort);
+
     if (!CONFIG.SAFE_OVER1_FORBIDDEN_LEAST.includes(leastLong) &&
-        !CONFIG.SAFE_OVER1_FORBIDDEN_LEAST.includes(leastShort)) {
-      return { direction: 'OVER', barrier: 1, gap: gap };
+        !CONFIG.SAFE_OVER1_FORBIDDEN_LEAST.includes(leastShort) &&
+        CONFIG.SAFE_OVER1_MOST_FREQ_ALLOWED.includes(mostShort)) {
+      return { direction: 'OVER', barrier: 1, gap };
     }
   }
+
   return null;
 }
 
@@ -562,37 +611,29 @@ function settleRealTrade() {
     }
   }
 
-  // ---------- REVISED MODE SWITCHING ----------
-  const prevMode = state.activeMode;
+  // ---------- MODE SWITCHING (revised) ----------
   if (state.activeMode === 'safe') {
     if (!isWin) {
-      // Loss in safe → switch to aggressive, record peak as PnL before this loss
       state.activeMode = 'aggressive';
-      state.sessionPnlPeak = oldSessionPnl; // PnL before the loss
+      state.sessionPnlPeak = oldSessionPnl;
       addLog(`🔄 Safe loss (${-profit.toFixed(2)}). Switching to Aggressive. Peak to beat: $${state.sessionPnlPeak.toFixed(2)}`);
     } else {
-      // Win in safe – stay safe, update peak if higher (not used in safe but for consistency)
       if (state.sessionPnl > state.sessionPnlPeak) state.sessionPnlPeak = state.sessionPnl;
     }
   } else { // aggressive
     if (isWin) {
       if (state.sessionPnl > state.sessionPnlPeak) {
-        // Recovered – switch back to safe
         state.activeMode = 'safe';
         addLog(`✅ Aggressive win recovered to $${state.sessionPnl.toFixed(2)} (peak $${state.sessionPnlPeak.toFixed(2)}). Switching back to Safe.`);
       } else {
-        // Still below peak, stay aggressive
-        if (state.sessionPnl > state.sessionPnlPeak) state.sessionPnlPeak = state.sessionPnl; // safety
+        if (state.sessionPnl > state.sessionPnlPeak) state.sessionPnlPeak = state.sessionPnl;
       }
     } else {
-      // Loss in aggressive → switch back to safe immediately
       state.activeMode = 'safe';
       addLog(`❌ Aggressive loss (${-profit.toFixed(2)}). Switching back to Safe.`);
-      // Do not change peak; it will be reset on next safe loss
     }
   }
 
-  // Save trade to DB
   saveTradeToCloud({
     contract_id: state.activeRealTrade.contractId,
     asset: MARKETS[state.activeRealTrade.symbol]?.name || state.activeRealTrade.symbol,
