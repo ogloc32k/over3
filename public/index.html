@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QUANTCORE // DESKTOP PROTO-INTERFACE</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  
   <style>
     /* =========================================================================
        CORE VARIABLES & RESET
@@ -131,6 +130,8 @@
     .digit-card .pct-val { font-size: 12px; font-weight: bold; }
     .digit-card.glow-green-circle { border: 2px solid var(--neon-green); box-shadow: 0 0 12px rgba(0, 255, 136, 0.2); background: #142826; }
     .digit-card.glow-green-circle .num-lbl { color: var(--neon-green); }
+    .digit-card.glow-red-circle { border: 2px solid var(--neon-red); box-shadow: 0 0 12px rgba(255,59,48,0.2); background: #2a1418; }
+    .digit-card.glow-red-circle .num-lbl { color: var(--neon-red); }
 
     .density-metrics-panel { background: var(--bg-card); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; }
     .density-meta-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
@@ -329,6 +330,7 @@
             <div class="ledger-row"><span class="ledger-lbl">Session Realized PnL</span><span class="ledger-val" id="ui-ledger-session-pnl" style="color:var(--neon-green);">$0.00</span></div>
             <div class="ledger-row"><span class="ledger-lbl">Daily PnL (24h)</span><span class="ledger-val" id="ui-ledger-daily-pnl" style="color:var(--neon-green);">$0.00</span></div>
             <div class="ledger-row"><span class="ledger-lbl">Dynamically Risk (1%)</span><span class="ledger-val" id="ui-ledger-stake" style="color:var(--neon-orange);">$0.00</span></div>
+            <div class="ledger-row"><span class="ledger-lbl">Active Mode</span><span class="ledger-val" id="ui-ledger-mode-label" style="color:var(--neon-blue);">SAFE</span></div>
           </div>
         </div>
       </div>
@@ -496,14 +498,18 @@
       dailyEl.style.color = dailyPnl >= 0 ? 'var(--neon-green)' : 'var(--neon-red)';
       
       document.getElementById('ui-ledger-stake').innerText = `$${parseFloat(state.currentStake).toFixed(2)}`;
+      
+      // Active mode
+      const modeLabel = document.getElementById('ui-ledger-mode-label');
+      const mode = state.activeMode || 'safe';
+      modeLabel.innerText = mode.toUpperCase();
+      modeLabel.style.color = mode === 'safe' ? 'var(--neon-green)' : 'var(--neon-orange)';
 
       const statusPill = document.getElementById('ui-sys-status');
       const alertBanner = document.getElementById('lock-alert-banner');
 
-      // Determine banner style based on locked and active
       if (state.locked) {
         if (state.active) {
-          // Green banner – armed but paused until midnight
           alertBanner.style.display = "block";
           alertBanner.style.background = "rgba(0,255,136,0.15)";
           alertBanner.style.borderColor = "var(--neon-green)";
@@ -512,7 +518,6 @@
           statusPill.innerText = "PAUSED (ARMED)"; statusPill.style.color = "var(--neon-green)";
           statusPill.style.borderColor = "var(--neon-green)"; statusPill.style.background = "rgba(0,255,136,0.1)";
         } else {
-          // Red banner – locked and not armed
           alertBanner.style.display = "block";
           alertBanner.style.background = "rgba(255,59,48,0.15)";
           alertBanner.style.borderColor = "var(--neon-red)";
@@ -532,7 +537,7 @@
         }
       }
 
-      // ----- CLUSTER CARDS – no badge, just name and gap -----
+      // Cluster list
       const clusterBox = document.getElementById('ui-cluster-list');
       clusterBox.innerHTML = '';
       for (const sym in MARKETS_CFG) {
@@ -575,11 +580,21 @@
           densityFill.style.boxShadow = '0 0 8px var(--neon-blue)';
         }
 
+        // ---- DIGIT CARDS with green/red circles ----
         for (let i = 0; i <= 9; i++) {
-          document.getElementById(`ui-pct-${i}`).innerText = `${currentMetric.pcts[i].toFixed(1)}%`;
-          document.getElementById(`ui-pct-${i}`).parentElement.className = 'digit-card';
+          const pctEl = document.getElementById(`ui-pct-${i}`);
+          pctEl.innerText = `${currentMetric.pcts[i].toFixed(1)}%`;
+          const card = pctEl.parentElement;
+          // Reset
+          card.className = 'digit-card';
+          if (i === currentMetric.mostFreq) {
+            card.classList.add('glow-green-circle');
+          } else if (i === currentMetric.leastFreq) {
+            card.classList.add('glow-red-circle');
+          }
         }
 
+        // Tail strip
         const tailBox = document.getElementById('ui-tail-strip');
         tailBox.innerHTML = '';
         const paddedTicks = currentMetric.last3 && currentMetric.last3.length === 3 ? currentMetric.last3 : ['—','—','—'];
