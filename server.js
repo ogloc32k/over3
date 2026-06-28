@@ -21,8 +21,8 @@ const STATE_FILE = '/var/data/deriv_multimarket_state.json';
 const CONFIG = {
     // ---------- Aggressive Mode (Pattern) ----------
     MIN_GAP_OVER: 12,
-    MAX_GAP_OVER: 30,
-    MIN_GAP_UNDER: -40,
+    MAX_GAP_OVER: 13,
+    MIN_GAP_UNDER: -13,
     MAX_GAP_UNDER: -12,
     OVER_4TH_PREV: [7, 8, 9],
     OVER_LAST3_RANGE: [0, 3],
@@ -33,7 +33,7 @@ const CONFIG = {
     UNDER_LAST_DIGIT_ALLOWED: [8, 9],
 
     // ---------- Safe Mode ----------
-    SAFE_WINDOW: 20,                     // increased from 15
+    SAFE_WINDOW: 20,
     SAFE_ABSENT_DIGITS_UNDER8: [0,1,2,3],
     SAFE_ABSENT_DIGITS_OVER1: [7,8,9],
     SAFE_LONG_WINDOW: 1000,
@@ -48,7 +48,7 @@ const CONFIG = {
 
     // ---------- Volatility Filter (both modes) ----------
     VOLATILITY_WINDOW: 20,
-    MAX_STD: 2.5,                        // maximum standard deviation of digits
+    MAX_STD: 2.5,
 
     // ---------- Timing & Cooldowns ----------
     MIN_TRIGGER_INTERVAL: 20000,
@@ -311,6 +311,8 @@ class MultiMarketPipeline {
     ticks.forEach(d => freq[d]++);
 
     const pcts = freq.map(count => (count / BUFFER_CAPACITY) * 100);
+
+    // --- Gap calculations (unchanged) ---
     const over0 = (ticks.filter(d => d > 0).length / BUFFER_CAPACITY) * 100;
     const under9 = (ticks.filter(d => d < 9).length / BUFFER_CAPACITY) * 100;
     const over1 = (ticks.filter(d => d > 1).length / BUFFER_CAPACITY) * 100;
@@ -324,11 +326,21 @@ class MultiMarketPipeline {
 
     const totalGap = (over0 - under9) + (over1 - under8) + (over2 - under7) + (over3 - under6) + (over4 - under5);
 
+    // --- Find most and least frequent digits ---
+    let maxCount = -1, minCount = Infinity;
+    let mostFreq = 0, leastFreq = 0;
+    for (let i = 0; i < 10; i++) {
+      if (freq[i] > maxCount) { maxCount = freq[i]; mostFreq = i; }
+      if (freq[i] < minCount) { minCount = freq[i]; leastFreq = i; }
+    }
+
     return {
       symbol,
       pcts,
       totalGap,
-      greenCircle: 0,
+      mostFreq,
+      leastFreq,
+      greenCircle: mostFreq,      // backward compatibility
       densityOver3: Math.round((ticks.filter(d => d > 3).length / BUFFER_CAPACITY) * 100),
       last3: ticks.slice(-3)
     };
