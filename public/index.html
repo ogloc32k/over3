@@ -130,8 +130,12 @@
     .digit-card .pct-val { font-size: 12px; font-weight: bold; }
     .digit-card.glow-green-circle { border: 2px solid var(--neon-green); box-shadow: 0 0 12px rgba(0, 255, 136, 0.2); background: #142826; }
     .digit-card.glow-green-circle .num-lbl { color: var(--neon-green); }
+    .digit-card.glow-green-faint { border: 1px solid rgba(0, 255, 136, 0.4); box-shadow: 0 0 6px rgba(0, 255, 136, 0.1); }
+    .digit-card.glow-green-faint .num-lbl { color: rgba(0, 255, 136, 0.6); }
     .digit-card.glow-red-circle { border: 2px solid var(--neon-red); box-shadow: 0 0 12px rgba(255,59,48,0.2); background: #2a1418; }
     .digit-card.glow-red-circle .num-lbl { color: var(--neon-red); }
+    .digit-card.glow-red-faint { border: 1px solid rgba(255,59,48,0.4); box-shadow: 0 0 6px rgba(255,59,48,0.1); }
+    .digit-card.glow-red-faint .num-lbl { color: rgba(255,59,48,0.6); }
 
     .density-metrics-panel { background: var(--bg-card); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; }
     .density-meta-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
@@ -499,7 +503,6 @@
       
       document.getElementById('ui-ledger-stake').innerText = `$${parseFloat(state.currentStake).toFixed(2)}`;
       
-      // Active mode
       const modeLabel = document.getElementById('ui-ledger-mode-label');
       const mode = state.activeMode || 'safe';
       modeLabel.innerText = mode.toUpperCase();
@@ -580,17 +583,29 @@
           densityFill.style.boxShadow = '0 0 8px var(--neon-blue)';
         }
 
-        // ---- DIGIT CARDS with green/red circles ----
+        // ---- DIGIT CARDS with gradation ----
+        // Get sorted digits by percentage descending
+        const digits = Array.from({length: 10}, (_, i) => i);
+        const sorted = digits.slice().sort((a, b) => currentMetric.pcts[b] - currentMetric.pcts[a]);
+        const most = sorted[0];
+        const secondMost = sorted[1];
+        const least = sorted[9];
+        const secondLeast = sorted[8];
+
         for (let i = 0; i <= 9; i++) {
           const pctEl = document.getElementById(`ui-pct-${i}`);
           pctEl.innerText = `${currentMetric.pcts[i].toFixed(1)}%`;
           const card = pctEl.parentElement;
           // Reset
           card.className = 'digit-card';
-          if (i === currentMetric.mostFreq) {
+          if (i === most) {
             card.classList.add('glow-green-circle');
-          } else if (i === currentMetric.leastFreq) {
+          } else if (i === secondMost) {
+            card.classList.add('glow-green-faint');
+          } else if (i === least) {
             card.classList.add('glow-red-circle');
+          } else if (i === secondLeast) {
+            card.classList.add('glow-red-faint');
           }
         }
 
