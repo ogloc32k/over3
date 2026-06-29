@@ -31,7 +31,7 @@ const CONFIG = {
     PATTERN_TRIGGER_DIGIT: 1,      // current digit must be this
 
     // ---------- Analysis window ----------
-    ANALYSIS_WINDOW: 100,          // compute frequencies on last N ticks
+    ANALYSIS_WINDOW: 100,          // compute frequencies and gap on last N ticks
 
     // ---------- Timing & Cooldowns ----------
     MIN_TRIGGER_INTERVAL: 20000,   // 20 seconds
@@ -89,14 +89,96 @@ async function checkDatabaseConnection() {
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
-// ---------- ANALYTICS API ----------
+// =====================================================================
+//  ANALYTICS API – FULL IMPLEMENTATION
+// =====================================================================
 app.get('/api/ledger/analytics', async (req, res) => {
   const { start, end, mode } = req.query;
+
   if (mode === 'session') {
-    return res.json({ totalProfit: state.sessionPnl || 0, strikeRate: '0', totalTrades: 0, rawData: [] });
+    const settlements = state.logs ? state.logs.filter(l => l.message.includes('Settlement')) : [];
+    const wins = settlements.filter(l => l.message.includes('WIN')).length;
+    const strikeRate = settlements.length > 0 ? ((wins / settlements.length) * 100).toFixed(1) : 0;
+    return res.json({
+      totalProfit: state.sessionPnl || 0,
+      strikeRate: strikeRate,
+      totalTrades: settlements.length,
+      rawData: []
+    });
   }
-  // Full analytics code (same as before) – omitted for brevity; keep your existing implementation
-  // (I'll include it in the final block)
+
+  let startDate = start, endDate = end;
+  const now = new Date();
+  if (mode === 'hour') {
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    startDate = oneHourAgo.toISOString();
+    endDate = now.toISOString();
+  } else if (mode === '24h') {
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    startDate = oneDayAgo.toISOString();
+    endDate = now.toISOString();
+  } else if (mode === 'month') {
+    const oneMonthAgo = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+    startDate = oneMonthAgo.toISOString();
+    endDate = now.toISOString();
+  } else if (mode === '6months') {
+    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+    startDate = sixMonthsAgo.toISOString();
+    endDate = now.toISOString();
+  } else if (mode === '1year') {
+    const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+    startDate = oneYearAgo.toISOString();
+    endDate = now.toISOString();
+  }
+
+  if (!startDate || !endDate) {
+    return res.status(400).json({ error: 'Invalid date range. Please provide start and end dates.' });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('trading_ledger')
+      .select('*')
+      .gte('created_at', startDate)
+      .lte('created_at', endDate);
+
+    if (error) throw error;
+
+    const totalProfit = data.reduce((acc, curr) => acc + (curr.profit_loss || 0), 0);
+    const totalTrades = data.length;
+    const wins = data.filter(t => t.is_win).length;
+    const strikeRate = totalTrades > 0 ? ((wins / totalTrades) * 100).toFixed(1) : 0;
+
+    let grossProfit = 0, grossLoss = 0;
+    data.forEach(t => {
+      const pnl = t.profit_loss || 0;
+      if (pnl > 0) grossProfit += pnl;
+      else if (pnl < 0) grossLoss += Math.abs(pnl);
+    });
+    const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? Infinity : 0);
+
+    const sorted = data.slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    let peak = 0, maxDrawdown = 0, cum = 0;
+    sorted.forEach(t => {
+      cum += (t.profit_loss || 0);
+      if (cum > peak) peak = cum;
+      const drawdown = peak - cum;
+      if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+    });
+    const drawdownPercent = (peak > 0) ? (maxDrawdown / peak) * 100 : 0;
+
+    res.json({
+      totalProfit: totalProfit.toFixed(2),
+      strikeRate,
+      totalTrades,
+      profitFactor: profitFactor.toFixed(2),
+      drawdown: drawdownPercent.toFixed(2),
+      rawData: data
+    });
+  } catch (err) {
+    console.error('❌ Analytics Error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch historical data' });
+  }
 });
 
 // --- REQUIRED: Live Logging System ---
@@ -203,11 +285,12 @@ class MultiMarketPipeline {
     const ticks = this.buffers[symbol];
     if (ticks.length < CONFIG.ANALYSIS_WINDOW) return null;
 
-    // Use only the last ANALYSIS_WINDOW ticks for frequency analysis
     const windowTicks = ticks.slice(-CONFIG.ANALYSIS_WINDOW);
+    const n = windowTicks.length;
+
     const freq = Array(10).fill(0);
     windowTicks.forEach(d => freq[d]++);
-    const pcts = freq.map(count => (count / CONFIG.ANALYSIS_WINDOW) * 100);
+    const pcts = freq.map(count => (count / n) * 100);
 
     let maxCount = -1, minCount = Infinity;
     let mostFreq = 0, leastFreq = 0;
@@ -216,8 +299,21 @@ class MultiMarketPipeline {
       if (freq[i] < minCount) { minCount = freq[i]; leastFreq = i; }
     }
 
-    const densityOver3 = (windowTicks.filter(d => d > 3).length / CONFIG.ANALYSIS_WINDOW) * 100;
-    const last3 = ticks.slice(-3);
+    const densityOver3 = (windowTicks.filter(d => d > 3).length / n) * 100;
+
+    // ---- Cumulative Macro-Gap ----
+    const over0 = (windowTicks.filter(d => d > 0).length / n) * 100;
+    const under9 = (windowTicks.filter(d => d < 9).length / n) * 100;
+    const over1 = (windowTicks.filter(d => d > 1).length / n) * 100;
+    const under8 = (windowTicks.filter(d => d < 8).length / n) * 100;
+    const over2 = (windowTicks.filter(d => d > 2).length / n) * 100;
+    const under7 = (windowTicks.filter(d => d < 7).length / n) * 100;
+    const over3 = (windowTicks.filter(d => d > 3).length / n) * 100;
+    const under6 = (windowTicks.filter(d => d < 6).length / n) * 100;
+    const over4 = (windowTicks.filter(d => d > 4).length / n) * 100;
+    const under5 = (windowTicks.filter(d => d < 5).length / n) * 100;
+
+    const totalGap = (over0 - under9) + (over1 - under8) + (over2 - under7) + (over3 - under6) + (over4 - under5);
 
     let secondMost = 0;
     let secondMax = -1;
@@ -228,6 +324,8 @@ class MultiMarketPipeline {
       }
     }
 
+    const last3 = ticks.slice(-3);
+
     return {
       symbol,
       pcts,
@@ -235,9 +333,9 @@ class MultiMarketPipeline {
       leastFreq,
       secondMost,
       densityOver3,
+      totalGap,
       last3,
-      greenCircle: mostFreq,
-      totalGap: 0
+      greenCircle: mostFreq
     };
   }
 }
@@ -278,7 +376,6 @@ function checkNewStrategy(symbol, buffer, metric) {
 
   const pcts = metric.pcts;
 
-  // 1. Frequency conditions
   for (let d = 0; d <= 4; d++) {
     if (pcts[d] >= CONFIG.MAX_LOW_DIGIT_PCT) return null;
   }
@@ -293,7 +390,6 @@ function checkNewStrategy(symbol, buffer, metric) {
 
   if (metric.densityOver3 <= CONFIG.MIN_DENSITY_OVER_3) return null;
 
-  // 2. Entry pattern
   if (buffer.length < CONFIG.PATTERN_WINDOW) return null;
   const recent = buffer.slice(-CONFIG.PATTERN_WINDOW);
   const lowCount = recent.filter(d => d < 4).length;
@@ -301,11 +397,10 @@ function checkNewStrategy(symbol, buffer, metric) {
   const currentDigit = buffer[buffer.length - 1];
   if (currentDigit !== CONFIG.PATTERN_TRIGGER_DIGIT) return null;
 
-  // All conditions passed – trade OVER 3 (digit > 3)
   return {
     direction: 'OVER',
     barrier: 3,
-    score: pcts[top]  // use top frequency as score for selection
+    score: pcts[top]
   };
 }
 
@@ -456,7 +551,7 @@ function settleRealTrade() {
 let consecutiveLosses = 0;
 
 // =====================================================================
-// ENTRY LOGIC – New Strategy (always OVER 3)
+// ENTRY LOGIC
 // =====================================================================
 function processLiveFeed(symbol, price) {
   if (state.pendingSettlement) {
@@ -502,7 +597,6 @@ function processLiveFeed(symbol, price) {
     return;
   }
 
-  // Evaluate all markets using the new strategy
   let bestCandidate = null;
   let bestScore = -Infinity;
 
@@ -513,7 +607,6 @@ function processLiveFeed(symbol, price) {
 
     const signal = checkNewStrategy(sym, buffer, metric);
     if (signal) {
-      // Use the score (top frequency) to choose the best market
       if (signal.score > bestScore) {
         bestScore = signal.score;
         bestCandidate = { symbol: sym, ...signal };
@@ -531,7 +624,7 @@ function processLiveFeed(symbol, price) {
 
     const contractType = direction === 'OVER' ? 'DIGITOVER' : 'DIGITUNDER';
     const metric = state.marketMetrics[symbol];
-    addLog(`🔥 Signal: ${symbol} | Barrier: ${barrier} | Top digit: ${metric.mostFreq} (${metric.pcts[metric.mostFreq].toFixed(1)}%)`);
+    addLog(`🔥 Signal: ${symbol} | Barrier: ${barrier} | Top digit: ${metric.mostFreq} (${metric.pcts[metric.mostFreq].toFixed(1)}%) | Gap: ${metric.totalGap.toFixed(1)}%`);
 
     state.activeRealTrade = {
       symbol,
@@ -562,7 +655,7 @@ function processLiveFeed(symbol, price) {
   broadcastSSE({ state: sanitizeState() });
 }
 
-// ------------------ WEBSOCKET CONNECTION (unchanged) ------------------
+// ------------------ WEBSOCKET CONNECTION ------------------
 let derivWs = null;
 let reqId = 0;
 let keepAliveLoop = null;
