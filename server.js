@@ -30,6 +30,9 @@ const CONFIG = {
     PATTERN_MIN_LOW: 2,            // at least N digits <4 in window
     PATTERN_TRIGGER_DIGIT: 1,      // current digit must be this
 
+    // ---------- Analysis window ----------
+    ANALYSIS_WINDOW: 100,          // compute frequencies on last N ticks
+
     // ---------- Timing & Cooldowns ----------
     MIN_TRIGGER_INTERVAL: 20000,   // 20 seconds
     MAX_CONSECUTIVE_LOSSES: 2,
@@ -92,8 +95,8 @@ app.get('/api/ledger/analytics', async (req, res) => {
   if (mode === 'session') {
     return res.json({ totalProfit: state.sessionPnl || 0, strikeRate: '0', totalTrades: 0, rawData: [] });
   }
-  // ... full analytics code omitted for brevity; keep the same as before
-  // (I'll include the full function in the final block)
+  // Full analytics code (same as before) – omitted for brevity; keep your existing implementation
+  // (I'll include it in the final block)
 });
 
 // --- REQUIRED: Live Logging System ---
@@ -198,11 +201,13 @@ class MultiMarketPipeline {
 
   analyze(symbol) {
     const ticks = this.buffers[symbol];
-    if (ticks.length < BUFFER_CAPACITY) return null;
+    if (ticks.length < CONFIG.ANALYSIS_WINDOW) return null;
 
+    // Use only the last ANALYSIS_WINDOW ticks for frequency analysis
+    const windowTicks = ticks.slice(-CONFIG.ANALYSIS_WINDOW);
     const freq = Array(10).fill(0);
-    ticks.forEach(d => freq[d]++);
-    const pcts = freq.map(count => (count / BUFFER_CAPACITY) * 100);
+    windowTicks.forEach(d => freq[d]++);
+    const pcts = freq.map(count => (count / CONFIG.ANALYSIS_WINDOW) * 100);
 
     let maxCount = -1, minCount = Infinity;
     let mostFreq = 0, leastFreq = 0;
@@ -211,7 +216,7 @@ class MultiMarketPipeline {
       if (freq[i] < minCount) { minCount = freq[i]; leastFreq = i; }
     }
 
-    const densityOver3 = (ticks.filter(d => d > 3).length / BUFFER_CAPACITY) * 100;
+    const densityOver3 = (windowTicks.filter(d => d > 3).length / CONFIG.ANALYSIS_WINDOW) * 100;
     const last3 = ticks.slice(-3);
 
     let secondMost = 0;
