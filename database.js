@@ -1,10 +1,10 @@
+// database.js
 const { createClient } = require('@supabase/supabase-js');
-const WebSocket = require('ws');  // This will now work because we added it
+const WebSocket = require('ws');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
 
-// Important: pass the WebSocket constructor to the Realtime client
 const supabase = createClient(supabaseUrl, supabaseKey, {
   realtime: {
     transport: WebSocket
