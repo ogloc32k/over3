@@ -12,46 +12,50 @@ const server = http.createServer(app);
 
 const PORT = process.env.PORT || 3000;
 const STATE_FILE = '/var/data/deriv_multimarket_state.json';
+const CONFIG_FILE = '/var/data/deriv_config.json';
 
 // =====================================================================
-//  CONFIGURATION
+//  DEFAULT CONFIG (Rise/Fall)
 // =====================================================================
-const CONFIG = {
-    // ---------- Frequency thresholds (percentages) ----------
-    MAX_LOW_DIGIT_PCT: 10.5,       // digits 0,1,2,3,4 must be < this
-    MAX_DIGIT_0_PCT: 9.5,          // digit 0 must be < this
-    MIN_TOP_DIGIT_PCT: 12.4,       // most frequent digit must be > this
-    TOP_DIGITS_ALLOWED: [7, 8, 9], // most frequent digit must be one of these
-    MIN_TOP_SECOND_DIFF: 1.0,      // top - second > this
-    MIN_DENSITY_OVER_3: 60.0,      // densityOver3 > this
-
-    // ---------- Entry pattern ----------
-    PATTERN_WINDOW: 5,             // look at last N ticks
-    PATTERN_MIN_LOW: 2,            // at least N digits <4 in window
-    PATTERN_TRIGGER_DIGIT: 1,      // current digit must be this
-
-    // ---------- Analysis window ----------
-    ANALYSIS_WINDOW: 100,          // compute frequencies and gap on last N ticks
-
-    // ---------- Timing & Cooldowns ----------
+const DEFAULT_CONFIG = {
+    MIN_SEQUENCE_LENGTH: 3,        // minimum consecutive ticks before trading
+    DURATION_TICKS: 5,             // contract duration in ticks
     MIN_TRIGGER_INTERVAL: 20000,   // 20 seconds
     MAX_CONSECUTIVE_LOSSES: 2,
     LOSS_COOLDOWN_MS: 120000,
-
-    // ---------- Risk Management ----------
     RISK_PERCENT: 1,
     TP_PERCENT: 5,
     SL_PERCENT: 10,
     MIN_STAKE: 0.35,
-
     COOLDOWN_TICKS: 1,
     SETTLE_TICKS: 5,
     SETTLEMENT_TIMEOUT_MS: 10000,
     PNL_SYNC_INTERVAL_MS: 300000
 };
-// =====================================================================
 
-// ---------- SCHEDULED RESTART (03:00 EAT) ----------
+function loadConfig() {
+    try {
+        if (fs.existsSync(CONFIG_FILE)) {
+            const saved = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+            return { ...DEFAULT_CONFIG, ...saved };
+        }
+    } catch(e) {}
+    return { ...DEFAULT_CONFIG };
+}
+
+function saveConfig(config) {
+    try {
+        const dir = path.dirname(CONFIG_FILE);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+    } catch(e) {}
+}
+
+let CONFIG = loadConfig();
+
+// =====================================================================
+//  SCHEDULED RESTART (03:00 EAT)
+// =====================================================================
 function scheduleRestart() {
   const now = Date.now();
   const nextMidnightUTC = new Date(now);
@@ -90,7 +94,26 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
 // =====================================================================
-//  ANALYTICS API – FULL IMPLEMENTATION
+//  CONFIG API
+// =====================================================================
+app.get('/api/config', (req, res) => {
+    res.json(CONFIG);
+});
+
+app.post('/api/config', (req, res) => {
+    try {
+        const newConfig = req.body;
+        if (typeof newConfig !== 'object') throw new Error('Invalid config');
+        CONFIG = { ...DEFAULT_CONFIG, ...newConfig };
+        saveConfig(CONFIG);
+        res.json({ success: true, config: CONFIG });
+    } catch(err) {
+        res.status(400).json({ error: err.message });
+    }
+});
+
+// =====================================================================
+//  ANALYTICS API
 // =====================================================================
 app.get('/api/ledger/analytics', async (req, res) => {
   const { start, end, mode } = req.query;
@@ -244,98 +267,70 @@ app.post('/api/control', (req, res) => {
 
 // ---------- Markets Configuration ----------
 const MARKETS = {
-  'R_10':  { id: 'R_10',  name: 'Volatility 10 Index',  dp: 3 },
-  'R_25':  { id: 'R_25',  name: 'Volatility 25 Index',  dp: 3 },
-  'R_50':  { id: 'R_50',  name: 'Volatility 50 Index',  dp: 4 },
-  'R_75':  { id: 'R_75',  name: 'Volatility 75 Index',  dp: 4 },
-  'R_100': { id: 'R_100', name: 'Volatility 100 Index', dp: 2 }
+  'R_10':  { id: 'R_10',  name: 'Volatility 10 Index',  dp: 0 }, // dp not used anymore
+  'R_25':  { id: 'R_25',  name: 'Volatility 25 Index',  dp: 0 },
+  'R_50':  { id: 'R_50',  name: 'Volatility 50 Index',  dp: 0 },
+  'R_75':  { id: 'R_75',  name: 'Volatility 75 Index',  dp: 0 },
+  'R_100': { id: 'R_100', name: 'Volatility 100 Index', dp: 0 }
 };
 const BUFFER_CAPACITY = 1000;
 
-// ---------- Pipeline Class ----------
+// ---------- Pipeline Class (Rise/Fall) ----------
 class MultiMarketPipeline {
   constructor() {
     this.buffers = {};
+    this.lastPrices = {};
+    this.sequences = {};
     for (const symbol in MARKETS) {
       this.buffers[symbol] = [];
-    }
-  }
-
-  extractDigit(price, dp) {
-    return parseInt(parseFloat(price).toFixed(dp).slice(-1));
-  }
-
-  seed(symbol, prices) {
-    const config = MARKETS[symbol];
-    this.buffers[symbol] = prices.map(p => this.extractDigit(p, config.dp));
-    if (this.buffers[symbol].length > BUFFER_CAPACITY) {
-      this.buffers[symbol] = this.buffers[symbol].slice(-BUFFER_CAPACITY);
+      this.lastPrices[symbol] = null;
+      this.sequences[symbol] = { count: 0, direction: 0 }; // direction: 1 for rise, -1 for fall, 0 for flat
     }
   }
 
   feed(symbol, price) {
-    const config = MARKETS[symbol];
-    const digit = this.extractDigit(price, config.dp);
-    this.buffers[symbol].push(digit);
-    if (this.buffers[symbol].length > BUFFER_CAPACITY) this.buffers[symbol].shift();
-    return this.analyze(symbol);
-  }
+    const buf = this.buffers[symbol];
+    buf.push(price);
+    if (buf.length > BUFFER_CAPACITY) buf.shift();
 
-  analyze(symbol) {
-    const ticks = this.buffers[symbol];
-    if (ticks.length < CONFIG.ANALYSIS_WINDOW) return null;
-
-    const windowTicks = ticks.slice(-CONFIG.ANALYSIS_WINDOW);
-    const n = windowTicks.length;
-
-    const freq = Array(10).fill(0);
-    windowTicks.forEach(d => freq[d]++);
-    const pcts = freq.map(count => (count / n) * 100);
-
-    let maxCount = -1, minCount = Infinity;
-    let mostFreq = 0, leastFreq = 0;
-    for (let i = 0; i < 10; i++) {
-      if (freq[i] > maxCount) { maxCount = freq[i]; mostFreq = i; }
-      if (freq[i] < minCount) { minCount = freq[i]; leastFreq = i; }
-    }
-
-    const densityOver3 = (windowTicks.filter(d => d > 3).length / n) * 100;
-
-    // ---- Cumulative Macro-Gap ----
-    const over0 = (windowTicks.filter(d => d > 0).length / n) * 100;
-    const under9 = (windowTicks.filter(d => d < 9).length / n) * 100;
-    const over1 = (windowTicks.filter(d => d > 1).length / n) * 100;
-    const under8 = (windowTicks.filter(d => d < 8).length / n) * 100;
-    const over2 = (windowTicks.filter(d => d > 2).length / n) * 100;
-    const under7 = (windowTicks.filter(d => d < 7).length / n) * 100;
-    const over3 = (windowTicks.filter(d => d > 3).length / n) * 100;
-    const under6 = (windowTicks.filter(d => d < 6).length / n) * 100;
-    const over4 = (windowTicks.filter(d => d > 4).length / n) * 100;
-    const under5 = (windowTicks.filter(d => d < 5).length / n) * 100;
-
-    const totalGap = (over0 - under9) + (over1 - under8) + (over2 - under7) + (over3 - under6) + (over4 - under5);
-
-    let secondMost = 0;
-    let secondMax = -1;
-    for (let i = 0; i < 10; i++) {
-      if (i !== mostFreq && freq[i] > secondMax) {
-        secondMax = freq[i];
-        secondMost = i;
+    const last = this.lastPrices[symbol];
+    if (last !== null) {
+      const diff = price - last;
+      if (diff > 0) {
+        // rising
+        if (this.sequences[symbol].direction === 1) {
+          this.sequences[symbol].count++;
+        } else {
+          this.sequences[symbol].count = 1;
+          this.sequences[symbol].direction = 1;
+        }
+      } else if (diff < 0) {
+        // falling
+        if (this.sequences[symbol].direction === -1) {
+          this.sequences[symbol].count++;
+        } else {
+          this.sequences[symbol].count = 1;
+          this.sequences[symbol].direction = -1;
+        }
+      } else {
+        // flat – reset count
+        this.sequences[symbol].count = 0;
+        this.sequences[symbol].direction = 0;
       }
+    } else {
+      // first tick – no sequence yet
+      this.sequences[symbol].count = 0;
+      this.sequences[symbol].direction = 0;
     }
 
-    const last3 = ticks.slice(-3);
+    this.lastPrices[symbol] = price;
 
     return {
       symbol,
-      pcts,
-      mostFreq,
-      leastFreq,
-      secondMost,
-      densityOver3,
-      totalGap,
-      last3,
-      greenCircle: mostFreq
+      price,
+      sequence: this.sequences[symbol],
+      // Also provide last few ticks for frontend display
+      lastPrices: buf.slice(-5)
     };
   }
 }
@@ -370,38 +365,23 @@ function sanitizeState() {
   return rest;
 }
 
-// ============ NEW STRATEGY CHECK ============
-function checkNewStrategy(symbol, buffer, metric) {
+// ============ STRATEGY CHECK ============
+function checkStrategy(symbol, metric) {
   if (!metric) return null;
+  const seq = metric.sequence;
+  const count = seq.count;
+  const direction = seq.direction;
+  if (Math.abs(count) < CONFIG.MIN_SEQUENCE_LENGTH) return null;
 
-  const pcts = metric.pcts;
-
-  for (let d = 0; d <= 4; d++) {
-    if (pcts[d] >= CONFIG.MAX_LOW_DIGIT_PCT) return null;
+  // Trade opposite direction
+  if (direction === -1) {
+    // falling streak -> buy CALL (expect rise)
+    return { direction: 'CALL', score: count }; // negative count, but we want absolute value later
+  } else if (direction === 1) {
+    // rising streak -> buy PUT (expect fall)
+    return { direction: 'PUT', score: count };
   }
-  if (pcts[0] >= CONFIG.MAX_DIGIT_0_PCT) return null;
-
-  const top = metric.mostFreq;
-  if (!CONFIG.TOP_DIGITS_ALLOWED.includes(top)) return null;
-  if (pcts[top] <= CONFIG.MIN_TOP_DIGIT_PCT) return null;
-
-  const second = metric.secondMost;
-  if (pcts[top] - pcts[second] <= CONFIG.MIN_TOP_SECOND_DIFF) return null;
-
-  if (metric.densityOver3 <= CONFIG.MIN_DENSITY_OVER_3) return null;
-
-  if (buffer.length < CONFIG.PATTERN_WINDOW) return null;
-  const recent = buffer.slice(-CONFIG.PATTERN_WINDOW);
-  const lowCount = recent.filter(d => d < 4).length;
-  if (lowCount < CONFIG.PATTERN_MIN_LOW) return null;
-  const currentDigit = buffer[buffer.length - 1];
-  if (currentDigit !== CONFIG.PATTERN_TRIGGER_DIGIT) return null;
-
-  return {
-    direction: 'OVER',
-    barrier: 3,
-    score: pcts[top]
-  };
+  return null;
 }
 
 // ============ P&L SYNC & LIMITS ============
@@ -527,11 +507,11 @@ function settleRealTrade() {
     stake: state.activeRealTrade.stake,
     payout: grossPayout,
     isWin: isWin,
-    barrier: state.activeRealTrade.barrier,
-    exitTick: state.activeRealTrade.exitTick
+    barrier: null,
+    exitTick: null
   });
 
-  addLog(`[Settlement] ${state.activeRealTrade.symbol} | Result: ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
+  addLog(`[Settlement] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | Result: ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
 
   state.tradeInProgress = false;
   state.activeRealTrade = null;
@@ -576,10 +556,10 @@ function processLiveFeed(symbol, price) {
     return;
   }
 
-  const analysis = engine.feed(symbol, price);
-  if (!analysis) return;
+  const metric = engine.feed(symbol, price);
+  if (!metric) return;
 
-  state.marketMetrics[symbol] = analysis;
+  state.marketMetrics[symbol] = metric;
   if (state.cooldownTicksLeft > 0) state.cooldownTicksLeft--;
 
   if (!state.active || state.locked || state.tradeInProgress || state.cooldownTicksLeft > 0) {
@@ -597,57 +577,58 @@ function processLiveFeed(symbol, price) {
     return;
   }
 
+  // Find best market (highest absolute count)
   let bestCandidate = null;
   let bestScore = -Infinity;
 
   for (const sym in MARKETS) {
-    const buffer = engine.buffers[sym];
-    const metric = state.marketMetrics[sym];
-    if (!metric) continue;
-
-    const signal = checkNewStrategy(sym, buffer, metric);
+    const m = state.marketMetrics[sym];
+    if (!m) continue;
+    const signal = checkStrategy(sym, m);
     if (signal) {
-      if (signal.score > bestScore) {
-        bestScore = signal.score;
+      const score = Math.abs(signal.score);
+      if (score > bestScore) {
+        bestScore = score;
         bestCandidate = { symbol: sym, ...signal };
       }
     }
   }
 
   if (bestCandidate) {
-    const { symbol, direction, barrier } = bestCandidate;
+    const { symbol, direction } = bestCandidate;
 
     state.pendingSettlement = false;
     state.tradeInProgress = true;
     const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
     state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-    const contractType = direction === 'OVER' ? 'DIGITOVER' : 'DIGITUNDER';
+    const contractType = direction; // 'CALL' or 'PUT'
     const metric = state.marketMetrics[symbol];
-    addLog(`🔥 Signal: ${symbol} | Barrier: ${barrier} | Top digit: ${metric.mostFreq} (${metric.pcts[metric.mostFreq].toFixed(1)}%) | Gap: ${metric.totalGap.toFixed(1)}%`);
+    const seq = metric.sequence;
+    const dirLabel = seq.direction === 1 ? 'RISE' : 'FALL';
+    addLog(`🔥 Signal: ${symbol} | ${direction} | Streak: ${Math.abs(seq.count)}${dirLabel}`);
 
     state.activeRealTrade = {
       symbol,
       stake: state.currentStake,
       balanceBefore: state.balance,
       contractType,
-      barrier,
-      direction
+      barrier: null,
+      direction: direction
     };
 
     state.lastTriggerTime = now;
 
-    addLog(`📤 Requesting proposal for ${symbol} ${direction} with barrier ${barrier}...`);
+    addLog(`📤 Requesting ${direction} proposal for ${symbol} (${CONFIG.DURATION_TICKS} ticks)...`);
     send({
       proposal: 1,
       amount: state.currentStake,
       basis: 'stake',
       contract_type: contractType,
       currency: state.currency || 'USD',
-      duration: 1,
+      duration: CONFIG.DURATION_TICKS,
       duration_unit: 't',
       underlying_symbol: symbol,
-      barrier: barrier,
       req_id: ++reqId
     });
   }
@@ -769,7 +750,9 @@ function handleMessage(msg) {
   }
   else if (msg.msg_type === 'history') {
     const symbol = msg.echo_req.ticks_history;
-    engine.seed(symbol, msg.history.prices);
+    // Seed pipeline with historical prices
+    const prices = msg.history.prices.map(p => parseFloat(p));
+    prices.forEach(p => engine.feed(symbol, p));
     addLog(`✅ History synchronized for ${symbol}`);
     send({ ticks: symbol, req_id: ++reqId });
   }
@@ -787,7 +770,7 @@ function handleMessage(msg) {
 
 // ------------------ MANUAL TRADING ------------------ //
 app.post('/api/manual-trade', (req, res) => {
-  const { symbol, contractType } = req.body;
+  const { symbol, contractType } = req.body; // contractType: 'CALL' or 'PUT'
   if (state.locked || state.tradeInProgress) {
     return res.status(400).json({ 
       error: state.locked ? state.lockReason : 'Trade in progress.' 
@@ -796,28 +779,21 @@ app.post('/api/manual-trade', (req, res) => {
   if (!MARKETS[symbol]) {
     return res.status(400).json({ error: 'Invalid symbol.' });
   }
+  if (!['CALL', 'PUT'].includes(contractType)) {
+    return res.status(400).json({ error: 'Invalid contract type. Use "CALL" or "PUT".' });
+  }
+
   const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
   state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
   state.pendingSettlement = false;
   state.tradeInProgress = true;
-  
-  let barrier, contractTypeApi;
-  if (contractType === 'OVER') {
-    barrier = 3;
-    contractTypeApi = 'DIGITOVER';
-  } else if (contractType === 'UNDER') {
-    barrier = 6;
-    contractTypeApi = 'DIGITUNDER';
-  } else {
-    return res.status(400).json({ error: 'Invalid contract type. Use "OVER" or "UNDER".' });
-  }
 
   state.activeRealTrade = {
     symbol,
     stake: state.currentStake,
     balanceBefore: state.balance,
-    contractType: contractTypeApi,
-    barrier,
+    contractType,
+    barrier: null,
     direction: contractType
   };
 
@@ -825,16 +801,15 @@ app.post('/api/manual-trade', (req, res) => {
     proposal: 1,
     amount: state.currentStake,
     basis: 'stake',
-    contract_type: contractTypeApi,
+    contract_type: contractType,
     currency: state.currency || 'USD',
-    duration: 1,
+    duration: CONFIG.DURATION_TICKS,
     duration_unit: 't',
     underlying_symbol: symbol,
-    barrier: barrier,
     req_id: ++reqId
   });
 
-  addLog(`📤 Manual ${contractType} request for ${symbol} with barrier ${barrier}...`);
+  addLog(`📤 Manual ${contractType} request for ${symbol} (${CONFIG.DURATION_TICKS} ticks)...`);
   res.json({ success: true, message: 'Proposal requested' });
 });
 
