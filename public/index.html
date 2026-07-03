@@ -165,7 +165,6 @@
     .tail-node.down { border-color: var(--neon-red); color: var(--neon-red); }
     .tail-node.flat { border-color: var(--text-dim); color: var(--text-dim); }
 
-    /* Other styles (deck, ledger, log, analytics, settings) unchanged */
     .deck-group { background: var(--bg-card); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; margin-bottom: 15px; }
     .deck-group:last-child { margin-bottom: 0; flex: 1; }
     
@@ -361,7 +360,7 @@
     </div>
   </div>
 
-  <!-- Analytics View (unchanged from previous) -->
+  <!-- Analytics View -->
   <div class="spa-view" id="view-analytics">
     <div class="analytics-layout">
       <div class="audit-filter-bar">
@@ -532,6 +531,7 @@
     let currentFocus = 'R_75';
     let serverMode = 'demo';
     let globalState = null;
+    let sseReady = false;
 
     function setFocusMarket(sym) {
       currentFocus = sym;
@@ -566,23 +566,41 @@
         .catch(err => alert('Network error: ' + err.message));
     }
 
+    // ---- SSE connection ----
     const sse = new EventSource('/api/logs');
+    
+    sse.onopen = function() {
+      console.log('✅ SSE connection opened');
+      sseReady = true;
+      document.getElementById('ui-ledger-mode').innerText = 'CONNECTED';
+    };
+    
+    sse.onerror = function(err) {
+      console.error('❌ SSE error:', err);
+      document.getElementById('ui-ledger-mode').innerText = 'SSE ERROR';
+    };
+
     sse.onmessage = function(e) {
-      const data = JSON.parse(e.data);
-      if (data.state) {
-        globalState = data.state;
-        renderOpsUI(data.state);
-      }
-      if (data.logs && data.logs.length > 0) {
-        const box = document.getElementById('ops-log-stream');
-        data.logs.forEach(log => {
-          const r = document.createElement('div');
-          r.className = 'log-entry';
-          r.innerHTML = `<span class="log-ts">[${new Date(log.time).toLocaleTimeString()}]</span><span class="log-text">${log.message}</span>`;
-          box.appendChild(r);
-        });
-        while (box.children.length > 150) box.removeChild(box.firstChild);
-        box.scrollTop = box.scrollHeight;
+      console.log('📡 SSE data received:', e.data);
+      try {
+        const data = JSON.parse(e.data);
+        if (data.state) {
+          globalState = data.state;
+          renderOpsUI(data.state);
+        }
+        if (data.logs && data.logs.length > 0) {
+          const box = document.getElementById('ops-log-stream');
+          data.logs.forEach(log => {
+            const r = document.createElement('div');
+            r.className = 'log-entry';
+            r.innerHTML = `<span class="log-ts">[${new Date(log.time).toLocaleTimeString()}]</span><span class="log-text">${log.message}</span>`;
+            box.appendChild(r);
+          });
+          while (box.children.length > 150) box.removeChild(box.firstChild);
+          box.scrollTop = box.scrollHeight;
+        }
+      } catch(err) {
+        console.error('❌ Error parsing SSE data:', err);
       }
     };
 
@@ -778,7 +796,7 @@
     }
 
     // =========================================================================
-    // 4. ANALYTICS (unchanged, same as before)
+    // 4. ANALYTICS
     // =========================================================================
     let activeCharts = {};
     function renderPrototypeCharts() {
@@ -975,6 +993,9 @@
     }
     setInterval(updateClock, 1000);
     updateClock();
+
+    // Initial loading state
+    document.getElementById('ui-ledger-mode').innerText = 'LOADING...';
   </script>
 </body>
 </html>
