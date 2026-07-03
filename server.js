@@ -20,8 +20,8 @@ const CONFIG_FILE = '/var/data/deriv_config.json';
 const DEFAULT_CONFIG = {
     FAST_MA_PERIOD: 8,
     SLOW_MA_PERIOD: 21,
-    MIN_SPREAD_PERCENT: 0.15,      // minimum % difference between fast and slow MA
-    MIN_VOLATILITY_PERCENT: 0.4,   // minimum recent price range % to avoid flat markets
+    MIN_SPREAD_PERCENT: 0.15,
+    MIN_VOLATILITY_PERCENT: 0.4,
     DURATION_TICKS: 12,
     MIN_TRIGGER_INTERVAL: 20000,
     MAX_CONSECUTIVE_LOSSES: 2,
@@ -228,6 +228,7 @@ app.get('/api/logs', (req, res) => {
   res.flushHeaders();
   const client = res;
   sseClients.add(client);
+  // Send initial state immediately
   client.write(`data: ${JSON.stringify({ state: sanitizeState(), logs: state.logs.slice(0, 50) })}\n\n`);
   req.on('close', () => {
     sseClients.delete(client);
@@ -293,14 +294,12 @@ class MultiMarketPipeline {
     }
   }
 
-  // Simple moving average
   _ma(arr, period) {
     if (arr.length < period) return null;
     const slice = arr.slice(-period);
     return slice.reduce((a,b) => a+b, 0) / period;
   }
 
-  // Price range % over last N ticks
   _volatility(arr, period) {
     if (arr.length < period) return 0;
     const slice = arr.slice(-period);
@@ -319,7 +318,7 @@ class MultiMarketPipeline {
 
     const fastMA = this._ma(buf, CONFIG.FAST_MA_PERIOD);
     const slowMA = this._ma(buf, CONFIG.SLOW_MA_PERIOD);
-    const vol = this._volatility(buf, 20); // 20 ticks volatility
+    const vol = this._volatility(buf, 20);
 
     return {
       symbol,
@@ -368,14 +367,11 @@ function checkStrategy(symbol, metric) {
   const { fastMA, slowMA, price, volatility } = metric;
   if (fastMA === null || slowMA === null || price === 0) return null;
 
-  // 1. Volatility filter
   if (volatility < CONFIG.MIN_VOLATILITY_PERCENT) return null;
 
-  // 2. Spread filter (in % of price)
   const spread = Math.abs(fastMA - slowMA) / price * 100;
   if (spread < CONFIG.MIN_SPREAD_PERCENT) return null;
 
-  // 3. Direction
   if (fastMA > slowMA) {
     return { direction: 'CALL', score: spread };
   } else {
@@ -579,7 +575,6 @@ function processLiveFeed(symbol, price) {
     return;
   }
 
-  // Find best market (largest MA spread)
   let bestCandidate = null;
   let bestScore = -Infinity;
 
@@ -603,7 +598,7 @@ function processLiveFeed(symbol, price) {
     const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
     state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-    const contractType = direction; // 'CALL' or 'PUT'
+    const contractType = direction;
     const metric = state.marketMetrics[symbol];
     const spread = ((metric.fastMA - metric.slowMA) / metric.price * 100).toFixed(2);
     addLog(`🔥 Signal: ${symbol} | ${direction} | Spread: ${spread}%`);
@@ -688,6 +683,11 @@ async function connectDeriv() {
       addLog(`🌐 Connected. Balance: $${state.balance.toFixed(2)} | Session: $${state.sessionPnl.toFixed(2)}`);
       send({ balance: 1, subscribe: 1, req_id: ++reqId });
       for (const key in MARKETS) send({ ticks_history: key, count: BUFFER_CAPACITY, end: 'latest', req_id: ++reqId });
+
+      // Periodic state broadcast every 5 seconds
+      setInterval(() => {
+        broadcastSSE({ state: sanitizeState() });
+      }, 5000);
 
       keepAliveLoop = setInterval(() => {
         send({ ping: 1 });
