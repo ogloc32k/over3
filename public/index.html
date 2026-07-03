@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>QUANTCORE // DESKTOP PROTO-INTERFACE</title>
+  <title>QUANTCORE // RISE/FALL ENGINE</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     /* =========================================================================
@@ -111,13 +111,24 @@
     }
 
     .cluster-list { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; flex: 1; }
-    .cluster-card { background: var(--bg-card); border: 1px solid var(--border-glow); border-radius: 4px; padding: 12px; cursor: pointer; }
+    .cluster-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-glow);
+      border-radius: 4px;
+      padding: 12px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
     .cluster-card.active { border-color: var(--neon-blue); box-shadow: inset 4px 0 0 var(--neon-blue); background: #19243a; }
+    .cluster-card.flash-green { border-color: var(--neon-green); box-shadow: 0 0 12px rgba(0,255,136,0.3); }
+    .cluster-card.flash-red { border-color: var(--neon-red); box-shadow: 0 0 12px rgba(255,59,48,0.3); }
     .cluster-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
     .cluster-name { font-size: 12px; font-weight: bold; }
     .cluster-data { display: flex; justify-content: space-between; align-items: baseline; }
     .cluster-price { font-size: 15px; font-weight: bold; }
-    .cluster-gap-mini { font-size: 11px; color: var(--neon-green); }
+    .cluster-seq { font-size: 13px; font-weight: bold; color: var(--neon-blue); }
+    .cluster-seq.rise { color: var(--neon-green); }
+    .cluster-seq.fall { color: var(--neon-red); }
 
     .main-matrix-view { display: flex; flex-direction: column; gap: 15px; overflow-y: auto; flex: 1; }
     .matrix-title-bar { display: flex; justify-content: space-between; align-items: center; background: var(--bg-card); border: 1px solid var(--border-glow); padding: 12px 15px; border-radius: 4px; }
@@ -128,14 +139,6 @@
     .digit-card { background: var(--bg-card); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px 10px; text-align: center; }
     .digit-card .num-lbl { font-size: 28px; font-weight: 900; color: var(--text-dim); margin-bottom: 6px; }
     .digit-card .pct-val { font-size: 12px; font-weight: bold; }
-    .digit-card.glow-green-circle { border: 2px solid var(--neon-green); box-shadow: 0 0 12px rgba(0, 255, 136, 0.2); background: #142826; }
-    .digit-card.glow-green-circle .num-lbl { color: var(--neon-green); }
-    .digit-card.glow-green-faint { border: 1px solid rgba(0, 255, 136, 0.4); box-shadow: 0 0 6px rgba(0, 255, 136, 0.1); }
-    .digit-card.glow-green-faint .num-lbl { color: rgba(0, 255, 136, 0.6); }
-    .digit-card.glow-red-circle { border: 2px solid var(--neon-red); box-shadow: 0 0 12px rgba(255,59,48,0.2); background: #2a1418; }
-    .digit-card.glow-red-circle .num-lbl { color: var(--neon-red); }
-    .digit-card.glow-red-faint { border: 1px solid rgba(255,59,48,0.4); box-shadow: 0 0 6px rgba(255,59,48,0.1); }
-    .digit-card.glow-red-faint .num-lbl { color: rgba(255,59,48,0.6); }
 
     .density-metrics-panel { background: var(--bg-card); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; }
     .density-meta-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
@@ -150,8 +153,9 @@
     
     .tail-strip { display: flex; gap: 8px; margin-top: 6px; }
     .tail-node { background: var(--bg-terminal); border: 1px solid var(--border-glow); padding: 6px 14px; border-radius: 3px; font-size: 15px; font-weight: bold; }
-    .tail-node.low-alert { border-color: var(--neon-orange); color: var(--neon-orange); background: rgba(255, 149, 0, 0.08); }
-    .tail-node.trigger-digit { border-color: var(--neon-blue); color: var(--neon-blue); background: rgba(0, 210, 255, 0.12); }
+    .tail-node.up { border-color: var(--neon-green); color: var(--neon-green); }
+    .tail-node.down { border-color: var(--neon-red); color: var(--neon-red); }
+    .tail-node.flat { border-color: var(--text-dim); color: var(--text-dim); }
 
     .deck-group { background: var(--bg-card); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; margin-bottom: 15px; }
     .deck-group:last-child { margin-bottom: 0; flex: 1; }
@@ -159,8 +163,8 @@
     .action-button { display: block; width: 100%; padding: 13px; border-radius: 4px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; cursor: pointer; border: none; margin-bottom: 10px; }
     .btn-arm { background: var(--neon-green); color: #05070a; }
     .btn-disarm { background: var(--neon-red); color: #ffffff; margin-bottom: 0; }
-    .btn-manual-over { background: var(--neon-green); color: #05070a; width: 48%; }
-    .btn-manual-under { background: var(--neon-red); color: #ffffff; width: 48%; }
+    .btn-manual-call { background: var(--neon-green); color: #05070a; width: 48%; }
+    .btn-manual-put { background: var(--neon-red); color: #ffffff; width: 48%; }
     .btn-swap-profile { background: #19243a; color: var(--text-bright); border: 1px solid var(--border-glow); }
 
     .ledger-table { display: flex; flex-direction: column; gap: 10px; }
@@ -174,6 +178,7 @@
     .log-ts { color: var(--neon-blue); margin-right: 10px; flex-shrink: 0; }
     #lock-alert-banner { padding: 12px; border-radius: 4px; font-size: 12px; font-weight: bold; display: none; margin-bottom: 15px; }
 
+    /* Analytics & Settings styles (unchanged from previous) */
     .analytics-layout { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; }
     .audit-filter-bar { background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; display: flex; justify-content: space-between; align-items: center; gap: 20px; }
     .filter-inputs-group { display: flex; align-items: center; gap: 12px; }
@@ -189,7 +194,6 @@
       outline: none;
     }
     .input-date-field:focus { border-color: var(--neon-blue); }
-
     .preset-buttons-strip { display: flex; gap: 6px; flex-wrap: wrap; }
     .btn-preset {
       background: var(--bg-card);
@@ -210,15 +214,26 @@
       border-color: var(--neon-blue);
       box-shadow: 0 0 8px rgba(0, 210, 255, 0.4);
     }
-
     .summary-metrics-ribbon { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
     .metric-ribbon-card { background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; }
     .metric-ribbon-card .m-lbl { font-size: 11px; text-transform: uppercase; color: var(--text-dim); font-weight: bold; letter-spacing: 0.5px; }
     .metric-ribbon-card .m-val { font-size: 24px; font-weight: bold; margin-top: 5px; }
-
     .charts-matrix-grid { display: grid; grid-template-columns: 320px 320px 1fr; gap: 15px; flex: 1; min-height: 380px; }
     .chart-container-panel { background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; display: flex; flex-direction: column; }
     .chart-canvas-wrapper { flex: 1; position: relative; display: flex; justify-content: center; align-items: center; min-height: 0; }
+
+    .settings-layout { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; padding: 20px; }
+    .settings-section { background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 4px; padding: 20px; }
+    .settings-section h3 { color: var(--neon-blue); font-size: 14px; margin-bottom: 15px; letter-spacing: 1px; }
+    .settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 15px; }
+    .setting-item { display: flex; flex-direction: column; gap: 4px; }
+    .setting-item label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+    .setting-item input { background: var(--bg-card); border: 1px solid var(--border-glow); color: var(--text-bright); padding: 6px 10px; border-radius: 3px; font-family: inherit; font-size: 13px; outline: none; }
+    .setting-item input:focus { border-color: var(--neon-blue); }
+    .settings-actions { margin-top: 20px; display: flex; gap: 15px; }
+    .btn-save-settings { background: var(--neon-green); color: #05070a; border: none; padding: 10px 30px; font-weight: bold; border-radius: 4px; cursor: pointer; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+    .btn-save-settings:hover { opacity: 0.8; }
+    .settings-status { color: var(--neon-green); font-size: 12px; padding: 6px 0; }
 
     #sys-clock {
       position: fixed;
@@ -240,16 +255,18 @@
 <body>
 
   <header class="master-nav-header">
-    <div class="brand-title">QUANTCORE<span>//</span>DESKTOP PROTO-INTERFACE</div>
+    <div class="brand-title">QUANTCORE<span>//</span>RISE/FALL ENGINE</div>
     <div class="nav-tabs-wrapper">
       <button class="nav-tab-btn active" id="tab-link-ops" onclick="changeSpaView('ops')">📟 System Execution Console</button>
       <button class="nav-tab-btn" id="tab-link-analytics" onclick="changeSpaView('analytics')">📊 Institutional Performance Deck</button>
+      <button class="nav-tab-btn" id="tab-link-settings" onclick="changeSpaView('settings')">⚙️ Settings</button>
     </div>
   </header>
 
+  <!-- Ops View -->
   <div class="spa-view active-view" id="view-ops">
     <div class="dashboard-grid">
-      
+      <!-- left -->
       <div class="panel-block">
         <div class="panel-header">
           <span>Pipeline Cluster Array</span>
@@ -258,50 +275,37 @@
         <div class="cluster-list" id="ui-cluster-list"></div>
       </div>
 
+      <!-- middle -->
       <div class="panel-block">
         <div class="panel-header">Primary Analytical Stage</div>
         <div class="main-matrix-view">
-          
           <div id="lock-alert-banner"></div>
-
           <div class="matrix-title-bar">
-            <h1 id="ui-focused-title">Active Focus Cluster Array: Volatility 75 Index</h1>
+            <h1 id="ui-focused-title">Active Focus: Volatility 75 Index</h1>
             <span class="sys-status-pill" id="ui-sys-status">CONNECTING...</span>
           </div>
 
-          <div class="digits-grid-2x5" id="ui-digits-grid">
-            <div class="digit-card"><div class="num-lbl">0</div><div class="pct-val" id="ui-pct-0">0.0%</div></div>
-            <div class="digit-card"><div class="num-lbl">1</div><div class="pct-val" id="ui-pct-1">0.0%</div></div>
-            <div class="digit-card"><div class="num-lbl">2</div><div class="pct-val" id="ui-pct-2">0.0%</div></div>
-            <div class="digit-card"><div class="num-lbl">3</div><div class="pct-val" id="ui-pct-3">0.0%</div></div>
-            <div class="digit-card"><div class="num-lbl">4</div><div class="pct-val" id="ui-pct-4">0.0%</div></div>
-            <div class="digit-card"><div class="num-lbl">5</div><div class="pct-val" id="ui-pct-5">0.0%</div></div>
-            <div class="digit-card"><div class="num-lbl">6</div><div class="pct-val" id="ui-pct-6">0.0%</div></div>
-            <div class="digit-card"><div class="num-lbl">7</div><div class="pct-val" id="ui-pct-7">0.0%</div></div>
-            <div class="digit-card"><div class="num-lbl">8</div><div class="pct-val" id="ui-pct-8">0.0%</div></div>
-            <div class="digit-card"><div class="num-lbl">9</div><div class="pct-val" id="ui-pct-9">0.0%</div></div>
+          <!-- Price & Sequence Display -->
+          <div style="display:flex; justify-content:space-around; background:var(--bg-card); border:1px solid var(--border-glow); border-radius:4px; padding:15px;">
+            <div>
+              <div style="color:var(--text-dim); font-size:11px;">Current Price</div>
+              <div style="font-size:24px; font-weight:bold; color:var(--neon-blue);" id="ui-current-price">—</div>
+            </div>
+            <div>
+              <div style="color:var(--text-dim); font-size:11px;">Consecutive Move</div>
+              <div style="font-size:24px; font-weight:bold; color:var(--neon-green);" id="ui-seq-label">—</div>
+            </div>
           </div>
 
-          <div class="density-metrics-panel">
-            <div class="density-meta-row">
-              <span class="density-lbl">Win-Space Density Filter Profile (Digits > 3)</span>
-              <span class="density-pct-display" id="ui-density-pct">0%</span>
-            </div>
-            <div class="density-progress-track"><div class="density-progress-fill" id="ui-density-fill" style="width: 0%;"></div></div>
-          </div>
-
-          <div class="diagnostics-strip">
-            <div class="diag-box">
-              <div class="panel-header" style="margin-bottom:4px; border:none; padding:0;">Cumulative Macro-Gap Score</div>
-              <div class="diag-large-val" id="ui-gap-score">0.0%</div>
-            </div>
-            <div class="diag-box">
-              <div class="panel-header" style="margin-bottom:4px; border:none; padding:0;">Stream Rolling Tail Sequence</div>
-              <div class="tail-strip" id="ui-tail-strip">
-                <span class="tail-node">—</span>
-                <span class="tail-node">—</span>
-                <span class="tail-node">—</span>
-              </div>
+          <!-- Last 5 ticks -->
+          <div style="background:var(--bg-card); border:1px solid var(--border-glow); border-radius:4px; padding:12px;">
+            <div style="color:var(--text-dim); font-size:11px; margin-bottom:6px;">Last 5 Price Ticks</div>
+            <div class="tail-strip" id="ui-tail-strip">
+              <span class="tail-node">—</span>
+              <span class="tail-node">—</span>
+              <span class="tail-node">—</span>
+              <span class="tail-node">—</span>
+              <span class="tail-node">—</span>
             </div>
           </div>
         </div>
@@ -312,6 +316,7 @@
         </div>
       </div>
 
+      <!-- right -->
       <div class="panel-block">
         <div class="panel-header">Operational Deck</div>
         <div class="deck-group">
@@ -322,8 +327,8 @@
         <div class="deck-group">
           <div class="panel-header" style="border:none; padding:0; margin-bottom:10px;">Direct Tactical Interventions</div>
           <div style="display:flex; justify-content:space-between;">
-            <button class="action-button btn-manual-over" onclick="fireManual('OVER')" style="margin-bottom:0;">Buy Over 3</button>
-            <button class="action-button btn-manual-under" onclick="fireManual('UNDER')" style="margin-bottom:0;">Buy Under 3</button>
+            <button class="action-button btn-manual-call" onclick="fireManual('CALL')" style="margin-bottom:0;">Buy CALL</button>
+            <button class="action-button btn-manual-put" onclick="fireManual('PUT')" style="margin-bottom:0;">Buy PUT</button>
           </div>
         </div>
         <div class="deck-group">
@@ -334,17 +339,15 @@
             <div class="ledger-row"><span class="ledger-lbl">Session Realized PnL</span><span class="ledger-val" id="ui-ledger-session-pnl" style="color:var(--neon-green);">$0.00</span></div>
             <div class="ledger-row"><span class="ledger-lbl">Daily PnL (24h)</span><span class="ledger-val" id="ui-ledger-daily-pnl" style="color:var(--neon-green);">$0.00</span></div>
             <div class="ledger-row"><span class="ledger-lbl">Dynamically Risk (1%)</span><span class="ledger-val" id="ui-ledger-stake" style="color:var(--neon-orange);">$0.00</span></div>
-            <div class="ledger-row"><span class="ledger-lbl">Active Mode</span><span class="ledger-val" id="ui-ledger-mode-label" style="color:var(--neon-blue);">SAFE</span></div>
           </div>
         </div>
       </div>
-
     </div>
   </div>
 
+  <!-- Analytics View -->
   <div class="spa-view" id="view-analytics">
     <div class="analytics-layout">
-      
       <div class="audit-filter-bar">
         <div class="filter-inputs-group">
           <label>Query Range Start</label>
@@ -362,7 +365,6 @@
           <button class="btn-preset" id="preset-clear" onclick="applyTimeframePreset(this, 'clear')">Clear</button>
         </div>
       </div>
-
       <div class="summary-metrics-ribbon">
         <div class="metric-ribbon-card">
           <div class="m-lbl">Total Accumulated Net Profit</div>
@@ -381,32 +383,108 @@
           <div class="m-val" id="meta-drawdown" style="color:var(--neon-red);">0.0%</div>
         </div>
       </div>
-
       <div class="charts-matrix-grid">
-        
         <div class="chart-container-panel">
           <div class="panel-header">Strike Distribution (Ratio)</div>
           <div class="chart-canvas-wrapper">
             <canvas id="chart-pie-winloss"></canvas>
           </div>
         </div>
-
         <div class="chart-container-panel">
           <div class="panel-header">Asset Performance Contribution</div>
           <div class="chart-canvas-wrapper">
             <canvas id="chart-donut-assets"></canvas>
           </div>
         </div>
-
         <div class="chart-container-panel">
           <div class="panel-header">Session Capital Growth Curve Trendline</div>
           <div class="chart-canvas-wrapper">
             <canvas id="chart-line-equity"></canvas>
           </div>
         </div>
-
       </div>
+    </div>
+  </div>
 
+  <!-- Settings View -->
+  <div class="spa-view" id="view-settings">
+    <div class="settings-layout">
+      <div class="settings-section">
+        <h3>📊 Strategy Parameters</h3>
+        <div class="settings-grid">
+          <div class="setting-item">
+            <label>Min Sequence Length</label>
+            <input type="number" id="config-MIN_SEQUENCE_LENGTH" step="1" />
+          </div>
+          <div class="setting-item">
+            <label>Duration (ticks)</label>
+            <input type="number" id="config-DURATION_TICKS" step="1" />
+          </div>
+        </div>
+      </div>
+      <div class="settings-section">
+        <h3>⏱ Timing & Cooldowns</h3>
+        <div class="settings-grid">
+          <div class="setting-item">
+            <label>Min Trigger Interval (ms)</label>
+            <input type="number" id="config-MIN_TRIGGER_INTERVAL" step="1000" />
+          </div>
+          <div class="setting-item">
+            <label>Max Consecutive Losses</label>
+            <input type="number" id="config-MAX_CONSECUTIVE_LOSSES" step="1" />
+          </div>
+          <div class="setting-item">
+            <label>Loss Cooldown (ms)</label>
+            <input type="number" id="config-LOSS_COOLDOWN_MS" step="1000" />
+          </div>
+        </div>
+      </div>
+      <div class="settings-section">
+        <h3>💰 Risk Management</h3>
+        <div class="settings-grid">
+          <div class="setting-item">
+            <label>Risk per Trade (%)</label>
+            <input type="number" id="config-RISK_PERCENT" step="0.1" />
+          </div>
+          <div class="setting-item">
+            <label>Daily Take Profit (%)</label>
+            <input type="number" id="config-TP_PERCENT" step="0.1" />
+          </div>
+          <div class="setting-item">
+            <label>Daily Stop Loss (%)</label>
+            <input type="number" id="config-SL_PERCENT" step="0.1" />
+          </div>
+          <div class="setting-item">
+            <label>Min Stake ($)</label>
+            <input type="number" id="config-MIN_STAKE" step="0.01" />
+          </div>
+        </div>
+      </div>
+      <div class="settings-section">
+        <h3>⚙️ Trade Execution</h3>
+        <div class="settings-grid">
+          <div class="setting-item">
+            <label>Cooldown Ticks</label>
+            <input type="number" id="config-COOLDOWN_TICKS" step="1" />
+          </div>
+          <div class="setting-item">
+            <label>Settle Ticks</label>
+            <input type="number" id="config-SETTLE_TICKS" step="1" />
+          </div>
+          <div class="setting-item">
+            <label>Settlement Timeout (ms)</label>
+            <input type="number" id="config-SETTLEMENT_TIMEOUT_MS" step="1000" />
+          </div>
+          <div class="setting-item">
+            <label>P&L Sync Interval (ms)</label>
+            <input type="number" id="config-PNL_SYNC_INTERVAL_MS" step="1000" />
+          </div>
+        </div>
+      </div>
+      <div class="settings-actions">
+        <button class="btn-save-settings" onclick="saveSettings()">Apply Settings</button>
+        <span class="settings-status" id="settings-status"></span>
+      </div>
     </div>
   </div>
 
@@ -414,7 +492,7 @@
 
   <script>
     // =========================================================================
-    // 1. LIVE OPERATIONS ENGINE (Backend Connection)
+    // 1. LIVE OPERATIONS ENGINE
     // =========================================================================
     const MARKETS_CFG = {
       'R_10': 'Volatility 10 Index',
@@ -423,7 +501,6 @@
       'R_75': 'Volatility 75 Index',
       'R_100': 'Volatility 100 Index'
     };
-    
     let currentFocus = 'R_75';
     let serverMode = 'demo';
     let globalState = null;
@@ -455,17 +532,13 @@
       fetch('/api/manual-trade', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: currentFocus, contractType: type }) })
         .then(res => res.json())
         .then(data => {
-          if (data.error) {
-            alert('Manual trade failed: ' + data.error);
-          } else {
-            console.log('Manual trade request sent:', data.message);
-          }
+          if (data.error) alert('Manual trade failed: ' + data.error);
+          else console.log('Manual trade request sent:', data.message);
         })
         .catch(err => alert('Network error: ' + err.message));
     }
 
     const sse = new EventSource('/api/logs');
-    
     sse.onmessage = function(e) {
       const data = JSON.parse(e.data);
       if (data.state) {
@@ -475,7 +548,7 @@
       if (data.logs && data.logs.length > 0) {
         const box = document.getElementById('ops-log-stream');
         data.logs.forEach(log => {
-          const r = document.createElement('div'); 
+          const r = document.createElement('div');
           r.className = 'log-entry';
           r.innerHTML = `<span class="log-ts">[${new Date(log.time).toLocaleTimeString()}]</span><span class="log-text">${log.message}</span>`;
           box.appendChild(r);
@@ -487,7 +560,6 @@
 
     function renderOpsUI(state) {
       serverMode = state.tradingMode;
-
       document.getElementById('ui-ledger-mode').innerText = state.tradingMode.toUpperCase();
       document.getElementById('ui-ledger-bal').innerText = state.balance ? `$${parseFloat(state.balance).toFixed(2)} ${state.currency}` : 'Synchronizing...';
       
@@ -502,11 +574,6 @@
       dailyEl.style.color = dailyPnl >= 0 ? 'var(--neon-green)' : 'var(--neon-red)';
       
       document.getElementById('ui-ledger-stake').innerText = `$${parseFloat(state.currentStake).toFixed(2)}`;
-      
-      const modeLabel = document.getElementById('ui-ledger-mode-label');
-      const mode = state.activeMode || 'safe';
-      modeLabel.innerText = mode.toUpperCase();
-      modeLabel.style.color = mode === 'safe' ? 'var(--neon-green)' : 'var(--neon-orange)';
 
       const statusPill = document.getElementById('ui-sys-status');
       const alertBanner = document.getElementById('lock-alert-banner');
@@ -540,120 +607,150 @@
         }
       }
 
-      // Cluster list
+      // Cluster cards
       const clusterBox = document.getElementById('ui-cluster-list');
       clusterBox.innerHTML = '';
       for (const sym in MARKETS_CFG) {
-        const mMetric = state.marketMetrics && state.marketMetrics[sym] ? state.marketMetrics[sym] : null;
+        const metric = state.marketMetrics && state.marketMetrics[sym] ? state.marketMetrics[sym] : null;
         const isActive = sym === currentFocus;
-        const gapVal = mMetric ? mMetric.totalGap.toFixed(1) : "0.0";
-        const gapColor = mMetric && mMetric.totalGap >= 0 ? 'var(--neon-green)' : 'var(--neon-red)';
+        const price = metric ? metric.price.toFixed(2) : '—';
+        let seqLabel = '—';
+        let seqClass = '';
+        let flashClass = '';
+        if (metric) {
+          const cnt = metric.sequence.count;
+          const dir = metric.sequence.direction;
+          if (dir === 1) { seqLabel = `+${cnt}R`; seqClass = 'rise'; flashClass = 'flash-green'; }
+          else if (dir === -1) { seqLabel = `${cnt}F`; seqClass = 'fall'; flashClass = 'flash-red'; }
+          else { seqLabel = '0'; seqClass = ''; flashClass = ''; }
+        }
 
         clusterBox.innerHTML += `
-          <div class="cluster-card ${isActive ? 'active' : ''}" onclick="setFocusMarket('${sym}')">
+          <div class="cluster-card ${isActive ? 'active' : ''} ${flashClass}" onclick="setFocusMarket('${sym}')">
             <div class="cluster-meta">
               <span class="cluster-name">${MARKETS_CFG[sym]}</span>
             </div>
             <div class="cluster-data">
-              <span class="cluster-price" style="font-size:12px; color:var(--text-dim);">Parsing Matrix...</span>
-              <span class="cluster-gap-mini" style="color:${gapColor};">${gapVal > 0 ? '+' : ''}${gapVal}% Gap</span>
+              <span class="cluster-price">$${price}</span>
+              <span class="cluster-seq ${seqClass}">${seqLabel}</span>
             </div>
           </div>
         `;
       }
 
-      const currentMetric = state.marketMetrics && state.marketMetrics[currentFocus] ? state.marketMetrics[currentFocus] : null;
-      document.getElementById('ui-focused-title').innerText = `Active Focus Cluster Array: ${MARKETS_CFG[currentFocus]}`;
+      // Focused market details
+      const focusMetric = state.marketMetrics && state.marketMetrics[currentFocus] ? state.marketMetrics[currentFocus] : null;
+      document.getElementById('ui-focused-title').innerText = `Active Focus: ${MARKETS_CFG[currentFocus]}`;
       
-      if (currentMetric) {
-        document.getElementById('ui-gap-score').innerText = `${currentMetric.totalGap > 0 ? '+' : ''}${currentMetric.totalGap.toFixed(1)}%`;
-        
-        const densityPct = document.getElementById('ui-density-pct');
-        const densityFill = document.getElementById('ui-density-fill');
-        densityPct.innerText = `${currentMetric.densityOver3}%`;
-        densityFill.style.width = `${currentMetric.densityOver3}%`;
-        
-        if (currentMetric.densityOver3 >= 60) {
-          densityPct.style.color = 'var(--neon-green)';
-          densityFill.style.backgroundColor = 'var(--neon-green)';
-          densityFill.style.boxShadow = '0 0 8px var(--neon-green)';
-        } else {
-          densityPct.style.color = 'var(--neon-blue)';
-          densityFill.style.backgroundColor = 'var(--neon-blue)';
-          densityFill.style.boxShadow = '0 0 8px var(--neon-blue)';
-        }
+      if (focusMetric) {
+        document.getElementById('ui-current-price').innerText = `$${focusMetric.price.toFixed(2)}`;
+        const cnt = focusMetric.sequence.count;
+        const dir = focusMetric.sequence.direction;
+        let label = '—', color = 'var(--text-dim)';
+        if (dir === 1) { label = `+${cnt} RISE`; color = 'var(--neon-green)'; }
+        else if (dir === -1) { label = `${cnt} FALL`; color = 'var(--neon-red)'; }
+        else { label = '0 FLAT'; color = 'var(--text-dim)'; }
+        document.getElementById('ui-seq-label').innerText = label;
+        document.getElementById('ui-seq-label').style.color = color;
 
-        // ---- DIGIT CARDS with gradation ----
-        // Get sorted digits by percentage descending
-        const digits = Array.from({length: 10}, (_, i) => i);
-        const sorted = digits.slice().sort((a, b) => currentMetric.pcts[b] - currentMetric.pcts[a]);
-        const most = sorted[0];
-        const secondMost = sorted[1];
-        const least = sorted[9];
-        const secondLeast = sorted[8];
-
-        for (let i = 0; i <= 9; i++) {
-          const pctEl = document.getElementById(`ui-pct-${i}`);
-          pctEl.innerText = `${currentMetric.pcts[i].toFixed(1)}%`;
-          const card = pctEl.parentElement;
-          // Reset
-          card.className = 'digit-card';
-          if (i === most) {
-            card.classList.add('glow-green-circle');
-          } else if (i === secondMost) {
-            card.classList.add('glow-green-faint');
-          } else if (i === least) {
-            card.classList.add('glow-red-circle');
-          } else if (i === secondLeast) {
-            card.classList.add('glow-red-faint');
-          }
-        }
-
-        // Tail strip
+        // Tail (last 5 prices)
         const tailBox = document.getElementById('ui-tail-strip');
         tailBox.innerHTML = '';
-        const paddedTicks = currentMetric.last3 && currentMetric.last3.length === 3 ? currentMetric.last3 : ['—','—','—'];
-        paddedTicks.forEach((t, idx) => {
-          let extraClass = '';
-          if (t !== '—') {
-            const num = parseInt(t);
-            if (idx < 2 && [0,2,3].includes(num)) extraClass = 'low-alert';
-            if (idx === 2 && num === 1) extraClass = 'trigger-digit';
+        const lastPrices = focusMetric.lastPrices || [];
+        const padded = lastPrices.slice(-5);
+        while (padded.length < 5) padded.unshift(null);
+        padded.forEach((p, idx) => {
+          const node = document.createElement('span');
+          node.className = 'tail-node';
+          if (p === null) { node.innerText = '—'; }
+          else {
+            node.innerText = p.toFixed(2);
+            if (idx > 0 && padded[idx-1] !== null) {
+              if (p > padded[idx-1]) node.classList.add('up');
+              else if (p < padded[idx-1]) node.classList.add('down');
+              else node.classList.add('flat');
+            }
           }
-          tailBox.innerHTML += `<span class="tail-node ${extraClass}">${t}</span>`;
+          tailBox.appendChild(node);
         });
       } else {
-        document.getElementById('ui-gap-score').innerText = '—';
-        document.getElementById('ui-density-pct').innerText = '0%';
-        document.getElementById('ui-density-fill').style.width = '0%';
-        for (let i = 0; i <= 9; i++) {
-          document.getElementById(`ui-pct-${i}`).innerText = '0.0%';
-          document.getElementById(`ui-pct-${i}`).parentElement.className = 'digit-card';
-        }
-        document.getElementById('ui-tail-strip').innerHTML = '<span class="tail-node">—</span><span class="tail-node">—</span><span class="tail-node">—</span>';
+        document.getElementById('ui-current-price').innerText = '—';
+        document.getElementById('ui-seq-label').innerText = '—';
+        document.getElementById('ui-seq-label').style.color = 'var(--text-dim)';
+        document.getElementById('ui-tail-strip').innerHTML = '<span class="tail-node">—</span><span class="tail-node">—</span><span class="tail-node">—</span><span class="tail-node">—</span><span class="tail-node">—</span>';
       }
     }
 
     // =========================================================================
-    // 2. SPA VIEW & INSTITUTIONAL ANALYTICS ENGINE
+    // 2. SPA VIEW SWITCHING
     // =========================================================================
     function changeSpaView(target) {
-      document.getElementById('view-ops').classList.remove('active-view');
-      document.getElementById('view-analytics').classList.remove('active-view');
-      document.getElementById('tab-link-ops').classList.remove('active');
-      document.getElementById('tab-link-analytics').classList.remove('active');
-
+      document.querySelectorAll('.spa-view').forEach(v => v.classList.remove('active-view'));
+      document.querySelectorAll('.nav-tab-btn').forEach(b => b.classList.remove('active'));
       if (target === 'ops') {
         document.getElementById('view-ops').classList.add('active-view');
         document.getElementById('tab-link-ops').classList.add('active');
-      } else {
+      } else if (target === 'analytics') {
         document.getElementById('view-analytics').classList.add('active-view');
         document.getElementById('tab-link-analytics').classList.add('active');
         renderPrototypeCharts();
         applyTimeframePreset(document.getElementById('preset-session'), 'session');
+      } else if (target === 'settings') {
+        document.getElementById('view-settings').classList.add('active-view');
+        document.getElementById('tab-link-settings').classList.add('active');
+        loadConfigToUI();
       }
     }
 
+    // =========================================================================
+    // 3. SETTINGS LOGIC
+    // =========================================================================
+    async function loadConfigToUI() {
+      try {
+        const resp = await fetch('/api/config');
+        const config = await resp.json();
+        for (const key in config) {
+          const el = document.getElementById(`config-${key}`);
+          if (el) el.value = config[key];
+        }
+        document.getElementById('settings-status').innerText = 'Config loaded.';
+      } catch(err) {
+        document.getElementById('settings-status').innerText = 'Error loading config.';
+        console.error(err);
+      }
+    }
+
+    async function saveSettings() {
+      const config = {};
+      document.querySelectorAll('[id^="config-"]').forEach(el => {
+        const key = el.id.replace('config-', '');
+        let val = el.value.trim();
+        if (val === '') val = null;
+        else if (!isNaN(val) && val !== '') val = parseFloat(val);
+        config[key] = val;
+      });
+
+      try {
+        const resp = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(config)
+        });
+        const result = await resp.json();
+        if (result.success) {
+          document.getElementById('settings-status').innerText = '✅ Settings applied successfully!';
+        } else {
+          document.getElementById('settings-status').innerText = '❌ Error: ' + result.error;
+        }
+      } catch(err) {
+        document.getElementById('settings-status').innerText = '❌ Network error.';
+        console.error(err);
+      }
+    }
+
+    // =========================================================================
+    // 4. ANALYTICS (RESTORED)
+    // =========================================================================
     let activeCharts = {};
     function renderPrototypeCharts() {
       if (activeCharts.winLoss) return;
@@ -839,7 +936,7 @@
     }
 
     // =========================================================================
-    // 3. SYSTEM CLOCK (East African Time)
+    // 5. SYSTEM CLOCK
     // =========================================================================
     function updateClock() {
       const now = new Date();
