@@ -18,9 +18,9 @@ const CONFIG_FILE = '/var/data/deriv_config.json';
 //  DEFAULT CONFIG (Rise/Fall)
 // =====================================================================
 const DEFAULT_CONFIG = {
-    MIN_SEQUENCE_LENGTH: 3,        // minimum consecutive ticks before trading
-    DURATION_TICKS: 5,             // contract duration in ticks
-    MIN_TRIGGER_INTERVAL: 20000,   // 20 seconds
+    MIN_SEQUENCE_LENGTH: 3,
+    DURATION_TICKS: 5,
+    MIN_TRIGGER_INTERVAL: 20000,
     MAX_CONSECUTIVE_LOSSES: 2,
     LOSS_COOLDOWN_MS: 120000,
     RISK_PERCENT: 1,
@@ -267,7 +267,7 @@ app.post('/api/control', (req, res) => {
 
 // ---------- Markets Configuration ----------
 const MARKETS = {
-  'R_10':  { id: 'R_10',  name: 'Volatility 10 Index',  dp: 0 }, // dp not used anymore
+  'R_10':  { id: 'R_10',  name: 'Volatility 10 Index',  dp: 0 },
   'R_25':  { id: 'R_25',  name: 'Volatility 25 Index',  dp: 0 },
   'R_50':  { id: 'R_50',  name: 'Volatility 50 Index',  dp: 0 },
   'R_75':  { id: 'R_75',  name: 'Volatility 75 Index',  dp: 0 },
@@ -284,7 +284,7 @@ class MultiMarketPipeline {
     for (const symbol in MARKETS) {
       this.buffers[symbol] = [];
       this.lastPrices[symbol] = null;
-      this.sequences[symbol] = { count: 0, direction: 0 }; // direction: 1 for rise, -1 for fall, 0 for flat
+      this.sequences[symbol] = { count: 0, direction: 0 };
     }
   }
 
@@ -297,7 +297,6 @@ class MultiMarketPipeline {
     if (last !== null) {
       const diff = price - last;
       if (diff > 0) {
-        // rising
         if (this.sequences[symbol].direction === 1) {
           this.sequences[symbol].count++;
         } else {
@@ -305,7 +304,6 @@ class MultiMarketPipeline {
           this.sequences[symbol].direction = 1;
         }
       } else if (diff < 0) {
-        // falling
         if (this.sequences[symbol].direction === -1) {
           this.sequences[symbol].count++;
         } else {
@@ -313,12 +311,10 @@ class MultiMarketPipeline {
           this.sequences[symbol].direction = -1;
         }
       } else {
-        // flat – reset count
         this.sequences[symbol].count = 0;
         this.sequences[symbol].direction = 0;
       }
     } else {
-      // first tick – no sequence yet
       this.sequences[symbol].count = 0;
       this.sequences[symbol].direction = 0;
     }
@@ -329,7 +325,6 @@ class MultiMarketPipeline {
       symbol,
       price,
       sequence: this.sequences[symbol],
-      // Also provide last few ticks for frontend display
       lastPrices: buf.slice(-5)
     };
   }
@@ -373,12 +368,9 @@ function checkStrategy(symbol, metric) {
   const direction = seq.direction;
   if (Math.abs(count) < CONFIG.MIN_SEQUENCE_LENGTH) return null;
 
-  // Trade opposite direction
   if (direction === -1) {
-    // falling streak -> buy CALL (expect rise)
-    return { direction: 'CALL', score: count }; // negative count, but we want absolute value later
+    return { direction: 'CALL', score: count };
   } else if (direction === 1) {
-    // rising streak -> buy PUT (expect fall)
     return { direction: 'PUT', score: count };
   }
   return null;
@@ -471,7 +463,7 @@ function loadState() {
   } catch(e) {}
 }
 
-// ============ SETTLEMENT ============
+// ============ SETTLEMENT (with new DB fields) ============
 function settleRealTrade() {
   if (!state.activeRealTrade || !state.activeRealTrade.contractId || state.balance == null) {
     if (state.activeRealTrade) {
@@ -500,6 +492,7 @@ function settleRealTrade() {
     }
   }
 
+  // Save with new columns
   saveTradeToCloud({
     contract_id: state.activeRealTrade.contractId,
     asset: MARKETS[state.activeRealTrade.symbol]?.name || state.activeRealTrade.symbol,
@@ -508,7 +501,10 @@ function settleRealTrade() {
     payout: grossPayout,
     isWin: isWin,
     barrier: null,
-    exitTick: null
+    exitTick: null,
+    entry_price: state.activeRealTrade.entryPrice || null,
+    exit_price: null, // we don't have the exit price yet
+    duration_ticks: CONFIG.DURATION_TICKS
   });
 
   addLog(`[Settlement] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | Result: ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
@@ -577,7 +573,7 @@ function processLiveFeed(symbol, price) {
     return;
   }
 
-  // Find best market (highest absolute count)
+  // Find best market
   let bestCandidate = null;
   let bestScore = -Infinity;
 
@@ -614,7 +610,8 @@ function processLiveFeed(symbol, price) {
       balanceBefore: state.balance,
       contractType,
       barrier: null,
-      direction: direction
+      direction: direction,
+      entryPrice: null // will be set on buy response
     };
 
     state.lastTriggerTime = now;
@@ -750,7 +747,6 @@ function handleMessage(msg) {
   }
   else if (msg.msg_type === 'history') {
     const symbol = msg.echo_req.ticks_history;
-    // Seed pipeline with historical prices
     const prices = msg.history.prices.map(p => parseFloat(p));
     prices.forEach(p => engine.feed(symbol, p));
     addLog(`✅ History synchronized for ${symbol}`);
@@ -762,15 +758,17 @@ function handleMessage(msg) {
   else if (msg.msg_type === 'buy') {
     if (state.activeRealTrade) {
       state.activeRealTrade.contractId = msg.buy.contract_id;
+      // Capture entry price from the buy response
+      state.activeRealTrade.entryPrice = msg.buy.price;
       state.settleTicksRemaining = CONFIG.SETTLE_TICKS;
-      addLog(`💰 Trade Executed: Contract ID ${msg.buy.contract_id}`);
+      addLog(`💰 Trade Executed: Contract ID ${msg.buy.contract_id} at price ${msg.buy.price}`);
     }
   }
 }
 
 // ------------------ MANUAL TRADING ------------------ //
 app.post('/api/manual-trade', (req, res) => {
-  const { symbol, contractType } = req.body; // contractType: 'CALL' or 'PUT'
+  const { symbol, contractType } = req.body;
   if (state.locked || state.tradeInProgress) {
     return res.status(400).json({ 
       error: state.locked ? state.lockReason : 'Trade in progress.' 
@@ -794,7 +792,8 @@ app.post('/api/manual-trade', (req, res) => {
     balanceBefore: state.balance,
     contractType,
     barrier: null,
-    direction: contractType
+    direction: contractType,
+    entryPrice: null
   };
 
   send({
