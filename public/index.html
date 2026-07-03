@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>QUANTCORE // RISE/FALL ENGINE</title>
+  <title>QUANTCORE // MA CROSSOVER ENGINE</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     /* =========================================================================
-       CORE VARIABLES & RESET
+       CORE VARIABLES & RESET (same as before)
        ========================================================================= */
     :root {
       --bg-terminal: #05070a;
@@ -120,43 +120,52 @@
       transition: all 0.3s ease;
     }
     .cluster-card.active { border-color: var(--neon-blue); box-shadow: inset 4px 0 0 var(--neon-blue); background: #19243a; }
-    .cluster-card.flash-green { border-color: var(--neon-green); box-shadow: 0 0 12px rgba(0,255,136,0.3); }
-    .cluster-card.flash-red { border-color: var(--neon-red); box-shadow: 0 0 12px rgba(255,59,48,0.3); }
+    .cluster-card.trend-bull { border-color: var(--neon-green); box-shadow: 0 0 12px rgba(0,255,136,0.2); }
+    .cluster-card.trend-bear { border-color: var(--neon-red); box-shadow: 0 0 12px rgba(255,59,48,0.2); }
     .cluster-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
     .cluster-name { font-size: 12px; font-weight: bold; }
     .cluster-data { display: flex; justify-content: space-between; align-items: baseline; }
     .cluster-price { font-size: 15px; font-weight: bold; }
-    .cluster-seq { font-size: 13px; font-weight: bold; color: var(--neon-blue); }
-    .cluster-seq.rise { color: var(--neon-green); }
-    .cluster-seq.fall { color: var(--neon-red); }
+    .cluster-spread { font-size: 13px; font-weight: bold; color: var(--neon-blue); }
+    .cluster-spread.bull { color: var(--neon-green); }
+    .cluster-spread.bear { color: var(--neon-red); }
 
     .main-matrix-view { display: flex; flex-direction: column; gap: 15px; overflow-y: auto; flex: 1; }
     .matrix-title-bar { display: flex; justify-content: space-between; align-items: center; background: var(--bg-card); border: 1px solid var(--border-glow); padding: 12px 15px; border-radius: 4px; }
     .matrix-title-bar h1 { font-size: 14px; color: var(--neon-blue); }
     .sys-status-pill { font-size: 11px; font-weight: bold; color: var(--neon-green); background: rgba(0, 255, 136, 0.1); padding: 4px 10px; border: 1px solid var(--neon-green); border-radius: 2px; }
 
-    .digits-grid-2x5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
-    .digit-card { background: var(--bg-card); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px 10px; text-align: center; }
-    .digit-card .num-lbl { font-size: 28px; font-weight: 900; color: var(--text-dim); margin-bottom: 6px; }
-    .digit-card .pct-val { font-size: 12px; font-weight: bold; }
+    .ma-display {
+      display: flex;
+      justify-content: space-around;
+      background: var(--bg-card);
+      border: 1px solid var(--border-glow);
+      border-radius: 4px;
+      padding: 15px;
+    }
+    .ma-item {
+      text-align: center;
+    }
+    .ma-item .label {
+      font-size: 11px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+    }
+    .ma-item .value {
+      font-size: 20px;
+      font-weight: bold;
+      color: var(--neon-blue);
+    }
+    .ma-item .value.fast { color: var(--neon-green); }
+    .ma-item .value.slow { color: var(--neon-orange); }
 
-    .density-metrics-panel { background: var(--bg-card); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; }
-    .density-meta-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-    .density-lbl { font-size: 12px; color: var(--text-dim); font-weight: bold; }
-    .density-pct-display { font-size: 18px; font-weight: bold; color: var(--neon-green); }
-    .density-progress-track { width: 100%; height: 12px; background: #090e16; border: 1px solid #1e293b; border-radius: 6px; overflow: hidden; }
-    .density-progress-fill { width: 64.2%; height: 100%; background: var(--neon-green); box-shadow: 0 0 8px var(--neon-green); transition: width 0.3s ease; }
-
-    .diagnostics-strip { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-    .diag-box { background: var(--bg-card); border: 1px solid var(--border-glow); border-radius: 4px; padding: 12px 15px; }
-    .diag-large-val { font-size: 24px; font-weight: bold; color: var(--neon-blue); margin-top: 4px; }
-    
-    .tail-strip { display: flex; gap: 8px; margin-top: 6px; }
+    .tail-strip { display: flex; gap: 8px; margin-top: 6px; justify-content: center; }
     .tail-node { background: var(--bg-terminal); border: 1px solid var(--border-glow); padding: 6px 14px; border-radius: 3px; font-size: 15px; font-weight: bold; }
     .tail-node.up { border-color: var(--neon-green); color: var(--neon-green); }
     .tail-node.down { border-color: var(--neon-red); color: var(--neon-red); }
     .tail-node.flat { border-color: var(--text-dim); color: var(--text-dim); }
 
+    /* Other styles (deck, ledger, log, analytics, settings) unchanged */
     .deck-group { background: var(--bg-card); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; margin-bottom: 15px; }
     .deck-group:last-child { margin-bottom: 0; flex: 1; }
     
@@ -178,7 +187,6 @@
     .log-ts { color: var(--neon-blue); margin-right: 10px; flex-shrink: 0; }
     #lock-alert-banner { padding: 12px; border-radius: 4px; font-size: 12px; font-weight: bold; display: none; margin-bottom: 15px; }
 
-    /* Analytics & Settings styles (unchanged from previous) */
     .analytics-layout { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; }
     .audit-filter-bar { background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; display: flex; justify-content: space-between; align-items: center; gap: 20px; }
     .filter-inputs-group { display: flex; align-items: center; gap: 12px; }
@@ -255,7 +263,7 @@
 <body>
 
   <header class="master-nav-header">
-    <div class="brand-title">QUANTCORE<span>//</span>RISE/FALL ENGINE</div>
+    <div class="brand-title">QUANTCORE<span>//</span>MA CROSSOVER ENGINE</div>
     <div class="nav-tabs-wrapper">
       <button class="nav-tab-btn active" id="tab-link-ops" onclick="changeSpaView('ops')">📟 System Execution Console</button>
       <button class="nav-tab-btn" id="tab-link-analytics" onclick="changeSpaView('analytics')">📊 Institutional Performance Deck</button>
@@ -285,15 +293,23 @@
             <span class="sys-status-pill" id="ui-sys-status">CONNECTING...</span>
           </div>
 
-          <!-- Price & Sequence Display -->
-          <div style="display:flex; justify-content:space-around; background:var(--bg-card); border:1px solid var(--border-glow); border-radius:4px; padding:15px;">
-            <div>
-              <div style="color:var(--text-dim); font-size:11px;">Current Price</div>
-              <div style="font-size:24px; font-weight:bold; color:var(--neon-blue);" id="ui-current-price">—</div>
+          <!-- MA Display -->
+          <div class="ma-display">
+            <div class="ma-item">
+              <div class="label">Fast MA (8)</div>
+              <div class="value fast" id="ui-fast-ma">—</div>
             </div>
-            <div>
-              <div style="color:var(--text-dim); font-size:11px;">Consecutive Move</div>
-              <div style="font-size:24px; font-weight:bold; color:var(--neon-green);" id="ui-seq-label">—</div>
+            <div class="ma-item">
+              <div class="label">Slow MA (21)</div>
+              <div class="value slow" id="ui-slow-ma">—</div>
+            </div>
+            <div class="ma-item">
+              <div class="label">Spread (%)</div>
+              <div class="value" id="ui-spread" style="color:var(--neon-blue);">—</div>
+            </div>
+            <div class="ma-item">
+              <div class="label">Volatility (%)</div>
+              <div class="value" id="ui-volatility" style="color:var(--neon-orange);">—</div>
             </div>
           </div>
 
@@ -345,7 +361,7 @@
     </div>
   </div>
 
-  <!-- Analytics View -->
+  <!-- Analytics View (unchanged from previous) -->
   <div class="spa-view" id="view-analytics">
     <div class="analytics-layout">
       <div class="audit-filter-bar">
@@ -410,11 +426,23 @@
   <div class="spa-view" id="view-settings">
     <div class="settings-layout">
       <div class="settings-section">
-        <h3>📊 Strategy Parameters</h3>
+        <h3>📊 MA Crossover Parameters</h3>
         <div class="settings-grid">
           <div class="setting-item">
-            <label>Min Sequence Length</label>
-            <input type="number" id="config-MIN_SEQUENCE_LENGTH" step="1" />
+            <label>Fast MA Period</label>
+            <input type="number" id="config-FAST_MA_PERIOD" step="1" />
+          </div>
+          <div class="setting-item">
+            <label>Slow MA Period</label>
+            <input type="number" id="config-SLOW_MA_PERIOD" step="1" />
+          </div>
+          <div class="setting-item">
+            <label>Min Spread %</label>
+            <input type="number" id="config-MIN_SPREAD_PERCENT" step="0.01" />
+          </div>
+          <div class="setting-item">
+            <label>Min Volatility %</label>
+            <input type="number" id="config-MIN_VOLATILITY_PERCENT" step="0.01" />
           </div>
           <div class="setting-item">
             <label>Duration (ticks)</label>
@@ -613,26 +641,25 @@
       for (const sym in MARKETS_CFG) {
         const metric = state.marketMetrics && state.marketMetrics[sym] ? state.marketMetrics[sym] : null;
         const isActive = sym === currentFocus;
-        const price = metric ? metric.price.toFixed(2) : '—';
-        let seqLabel = '—';
-        let seqClass = '';
-        let flashClass = '';
+        let price = '—', spread = '—', trendClass = '';
         if (metric) {
-          const cnt = metric.sequence.count;
-          const dir = metric.sequence.direction;
-          if (dir === 1) { seqLabel = `+${cnt}R`; seqClass = 'rise'; flashClass = 'flash-green'; }
-          else if (dir === -1) { seqLabel = `${cnt}F`; seqClass = 'fall'; flashClass = 'flash-red'; }
-          else { seqLabel = '0'; seqClass = ''; flashClass = ''; }
+          price = metric.price.toFixed(2);
+          if (metric.fastMA !== null && metric.slowMA !== null) {
+            const sp = ((metric.fastMA - metric.slowMA) / metric.price * 100);
+            spread = sp.toFixed(2) + '%';
+            if (sp > 0) trendClass = 'trend-bull';
+            else if (sp < 0) trendClass = 'trend-bear';
+          }
         }
 
         clusterBox.innerHTML += `
-          <div class="cluster-card ${isActive ? 'active' : ''} ${flashClass}" onclick="setFocusMarket('${sym}')">
+          <div class="cluster-card ${isActive ? 'active' : ''} ${trendClass}" onclick="setFocusMarket('${sym}')">
             <div class="cluster-meta">
               <span class="cluster-name">${MARKETS_CFG[sym]}</span>
             </div>
             <div class="cluster-data">
               <span class="cluster-price">$${price}</span>
-              <span class="cluster-seq ${seqClass}">${seqLabel}</span>
+              <span class="cluster-spread ${sp > 0 ? 'bull' : 'bear'}">${spread}</span>
             </div>
           </div>
         `;
@@ -643,15 +670,16 @@
       document.getElementById('ui-focused-title').innerText = `Active Focus: ${MARKETS_CFG[currentFocus]}`;
       
       if (focusMetric) {
-        document.getElementById('ui-current-price').innerText = `$${focusMetric.price.toFixed(2)}`;
-        const cnt = focusMetric.sequence.count;
-        const dir = focusMetric.sequence.direction;
-        let label = '—', color = 'var(--text-dim)';
-        if (dir === 1) { label = `+${cnt} RISE`; color = 'var(--neon-green)'; }
-        else if (dir === -1) { label = `${cnt} FALL`; color = 'var(--neon-red)'; }
-        else { label = '0 FLAT'; color = 'var(--text-dim)'; }
-        document.getElementById('ui-seq-label').innerText = label;
-        document.getElementById('ui-seq-label').style.color = color;
+        document.getElementById('ui-fast-ma').innerText = focusMetric.fastMA !== null ? focusMetric.fastMA.toFixed(2) : '—';
+        document.getElementById('ui-slow-ma').innerText = focusMetric.slowMA !== null ? focusMetric.slowMA.toFixed(2) : '—';
+        if (focusMetric.fastMA !== null && focusMetric.slowMA !== null) {
+          const sp = ((focusMetric.fastMA - focusMetric.slowMA) / focusMetric.price * 100);
+          document.getElementById('ui-spread').innerText = sp.toFixed(2) + '%';
+          document.getElementById('ui-spread').style.color = sp > 0 ? 'var(--neon-green)' : 'var(--neon-red)';
+        } else {
+          document.getElementById('ui-spread').innerText = '—';
+        }
+        document.getElementById('ui-volatility').innerText = focusMetric.volatility !== null ? focusMetric.volatility.toFixed(2) + '%' : '—';
 
         // Tail (last 5 prices)
         const tailBox = document.getElementById('ui-tail-strip');
@@ -674,9 +702,10 @@
           tailBox.appendChild(node);
         });
       } else {
-        document.getElementById('ui-current-price').innerText = '—';
-        document.getElementById('ui-seq-label').innerText = '—';
-        document.getElementById('ui-seq-label').style.color = 'var(--text-dim)';
+        document.getElementById('ui-fast-ma').innerText = '—';
+        document.getElementById('ui-slow-ma').innerText = '—';
+        document.getElementById('ui-spread').innerText = '—';
+        document.getElementById('ui-volatility').innerText = '—';
         document.getElementById('ui-tail-strip').innerHTML = '<span class="tail-node">—</span><span class="tail-node">—</span><span class="tail-node">—</span><span class="tail-node">—</span><span class="tail-node">—</span>';
       }
     }
@@ -749,7 +778,7 @@
     }
 
     // =========================================================================
-    // 4. ANALYTICS (RESTORED)
+    // 4. ANALYTICS (unchanged, same as before)
     // =========================================================================
     let activeCharts = {};
     function renderPrototypeCharts() {
