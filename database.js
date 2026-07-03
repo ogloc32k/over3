@@ -1,9 +1,15 @@
-// database.js (excerpt)
 const { createClient } = require('@supabase/supabase-js');
+const WebSocket = require('ws');  // This will now work because we added it
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Important: pass the WebSocket constructor to the Realtime client
+const supabase = createClient(supabaseUrl, supabaseKey, {
+  realtime: {
+    transport: WebSocket
+  }
+});
 
 async function saveTradeToCloud(trade) {
   const { 
@@ -20,7 +26,7 @@ async function saveTradeToCloud(trade) {
     duration_ticks 
   } = trade;
 
-  const profit_loss = isWin ? (payout - stake) : (payout - stake); // same
+  const profit_loss = isWin ? (payout - stake) : (payout - stake);
 
   const { data, error } = await supabase
     .from('trading_ledger')
