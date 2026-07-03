@@ -15,11 +15,14 @@ const STATE_FILE = '/var/data/deriv_multimarket_state.json';
 const CONFIG_FILE = '/var/data/deriv_config.json';
 
 // =====================================================================
-//  DEFAULT CONFIG (Rise/Fall)
+//  DEFAULT CONFIG (MA Crossover)
 // =====================================================================
 const DEFAULT_CONFIG = {
-    MIN_SEQUENCE_LENGTH: 3,
-    DURATION_TICKS: 5,
+    FAST_MA_PERIOD: 8,
+    SLOW_MA_PERIOD: 21,
+    MIN_SPREAD_PERCENT: 0.15,      // minimum % difference between fast and slow MA
+    MIN_VOLATILITY_PERCENT: 0.4,   // minimum recent price range % to avoid flat markets
+    DURATION_TICKS: 12,
     MIN_TRIGGER_INTERVAL: 20000,
     MAX_CONSECUTIVE_LOSSES: 2,
     LOSS_COOLDOWN_MS: 120000,
@@ -275,17 +278,36 @@ const MARKETS = {
 };
 const BUFFER_CAPACITY = 1000;
 
-// ---------- Pipeline Class (Rise/Fall) ----------
+// ---------- Pipeline Class (MA + Volatility) ----------
 class MultiMarketPipeline {
   constructor() {
     this.buffers = {};
+    this.maFast = {};
+    this.maSlow = {};
     this.lastPrices = {};
-    this.sequences = {};
     for (const symbol in MARKETS) {
       this.buffers[symbol] = [];
+      this.maFast[symbol] = null;
+      this.maSlow[symbol] = null;
       this.lastPrices[symbol] = null;
-      this.sequences[symbol] = { count: 0, direction: 0 };
     }
+  }
+
+  // Simple moving average
+  _ma(arr, period) {
+    if (arr.length < period) return null;
+    const slice = arr.slice(-period);
+    return slice.reduce((a,b) => a+b, 0) / period;
+  }
+
+  // Price range % over last N ticks
+  _volatility(arr, period) {
+    if (arr.length < period) return 0;
+    const slice = arr.slice(-period);
+    const min = Math.min(...slice);
+    const max = Math.max(...slice);
+    if (min === 0) return 0;
+    return (max - min) / min * 100;
   }
 
   feed(symbol, price) {
@@ -293,38 +315,18 @@ class MultiMarketPipeline {
     buf.push(price);
     if (buf.length > BUFFER_CAPACITY) buf.shift();
 
-    const last = this.lastPrices[symbol];
-    if (last !== null) {
-      const diff = price - last;
-      if (diff > 0) {
-        if (this.sequences[symbol].direction === 1) {
-          this.sequences[symbol].count++;
-        } else {
-          this.sequences[symbol].count = 1;
-          this.sequences[symbol].direction = 1;
-        }
-      } else if (diff < 0) {
-        if (this.sequences[symbol].direction === -1) {
-          this.sequences[symbol].count++;
-        } else {
-          this.sequences[symbol].count = 1;
-          this.sequences[symbol].direction = -1;
-        }
-      } else {
-        this.sequences[symbol].count = 0;
-        this.sequences[symbol].direction = 0;
-      }
-    } else {
-      this.sequences[symbol].count = 0;
-      this.sequences[symbol].direction = 0;
-    }
-
     this.lastPrices[symbol] = price;
+
+    const fastMA = this._ma(buf, CONFIG.FAST_MA_PERIOD);
+    const slowMA = this._ma(buf, CONFIG.SLOW_MA_PERIOD);
+    const vol = this._volatility(buf, 20); // 20 ticks volatility
 
     return {
       symbol,
       price,
-      sequence: this.sequences[symbol],
+      fastMA,
+      slowMA,
+      volatility: vol,
       lastPrices: buf.slice(-5)
     };
   }
@@ -360,20 +362,25 @@ function sanitizeState() {
   return rest;
 }
 
-// ============ STRATEGY CHECK ============
+// ============ STRATEGY CHECK (MA Crossover) ============
 function checkStrategy(symbol, metric) {
   if (!metric) return null;
-  const seq = metric.sequence;
-  const count = seq.count;
-  const direction = seq.direction;
-  if (Math.abs(count) < CONFIG.MIN_SEQUENCE_LENGTH) return null;
+  const { fastMA, slowMA, price, volatility } = metric;
+  if (fastMA === null || slowMA === null || price === 0) return null;
 
-  if (direction === -1) {
-    return { direction: 'CALL', score: count };
-  } else if (direction === 1) {
-    return { direction: 'PUT', score: count };
+  // 1. Volatility filter
+  if (volatility < CONFIG.MIN_VOLATILITY_PERCENT) return null;
+
+  // 2. Spread filter (in % of price)
+  const spread = Math.abs(fastMA - slowMA) / price * 100;
+  if (spread < CONFIG.MIN_SPREAD_PERCENT) return null;
+
+  // 3. Direction
+  if (fastMA > slowMA) {
+    return { direction: 'CALL', score: spread };
+  } else {
+    return { direction: 'PUT', score: spread };
   }
-  return null;
 }
 
 // ============ P&L SYNC & LIMITS ============
@@ -463,7 +470,7 @@ function loadState() {
   } catch(e) {}
 }
 
-// ============ SETTLEMENT (with new DB fields) ============
+// ============ SETTLEMENT ============
 function settleRealTrade() {
   if (!state.activeRealTrade || !state.activeRealTrade.contractId || state.balance == null) {
     if (state.activeRealTrade) {
@@ -492,7 +499,6 @@ function settleRealTrade() {
     }
   }
 
-  // Save with new columns
   saveTradeToCloud({
     contract_id: state.activeRealTrade.contractId,
     asset: MARKETS[state.activeRealTrade.symbol]?.name || state.activeRealTrade.symbol,
@@ -503,7 +509,7 @@ function settleRealTrade() {
     barrier: null,
     exitTick: null,
     entry_price: state.activeRealTrade.entryPrice || null,
-    exit_price: null, // we don't have the exit price yet
+    exit_price: null,
     duration_ticks: CONFIG.DURATION_TICKS
   });
 
@@ -573,7 +579,7 @@ function processLiveFeed(symbol, price) {
     return;
   }
 
-  // Find best market
+  // Find best market (largest MA spread)
   let bestCandidate = null;
   let bestScore = -Infinity;
 
@@ -582,9 +588,8 @@ function processLiveFeed(symbol, price) {
     if (!m) continue;
     const signal = checkStrategy(sym, m);
     if (signal) {
-      const score = Math.abs(signal.score);
-      if (score > bestScore) {
-        bestScore = score;
+      if (signal.score > bestScore) {
+        bestScore = signal.score;
         bestCandidate = { symbol: sym, ...signal };
       }
     }
@@ -600,9 +605,8 @@ function processLiveFeed(symbol, price) {
 
     const contractType = direction; // 'CALL' or 'PUT'
     const metric = state.marketMetrics[symbol];
-    const seq = metric.sequence;
-    const dirLabel = seq.direction === 1 ? 'RISE' : 'FALL';
-    addLog(`🔥 Signal: ${symbol} | ${direction} | Streak: ${Math.abs(seq.count)}${dirLabel}`);
+    const spread = ((metric.fastMA - metric.slowMA) / metric.price * 100).toFixed(2);
+    addLog(`🔥 Signal: ${symbol} | ${direction} | Spread: ${spread}%`);
 
     state.activeRealTrade = {
       symbol,
@@ -611,7 +615,7 @@ function processLiveFeed(symbol, price) {
       contractType,
       barrier: null,
       direction: direction,
-      entryPrice: null // will be set on buy response
+      entryPrice: null
     };
 
     state.lastTriggerTime = now;
@@ -758,7 +762,6 @@ function handleMessage(msg) {
   else if (msg.msg_type === 'buy') {
     if (state.activeRealTrade) {
       state.activeRealTrade.contractId = msg.buy.contract_id;
-      // Capture entry price from the buy response
       state.activeRealTrade.entryPrice = msg.buy.price;
       state.settleTicksRemaining = CONFIG.SETTLE_TICKS;
       addLog(`💰 Trade Executed: Contract ID ${msg.buy.contract_id} at price ${msg.buy.price}`);
