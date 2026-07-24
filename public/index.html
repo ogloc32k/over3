@@ -6,9 +6,6 @@
   <title>QUANTCORE // MA CROSSOVER ENGINE</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    /* =========================================================================
-       CORE VARIABLES & RESET
-       ========================================================================= */
     :root {
       --bg-terminal: #05070a;
       --bg-panel: #0a0d14;
@@ -22,9 +19,7 @@
       --text-bright: #e2e8f0;
       --text-dim: #64748b;
     }
-
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    
     body {
       background-color: var(--bg-terminal);
       color: var(--text-bright);
@@ -35,7 +30,6 @@
       overflow: hidden;
       padding: 15px;
     }
-
     .master-nav-header {
       display: flex;
       justify-content: space-between;
@@ -46,12 +40,9 @@
       padding: 10px 20px;
       margin-bottom: 15px;
     }
-
     .brand-title { font-size: 14px; font-weight: bold; letter-spacing: 2px; }
     .brand-title span { color: var(--neon-blue); margin: 0 6px; }
-
     .nav-tabs-wrapper { display: flex; gap: 10px; }
-
     .nav-tab-btn {
       background: var(--bg-card);
       border: 1px solid var(--border-glow);
@@ -65,19 +56,15 @@
       cursor: pointer;
       transition: all 0.2s ease;
     }
-
     .nav-tab-btn:hover { background: var(--bg-card-hover); color: var(--text-bright); }
-
     .nav-tab-btn.active {
       border-color: var(--neon-blue);
       color: var(--neon-blue);
       background: rgba(0, 210, 255, 0.05);
       box-shadow: 0 0 10px rgba(0, 210, 255, 0.15);
     }
-
     .spa-view { display: none; flex: 1; min-height: 0; }
     .spa-view.active-view { display: flex; }
-
     .dashboard-grid {
       display: grid;
       grid-template-columns: 310px 1fr 360px;
@@ -85,7 +72,6 @@
       width: 100%;
       height: 100%;
     }
-
     .panel-block {
       background: var(--bg-panel);
       border: 1px solid var(--border-glow);
@@ -95,7 +81,6 @@
       padding: 15px;
       min-height: 0;
     }
-
     .panel-header {
       font-size: 11px;
       text-transform: uppercase;
@@ -109,7 +94,6 @@
       justify-content: space-between;
       align-items: center;
     }
-
     .cluster-list { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; flex: 1; }
     .cluster-card {
       background: var(--bg-card);
@@ -143,19 +127,9 @@
       border-radius: 4px;
       padding: 15px;
     }
-    .ma-item {
-      text-align: center;
-    }
-    .ma-item .label {
-      font-size: 11px;
-      color: var(--text-dim);
-      text-transform: uppercase;
-    }
-    .ma-item .value {
-      font-size: 20px;
-      font-weight: bold;
-      color: var(--neon-blue);
-    }
+    .ma-item { text-align: center; }
+    .ma-item .label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; }
+    .ma-item .value { font-size: 20px; font-weight: bold; color: var(--neon-blue); }
     .ma-item .value.fast { color: var(--neon-green); }
     .ma-item .value.slow { color: var(--neon-orange); }
 
@@ -167,7 +141,6 @@
 
     .deck-group { background: var(--bg-card); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; margin-bottom: 15px; }
     .deck-group:last-child { margin-bottom: 0; flex: 1; }
-    
     .action-button { display: block; width: 100%; padding: 13px; border-radius: 4px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; cursor: pointer; border: none; margin-bottom: 10px; }
     .btn-arm { background: var(--neon-green); color: #05070a; }
     .btn-disarm { background: var(--neon-red); color: #ffffff; margin-bottom: 0; }
@@ -292,7 +265,6 @@
             <span class="sys-status-pill" id="ui-sys-status">CONNECTING...</span>
           </div>
 
-          <!-- MA Display -->
           <div class="ma-display">
             <div class="ma-item">
               <div class="label">Fast MA (8)</div>
@@ -312,7 +284,6 @@
             </div>
           </div>
 
-          <!-- Last 5 ticks -->
           <div style="background:var(--bg-card); border:1px solid var(--border-glow); border-radius:4px; padding:12px;">
             <div style="color:var(--text-dim); font-size:11px; margin-bottom:6px;">Last 5 Price Ticks</div>
             <div class="tail-strip" id="ui-tail-strip">
@@ -427,85 +398,37 @@
       <div class="settings-section">
         <h3>📊 MA Crossover Parameters</h3>
         <div class="settings-grid">
-          <div class="setting-item">
-            <label>Fast MA Period</label>
-            <input type="number" id="config-FAST_MA_PERIOD" step="1" />
-          </div>
-          <div class="setting-item">
-            <label>Slow MA Period</label>
-            <input type="number" id="config-SLOW_MA_PERIOD" step="1" />
-          </div>
-          <div class="setting-item">
-            <label>Min Spread %</label>
-            <input type="number" id="config-MIN_SPREAD_PERCENT" step="0.01" />
-          </div>
-          <div class="setting-item">
-            <label>Min Volatility %</label>
-            <input type="number" id="config-MIN_VOLATILITY_PERCENT" step="0.01" />
-          </div>
-          <div class="setting-item">
-            <label>Duration (ticks)</label>
-            <input type="number" id="config-DURATION_TICKS" step="1" />
-          </div>
+          <div class="setting-item"><label>Fast MA Period</label><input type="number" id="config-FAST_MA_PERIOD" step="1" /></div>
+          <div class="setting-item"><label>Slow MA Period</label><input type="number" id="config-SLOW_MA_PERIOD" step="1" /></div>
+          <div class="setting-item"><label>Min Spread %</label><input type="number" id="config-MIN_SPREAD_PERCENT" step="0.01" /></div>
+          <div class="setting-item"><label>Min Volatility %</label><input type="number" id="config-MIN_VOLATILITY_PERCENT" step="0.01" /></div>
+          <div class="setting-item"><label>Duration (ticks)</label><input type="number" id="config-DURATION_TICKS" step="1" /></div>
         </div>
       </div>
       <div class="settings-section">
         <h3>⏱ Timing & Cooldowns</h3>
         <div class="settings-grid">
-          <div class="setting-item">
-            <label>Min Trigger Interval (ms)</label>
-            <input type="number" id="config-MIN_TRIGGER_INTERVAL" step="1000" />
-          </div>
-          <div class="setting-item">
-            <label>Max Consecutive Losses</label>
-            <input type="number" id="config-MAX_CONSECUTIVE_LOSSES" step="1" />
-          </div>
-          <div class="setting-item">
-            <label>Loss Cooldown (ms)</label>
-            <input type="number" id="config-LOSS_COOLDOWN_MS" step="1000" />
-          </div>
+          <div class="setting-item"><label>Min Trigger Interval (ms)</label><input type="number" id="config-MIN_TRIGGER_INTERVAL" step="1000" /></div>
+          <div class="setting-item"><label>Max Consecutive Losses</label><input type="number" id="config-MAX_CONSECUTIVE_LOSSES" step="1" /></div>
+          <div class="setting-item"><label>Loss Cooldown (ms)</label><input type="number" id="config-LOSS_COOLDOWN_MS" step="1000" /></div>
         </div>
       </div>
       <div class="settings-section">
         <h3>💰 Risk Management</h3>
         <div class="settings-grid">
-          <div class="setting-item">
-            <label>Risk per Trade (%)</label>
-            <input type="number" id="config-RISK_PERCENT" step="0.1" />
-          </div>
-          <div class="setting-item">
-            <label>Daily Take Profit (%)</label>
-            <input type="number" id="config-TP_PERCENT" step="0.1" />
-          </div>
-          <div class="setting-item">
-            <label>Daily Stop Loss (%)</label>
-            <input type="number" id="config-SL_PERCENT" step="0.1" />
-          </div>
-          <div class="setting-item">
-            <label>Min Stake ($)</label>
-            <input type="number" id="config-MIN_STAKE" step="0.01" />
-          </div>
+          <div class="setting-item"><label>Risk per Trade (%)</label><input type="number" id="config-RISK_PERCENT" step="0.1" /></div>
+          <div class="setting-item"><label>Daily Take Profit (%)</label><input type="number" id="config-TP_PERCENT" step="0.1" /></div>
+          <div class="setting-item"><label>Daily Stop Loss (%)</label><input type="number" id="config-SL_PERCENT" step="0.1" /></div>
+          <div class="setting-item"><label>Min Stake ($)</label><input type="number" id="config-MIN_STAKE" step="0.01" /></div>
         </div>
       </div>
       <div class="settings-section">
         <h3>⚙️ Trade Execution</h3>
         <div class="settings-grid">
-          <div class="setting-item">
-            <label>Cooldown Ticks</label>
-            <input type="number" id="config-COOLDOWN_TICKS" step="1" />
-          </div>
-          <div class="setting-item">
-            <label>Settle Ticks</label>
-            <input type="number" id="config-SETTLE_TICKS" step="1" />
-          </div>
-          <div class="setting-item">
-            <label>Settlement Timeout (ms)</label>
-            <input type="number" id="config-SETTLEMENT_TIMEOUT_MS" step="1000" />
-          </div>
-          <div class="setting-item">
-            <label>P&L Sync Interval (ms)</label>
-            <input type="number" id="config-PNL_SYNC_INTERVAL_MS" step="1000" />
-          </div>
+          <div class="setting-item"><label>Cooldown Ticks</label><input type="number" id="config-COOLDOWN_TICKS" step="1" /></div>
+          <div class="setting-item"><label>Settle Ticks</label><input type="number" id="config-SETTLE_TICKS" step="1" /></div>
+          <div class="setting-item"><label>Settlement Timeout (ms)</label><input type="number" id="config-SETTLEMENT_TIMEOUT_MS" step="1000" /></div>
+          <div class="setting-item"><label>P&L Sync Interval (ms)</label><input type="number" id="config-PNL_SYNC_INTERVAL_MS" step="1000" /></div>
         </div>
       </div>
       <div class="settings-actions">
@@ -653,10 +576,11 @@
         const metric = state.marketMetrics && state.marketMetrics[sym] ? state.marketMetrics[sym] : null;
         const isActive = sym === currentFocus;
         let price = '—', spread = '—', trendClass = '';
+        let sp = 0;
         if (metric) {
-          price = metric.price.toFixed(2);
-          if (metric.fastMA !== null && metric.slowMA !== null) {
-            const sp = ((metric.fastMA - metric.slowMA) / metric.price * 100);
+          price = metric.price ? metric.price.toFixed(2) : '—';
+          if (metric.fastMA !== null && metric.fastMA !== undefined && metric.slowMA !== null && metric.slowMA !== undefined) {
+            sp = ((metric.fastMA - metric.slowMA) / metric.price * 100);
             spread = sp.toFixed(2) + '%';
             if (sp > 0) trendClass = 'trend-bull';
             else if (sp < 0) trendClass = 'trend-bear';
@@ -670,7 +594,7 @@
             </div>
             <div class="cluster-data">
               <span class="cluster-price">$${price}</span>
-              <span class="cluster-spread ${sp > 0 ? 'bull' : 'bear'}">${spread}</span>
+              <span class="cluster-spread ${sp > 0 ? 'bull' : (sp < 0 ? 'bear' : '')}">${spread}</span>
             </div>
           </div>
         `;
@@ -681,18 +605,18 @@
       document.getElementById('ui-focused-title').innerText = `Active Focus: ${MARKETS_CFG[currentFocus]}`;
       
       if (focusMetric) {
-        document.getElementById('ui-fast-ma').innerText = focusMetric.fastMA !== null ? focusMetric.fastMA.toFixed(2) : '—';
-        document.getElementById('ui-slow-ma').innerText = focusMetric.slowMA !== null ? focusMetric.slowMA.toFixed(2) : '—';
-        if (focusMetric.fastMA !== null && focusMetric.slowMA !== null) {
+        document.getElementById('ui-fast-ma').innerText = focusMetric.fastMA !== null && focusMetric.fastMA !== undefined ? focusMetric.fastMA.toFixed(2) : '—';
+        document.getElementById('ui-slow-ma').innerText = focusMetric.slowMA !== null && focusMetric.slowMA !== undefined ? focusMetric.slowMA.toFixed(2) : '—';
+        if (focusMetric.fastMA !== null && focusMetric.fastMA !== undefined && focusMetric.slowMA !== null && focusMetric.slowMA !== undefined) {
           const sp = ((focusMetric.fastMA - focusMetric.slowMA) / focusMetric.price * 100);
           document.getElementById('ui-spread').innerText = sp.toFixed(2) + '%';
           document.getElementById('ui-spread').style.color = sp > 0 ? 'var(--neon-green)' : 'var(--neon-red)';
         } else {
           document.getElementById('ui-spread').innerText = '—';
         }
-        document.getElementById('ui-volatility').innerText = focusMetric.volatility !== null ? focusMetric.volatility.toFixed(2) + '%' : '—';
+        document.getElementById('ui-volatility').innerText = focusMetric.volatility !== null && focusMetric.volatility !== undefined ? focusMetric.volatility.toFixed(2) + '%' : '—';
 
-        // Tail (last 5 prices)
+        // Tail
         const tailBox = document.getElementById('ui-tail-strip');
         tailBox.innerHTML = '';
         const lastPrices = focusMetric.lastPrices || [];
@@ -987,7 +911,6 @@
     setInterval(updateClock, 1000);
     updateClock();
 
-    // Initial loading state
     document.getElementById('ui-ledger-mode').innerText = 'LOADING...';
   </script>
 </body>
