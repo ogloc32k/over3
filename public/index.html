@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>QUANTCORE // SUPPORT/RISE ENGINE</title>
+  <title>QUANTCORE // MA CROSSOVER ENGINE</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     /* =========================================================================
-       CORE VARIABLES & RESET
+       CORE VARIABLES & RESET (same as before)
        ========================================================================= */
     :root {
       --bg-terminal: #05070a;
@@ -124,46 +124,40 @@
     .cluster-card.trend-bear { border-color: var(--neon-red); box-shadow: 0 0 12px rgba(255,59,48,0.2); }
     .cluster-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
     .cluster-name { font-size: 12px; font-weight: bold; }
-    .cluster-data { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 4px; }
+    .cluster-data { display: flex; justify-content: space-between; align-items: baseline; }
     .cluster-price { font-size: 15px; font-weight: bold; }
     .cluster-spread { font-size: 13px; font-weight: bold; color: var(--neon-blue); }
     .cluster-spread.bull { color: var(--neon-green); }
     .cluster-spread.bear { color: var(--neon-red); }
-    .cluster-vloss { font-size: 11px; color: var(--text-dim); margin-left: auto; }
-    .cluster-vloss.loss-high { color: var(--neon-red); }
 
     .main-matrix-view { display: flex; flex-direction: column; gap: 15px; overflow-y: auto; flex: 1; }
     .matrix-title-bar { display: flex; justify-content: space-between; align-items: center; background: var(--bg-card); border: 1px solid var(--border-glow); padding: 12px 15px; border-radius: 4px; }
     .matrix-title-bar h1 { font-size: 14px; color: var(--neon-blue); }
     .sys-status-pill { font-size: 11px; font-weight: bold; color: var(--neon-green); background: rgba(0, 255, 136, 0.1); padding: 4px 10px; border: 1px solid var(--neon-green); border-radius: 2px; }
 
-    .metrics-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
+    .ma-display {
+      display: flex;
+      justify-content: space-around;
       background: var(--bg-card);
       border: 1px solid var(--border-glow);
       border-radius: 4px;
       padding: 15px;
     }
-    .metrics-item {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
+    .ma-item {
+      text-align: center;
     }
-    .metrics-item .label {
-      font-size: 10px;
+    .ma-item .label {
+      font-size: 11px;
       color: var(--text-dim);
       text-transform: uppercase;
     }
-    .metrics-item .value {
-      font-size: 18px;
+    .ma-item .value {
+      font-size: 20px;
       font-weight: bold;
+      color: var(--neon-blue);
     }
-    .metrics-item .value.green { color: var(--neon-green); }
-    .metrics-item .value.red { color: var(--neon-red); }
-    .metrics-item .value.blue { color: var(--neon-blue); }
-    .metrics-item .value.orange { color: var(--neon-orange); }
+    .ma-item .value.fast { color: var(--neon-green); }
+    .ma-item .value.slow { color: var(--neon-orange); }
 
     .tail-strip { display: flex; gap: 8px; margin-top: 6px; justify-content: center; }
     .tail-node { background: var(--bg-terminal); border: 1px solid var(--border-glow); padding: 6px 14px; border-radius: 3px; font-size: 15px; font-weight: bold; }
@@ -171,6 +165,7 @@
     .tail-node.down { border-color: var(--neon-red); color: var(--neon-red); }
     .tail-node.flat { border-color: var(--text-dim); color: var(--text-dim); }
 
+    /* Other styles (deck, ledger, log, analytics, settings) unchanged */
     .deck-group { background: var(--bg-card); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; margin-bottom: 15px; }
     .deck-group:last-child { margin-bottom: 0; flex: 1; }
     
@@ -268,7 +263,7 @@
 <body>
 
   <header class="master-nav-header">
-    <div class="brand-title">QUANTCORE<span>//</span>SUPPORT/RISE ENGINE</div>
+    <div class="brand-title">QUANTCORE<span>//</span>MA CROSSOVER ENGINE</div>
     <div class="nav-tabs-wrapper">
       <button class="nav-tab-btn active" id="tab-link-ops" onclick="changeSpaView('ops')">📟 System Execution Console</button>
       <button class="nav-tab-btn" id="tab-link-analytics" onclick="changeSpaView('analytics')">📊 Institutional Performance Deck</button>
@@ -298,23 +293,23 @@
             <span class="sys-status-pill" id="ui-sys-status">CONNECTING...</span>
           </div>
 
-          <!-- Metrics Grid -->
-          <div class="metrics-grid">
-            <div class="metrics-item">
-              <span class="label">Rise %</span>
-              <span class="value blue" id="ui-rise">—</span>
+          <!-- MA Display -->
+          <div class="ma-display">
+            <div class="ma-item">
+              <div class="label">Fast MA (8)</div>
+              <div class="value fast" id="ui-fast-ma">—</div>
             </div>
-            <div class="metrics-item">
-              <span class="label">Support %</span>
-              <span class="value blue" id="ui-support">—</span>
+            <div class="ma-item">
+              <div class="label">Slow MA (21)</div>
+              <div class="value slow" id="ui-slow-ma">—</div>
             </div>
-            <div class="metrics-item">
-              <span class="label">SMA (10)</span>
-              <span class="value orange" id="ui-sma">—</span>
+            <div class="ma-item">
+              <div class="label">Spread (%)</div>
+              <div class="value" id="ui-spread" style="color:var(--neon-blue);">—</div>
             </div>
-            <div class="metrics-item">
-              <span class="label">Virtual Losses</span>
-              <span class="value" id="ui-vloss" style="color:var(--neon-orange);">0</span>
+            <div class="ma-item">
+              <div class="label">Volatility (%)</div>
+              <div class="value" id="ui-volatility" style="color:var(--neon-orange);">—</div>
             </div>
           </div>
 
@@ -366,7 +361,7 @@
     </div>
   </div>
 
-  <!-- Analytics View (unchanged) -->
+  <!-- Analytics View (unchanged from previous) -->
   <div class="spa-view" id="view-analytics">
     <div class="analytics-layout">
       <div class="audit-filter-bar">
@@ -427,39 +422,31 @@
     </div>
   </div>
 
-  <!-- Settings View (unchanged) -->
+  <!-- Settings View -->
   <div class="spa-view" id="view-settings">
     <div class="settings-layout">
       <div class="settings-section">
-        <h3>📊 Strategy Parameters</h3>
+        <h3>📊 MA Crossover Parameters</h3>
         <div class="settings-grid">
           <div class="setting-item">
-            <label>Window Ticks</label>
-            <input type="number" id="config-WINDOW_TICKS" step="1" />
+            <label>Fast MA Period</label>
+            <input type="number" id="config-FAST_MA_PERIOD" step="1" />
+          </div>
+          <div class="setting-item">
+            <label>Slow MA Period</label>
+            <input type="number" id="config-SLOW_MA_PERIOD" step="1" />
+          </div>
+          <div class="setting-item">
+            <label>Min Spread %</label>
+            <input type="number" id="config-MIN_SPREAD_PERCENT" step="0.01" />
+          </div>
+          <div class="setting-item">
+            <label>Min Volatility %</label>
+            <input type="number" id="config-MIN_VOLATILITY_PERCENT" step="0.01" />
           </div>
           <div class="setting-item">
             <label>Duration (ticks)</label>
             <input type="number" id="config-DURATION_TICKS" step="1" />
-          </div>
-          <div class="setting-item">
-            <label>Rise Low %</label>
-            <input type="number" id="config-RISE_THRESHOLD_LOW" step="0.1" />
-          </div>
-          <div class="setting-item">
-            <label>Rise High %</label>
-            <input type="number" id="config-RISE_THRESHOLD_HIGH" step="0.1" />
-          </div>
-          <div class="setting-item">
-            <label>Support Low %</label>
-            <input type="number" id="config-SUPPORT_THRESHOLD_LOW" step="0.1" />
-          </div>
-          <div class="setting-item">
-            <label>Support High %</label>
-            <input type="number" id="config-SUPPORT_THRESHOLD_HIGH" step="0.1" />
-          </div>
-          <div class="setting-item">
-            <label>Virtual Loss Limit</label>
-            <input type="number" id="config-VIRTUAL_LOSS_LIMIT" step="1" />
           </div>
         </div>
       </div>
@@ -580,35 +567,22 @@
     }
 
     const sse = new EventSource('/api/logs');
-    sse.onopen = function() {
-      console.log('✅ SSE connection opened');
-      document.getElementById('ui-ledger-mode').innerText = 'CONNECTED';
-    };
-    sse.onerror = function(err) {
-      console.error('❌ SSE error:', err);
-      document.getElementById('ui-ledger-mode').innerText = 'SSE ERROR';
-    };
     sse.onmessage = function(e) {
-      console.log('📡 SSE data received');
-      try {
-        const data = JSON.parse(e.data);
-        if (data.state) {
-          globalState = data.state;
-          renderOpsUI(data.state);
-        }
-        if (data.logs && data.logs.length > 0) {
-          const box = document.getElementById('ops-log-stream');
-          data.logs.forEach(log => {
-            const r = document.createElement('div');
-            r.className = 'log-entry';
-            r.innerHTML = `<span class="log-ts">[${new Date(log.time).toLocaleTimeString()}]</span><span class="log-text">${log.message}</span>`;
-            box.appendChild(r);
-          });
-          while (box.children.length > 150) box.removeChild(box.firstChild);
-          box.scrollTop = box.scrollHeight;
-        }
-      } catch(err) {
-        console.error('❌ Error parsing SSE data:', err);
+      const data = JSON.parse(e.data);
+      if (data.state) {
+        globalState = data.state;
+        renderOpsUI(data.state);
+      }
+      if (data.logs && data.logs.length > 0) {
+        const box = document.getElementById('ops-log-stream');
+        data.logs.forEach(log => {
+          const r = document.createElement('div');
+          r.className = 'log-entry';
+          r.innerHTML = `<span class="log-ts">[${new Date(log.time).toLocaleTimeString()}]</span><span class="log-text">${log.message}</span>`;
+          box.appendChild(r);
+        });
+        while (box.children.length > 150) box.removeChild(box.firstChild);
+        box.scrollTop = box.scrollHeight;
       }
     };
 
@@ -667,34 +641,25 @@
       for (const sym in MARKETS_CFG) {
         const metric = state.marketMetrics && state.marketMetrics[sym] ? state.marketMetrics[sym] : null;
         const isActive = sym === currentFocus;
-        let price = '—', spread = '—', vloss = '0', trendClass = '';
+        let price = '—', spread = '—', trendClass = '';
         if (metric) {
           price = metric.price.toFixed(2);
-          if (metric.risePct !== undefined && metric.supportPct !== undefined) {
-            const sp = ((metric.fastMA - metric.slowMA) / metric.price * 100); // we no longer have fastMA/slowMA; we'll show rise/support instead.
-            // We'll just display rise/support in the cluster card? Let's show a simple "R: X% S: Y%" or just the spread (difference between rise and support).
-            // For simplicity, show a combined score: (rise - support). But the user may want to see them separately.
-            // I'll show rise and support in the cluster card.
-            // But the cluster card has limited space. Let's show a simple "R/S" value: e.g., "R:12% S:35%".
-            // However, we already have a span for spread; let's repurpose it to show "R↑S↓" or something.
-            // Let's show the net score: rise - support.
-            const net = metric.risePct - metric.supportPct;
-            spread = (net > 0 ? '+' : '') + net.toFixed(1) + '%';
-            trendClass = net > 0 ? 'trend-bull' : (net < 0 ? 'trend-bear' : '');
+          if (metric.fastMA !== null && metric.slowMA !== null) {
+            const sp = ((metric.fastMA - metric.slowMA) / metric.price * 100);
+            spread = sp.toFixed(2) + '%';
+            if (sp > 0) trendClass = 'trend-bull';
+            else if (sp < 0) trendClass = 'trend-bear';
           }
         }
-        const lossCount = state.virtualLossCounts && state.virtualLossCounts[sym] !== undefined ? state.virtualLossCounts[sym] : 0;
-        const vlossClass = lossCount >= CONFIG.VIRTUAL_LOSS_LIMIT ? 'loss-high' : '';
 
         clusterBox.innerHTML += `
           <div class="cluster-card ${isActive ? 'active' : ''} ${trendClass}" onclick="setFocusMarket('${sym}')">
             <div class="cluster-meta">
               <span class="cluster-name">${MARKETS_CFG[sym]}</span>
-              <span class="cluster-vloss ${vlossClass}">VL: ${lossCount}</span>
             </div>
             <div class="cluster-data">
               <span class="cluster-price">$${price}</span>
-              <span class="cluster-spread">${spread}</span>
+              <span class="cluster-spread ${sp > 0 ? 'bull' : 'bear'}">${spread}</span>
             </div>
           </div>
         `;
@@ -705,12 +670,16 @@
       document.getElementById('ui-focused-title').innerText = `Active Focus: ${MARKETS_CFG[currentFocus]}`;
       
       if (focusMetric) {
-        document.getElementById('ui-rise').innerText = focusMetric.risePct !== undefined ? focusMetric.risePct.toFixed(2) + '%' : '—';
-        document.getElementById('ui-support').innerText = focusMetric.supportPct !== undefined ? focusMetric.supportPct.toFixed(2) + '%' : '—';
-        document.getElementById('ui-sma').innerText = focusMetric.sma !== undefined ? focusMetric.sma.toFixed(2) : '—';
-        const vloss = state.virtualLossCounts && state.virtualLossCounts[currentFocus] !== undefined ? state.virtualLossCounts[currentFocus] : 0;
-        document.getElementById('ui-vloss').innerText = vloss;
-        document.getElementById('ui-vloss').style.color = vloss >= CONFIG.VIRTUAL_LOSS_LIMIT ? 'var(--neon-red)' : 'var(--neon-orange)';
+        document.getElementById('ui-fast-ma').innerText = focusMetric.fastMA !== null ? focusMetric.fastMA.toFixed(2) : '—';
+        document.getElementById('ui-slow-ma').innerText = focusMetric.slowMA !== null ? focusMetric.slowMA.toFixed(2) : '—';
+        if (focusMetric.fastMA !== null && focusMetric.slowMA !== null) {
+          const sp = ((focusMetric.fastMA - focusMetric.slowMA) / focusMetric.price * 100);
+          document.getElementById('ui-spread').innerText = sp.toFixed(2) + '%';
+          document.getElementById('ui-spread').style.color = sp > 0 ? 'var(--neon-green)' : 'var(--neon-red)';
+        } else {
+          document.getElementById('ui-spread').innerText = '—';
+        }
+        document.getElementById('ui-volatility').innerText = focusMetric.volatility !== null ? focusMetric.volatility.toFixed(2) + '%' : '—';
 
         // Tail (last 5 prices)
         const tailBox = document.getElementById('ui-tail-strip');
@@ -733,10 +702,10 @@
           tailBox.appendChild(node);
         });
       } else {
-        document.getElementById('ui-rise').innerText = '—';
-        document.getElementById('ui-support').innerText = '—';
-        document.getElementById('ui-sma').innerText = '—';
-        document.getElementById('ui-vloss').innerText = '0';
+        document.getElementById('ui-fast-ma').innerText = '—';
+        document.getElementById('ui-slow-ma').innerText = '—';
+        document.getElementById('ui-spread').innerText = '—';
+        document.getElementById('ui-volatility').innerText = '—';
         document.getElementById('ui-tail-strip').innerHTML = '<span class="tail-node">—</span><span class="tail-node">—</span><span class="tail-node">—</span><span class="tail-node">—</span><span class="tail-node">—</span>';
       }
     }
@@ -809,14 +778,191 @@
     }
 
     // =========================================================================
-    // 4. ANALYTICS (unchanged)
+    // 4. ANALYTICS (unchanged, same as before)
     // =========================================================================
     let activeCharts = {};
-    function renderPrototypeCharts() { /* same as before */ }
-    function computeFromRawData(rawData) { /* same */ }
-    async function applyTimeframePreset(clickedButton, presetMode) { /* same */ }
-    async function applyManualDateFilter() { /* same */ }
-    function updateUIElements(metrics, chartData, customLineLabels) { /* same */ }
+    function renderPrototypeCharts() {
+      if (activeCharts.winLoss) return;
+      const darkThemeText = '#64748b';
+      const gridBorderColor = '#232f48';
+
+      const ctxPie = document.getElementById('chart-pie-winloss').getContext('2d');
+      activeCharts.winLoss = new Chart(ctxPie, { type: 'pie', data: { labels: ['Wins', 'Losses'], datasets: [{ data: [0, 0], backgroundColor: ['#00ff88', '#ff3b30'], borderColor: '#101524', borderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: darkThemeText, font: { family: 'Consolas' } } } } } });
+
+      const assetLabels = ['Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index', 'Volatility 75 Index', 'Volatility 100 Index'];
+      const assetColors = ['#00d2ff', '#ff9500', '#94a3b8', '#00ff88', '#a855f7'];
+      const ctxDonut = document.getElementById('chart-donut-assets').getContext('2d');
+      activeCharts.assets = new Chart(ctxDonut, { type: 'doughnut', data: { labels: assetLabels, datasets: [{ data: [0, 0, 0, 0, 0], backgroundColor: assetColors, borderColor: '#101524', borderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: darkThemeText, font: { family: 'Consolas' } } } } } });
+
+      const ctxLine = document.getElementById('chart-line-equity').getContext('2d');
+      activeCharts.equity = new Chart(ctxLine, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [{
+            label: 'Cumulative P&L ($)',
+            data: [0],
+            borderColor: '#00ff88',
+            backgroundColor: 'transparent',
+            borderWidth: 4,
+            pointRadius: 4,
+            pointBackgroundColor: '#00ff88',
+            pointBorderColor: '#ffffff',
+            pointBorderWidth: 1,
+            tension: 0.3,
+            showLine: true,
+            fill: false
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText } },
+            y: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText } }
+          },
+          plugins: { legend: { display: false } }
+        }
+      });
+    }
+
+    function computeFromRawData(rawData) {
+      let wins = 0, losses = 0, grossProfit = 0, grossLoss = 0;
+      const assetMap = {};
+      const sortedTrades = rawData.slice().sort((a, b) => {
+        const da = new Date(a.created_at);
+        const db = new Date(b.created_at);
+        return da - db;
+      });
+      const equityCurve = [];
+      let cumProfit = 0;
+      sortedTrades.forEach(t => {
+        const pnl = t.profit_loss || 0;
+        cumProfit += pnl;
+        equityCurve.push(cumProfit);
+        if (pnl > 0) { wins++; grossProfit += pnl; }
+        else if (pnl < 0) { losses++; grossLoss += Math.abs(pnl); }
+        const asset = t.asset || 'Unknown';
+        assetMap[asset] = (assetMap[asset] || 0) + pnl;
+      });
+      
+      const assetFullNames = ['Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index', 'Volatility 75 Index', 'Volatility 100 Index'];
+      const assetData = assetFullNames.map(name => assetMap[name] || 0);
+      
+      if (equityCurve.length === 0) equityCurve.push(0);
+      
+      const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? Infinity : 0);
+      const totalTrades = wins + losses;
+      const strikeRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
+      
+      return { wins, losses, profitFactor, strikeRate, assetData, equityCurve };
+    }
+
+    async function applyTimeframePreset(clickedButton, presetMode) {
+      if (clickedButton) {
+        document.querySelectorAll('.btn-preset').forEach(btn => btn.classList.remove('active-preset'));
+        clickedButton.classList.add('active-preset');
+      }
+
+      if (presetMode === 'clear') {
+        updateUIElements({ profit: '$0.00', pf: 'N/A', strike: '0.0%', drawdown: '0.00%' }, { winLoss: [0, 0], assets: [0,0,0,0,0], equity: [0] }, null);
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/ledger/analytics?mode=${presetMode}`);
+        const data = await response.json();
+        if (data.error) throw new Error(data.error);
+
+        let winLoss, assets, equity, pf, strike, drawdown;
+        if (presetMode === 'session') {
+          const totalTrades = data.totalTrades || 0;
+          const strikeNum = parseFloat(data.strikeRate) || 0;
+          const wins = Math.round((strikeNum / 100) * totalTrades);
+          const losses = totalTrades - wins;
+          winLoss = [wins, losses];
+          assets = [0,0,0,0,0];
+          equity = [data.totalProfit || 0];
+          pf = 'N/A';
+          strike = data.strikeRate || '0.0%';
+          drawdown = '0.0%';
+        } else {
+          const raw = data.rawData || [];
+          const computed = computeFromRawData(raw);
+          winLoss = [computed.wins, computed.losses];
+          assets = computed.assetData;
+          equity = computed.equityCurve;
+          pf = data.profitFactor || '0.00';
+          strike = data.strikeRate + '%';
+          drawdown = data.drawdown + '%';
+        }
+
+        updateUIElements({
+          profit: `$${parseFloat(data.totalProfit).toFixed(2)}`,
+          pf: pf,
+          strike: strike,
+          drawdown: drawdown
+        }, { winLoss, assets, equity }, null);
+      } catch (err) {
+        console.error("Fetch Error:", err);
+      }
+    }
+
+    async function applyManualDateFilter() {
+      const start = document.getElementById('date-picker-start').value;
+      const end = document.getElementById('date-picker-end').value;
+      try {
+        const response = await fetch(`/api/ledger/analytics?start=${start}&end=${end}`);
+        const data = await response.json();
+        const raw = data.rawData || [];
+        const computed = computeFromRawData(raw);
+        const winLoss = [computed.wins, computed.losses];
+        const assets = computed.assetData;
+        const equity = computed.equityCurve;
+        const pf = data.profitFactor || '0.00';
+        const strike = data.strikeRate + '%';
+        const drawdown = data.drawdown + '%';
+
+        updateUIElements({
+          profit: `$${parseFloat(data.totalProfit).toFixed(2)}`,
+          pf: pf,
+          strike: strike,
+          drawdown: drawdown
+        }, { winLoss, assets, equity }, null);
+      } catch (err) { console.error("Filter Error:", err); }
+    }
+
+    function updateUIElements(metrics, chartData, customLineLabels) {
+      document.getElementById('meta-net-profit').innerText = metrics.profit;
+      document.getElementById('meta-profit-factor').innerText = metrics.pf;
+      document.getElementById('meta-strike-rate').innerText = metrics.strike;
+      document.getElementById('meta-drawdown').innerText = metrics.drawdown;
+
+      activeCharts.winLoss.data.datasets[0].data = chartData.winLoss;
+      activeCharts.winLoss.update('none');
+
+      activeCharts.assets.data.datasets[0].data = chartData.assets;
+      activeCharts.assets.update('none');
+
+      const equityData = chartData.equity;
+      const labels = customLineLabels || equityData.map((_, i) => `T${i+1}`);
+      activeCharts.equity.data.labels = labels;
+      activeCharts.equity.data.datasets[0] = {
+        label: 'Cumulative P&L ($)',
+        data: equityData,
+        borderColor: '#00ff88',
+        backgroundColor: 'transparent',
+        borderWidth: 4,
+        pointRadius: 4,
+        pointBackgroundColor: '#00ff88',
+        pointBorderColor: '#ffffff',
+        pointBorderWidth: 1,
+        tension: 0.3,
+        showLine: true,
+        fill: false
+      };
+      activeCharts.equity.update('none');
+    }
 
     // =========================================================================
     // 5. SYSTEM CLOCK
@@ -829,9 +975,6 @@
     }
     setInterval(updateClock, 1000);
     updateClock();
-
-    // Initial loading state
-    document.getElementById('ui-ledger-mode').innerText = 'LOADING...';
   </script>
 </body>
 </html>
