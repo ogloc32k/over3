@@ -15,14 +15,14 @@ const STATE_FILE = '/var/data/deriv_multimarket_state.json';
 const CONFIG_FILE = '/var/data/deriv_config.json';
 
 // =====================================================================
-//  DEFAULT CONFIG (MA Crossover)
+//  DEFAULT CONFIG
 // =====================================================================
 const DEFAULT_CONFIG = {
     FAST_MA_PERIOD: 8,
     SLOW_MA_PERIOD: 21,
     MIN_SPREAD_PERCENT: 0.15,
     MIN_VOLATILITY_PERCENT: 0.4,
-    DURATION_TICKS: 12,
+    DURATION_TICKS: 10,  // FIXED: max allowed is 10 ticks
     MIN_TRIGGER_INTERVAL: 20000,
     MAX_CONSECUTIVE_LOSSES: 2,
     LOSS_COOLDOWN_MS: 120000,
@@ -57,7 +57,7 @@ function saveConfig(config) {
 let CONFIG = loadConfig();
 
 // =====================================================================
-//  SCHEDULED RESTART (03:00 EAT)
+//  SCHEDULED RESTART
 // =====================================================================
 function scheduleRestart() {
   const now = Date.now();
@@ -227,7 +227,6 @@ function broadcastSSE(payload) {
   if (!payload.state) {
     payload.state = getFullState();
   }
-  // Ensure marketMetrics is always included
   if (payload.state && !payload.state.marketMetrics) {
     payload.state.marketMetrics = state.marketMetrics || {};
   }
@@ -243,7 +242,6 @@ app.get('/api/logs', (req, res) => {
   const client = res;
   sseClients.add(client);
   
-  // Send initial state
   client.write(`data: ${JSON.stringify({ 
     state: getFullState(), 
     logs: state.logs.slice(0, 50) 
@@ -298,7 +296,7 @@ const MARKETS = {
 };
 const BUFFER_CAPACITY = 1000;
 
-// ---------- Pipeline Class (MA + Volatility) ----------
+// ---------- Pipeline Class ----------
 class MultiMarketPipeline {
   constructor() {
     this.buffers = {};
@@ -344,7 +342,6 @@ class MultiMarketPipeline {
       lastPrices: buf.slice(-5)
     };
 
-    // Store in state for broadcasting
     state.marketMetrics[symbol] = result;
 
     return result;
@@ -376,7 +373,7 @@ const state = {
   pendingSettlement: false
 };
 
-// ============ STRATEGY CHECK (MA Crossover) ============
+// ============ STRATEGY CHECK ============
 function checkStrategy(symbol, metric) {
   if (!metric) return null;
   const { fastMA, slowMA, price, volatility } = metric;
@@ -521,7 +518,7 @@ function settleRealTrade() {
     exitTick: null,
     entry_price: state.activeRealTrade.entryPrice || null,
     exit_price: null,
-    duration_ticks: CONFIG.DURATION_TICKS
+    duration_ticks: state.activeRealTrade.duration || CONFIG.DURATION_TICKS
   });
 
   addLog(`[Settlement] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | Result: ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
@@ -624,7 +621,8 @@ function processLiveFeed(symbol, price) {
       contractType,
       barrier: null,
       direction: direction,
-      entryPrice: null
+      entryPrice: null,
+      duration: CONFIG.DURATION_TICKS
     };
 
     state.lastTriggerTime = now;
@@ -698,7 +696,6 @@ async function connectDeriv() {
       send({ balance: 1, subscribe: 1, req_id: ++reqId });
       for (const key in MARKETS) send({ ticks_history: key, count: BUFFER_CAPACITY, end: 'latest', req_id: ++reqId });
 
-      // Periodic state broadcast every 3 seconds
       setInterval(() => {
         broadcastSSE({ state: getFullState() });
       }, 3000);
@@ -785,7 +782,8 @@ function handleMessage(msg) {
 
 // ------------------ MANUAL TRADING ------------------ //
 app.post('/api/manual-trade', (req, res) => {
-  const { symbol, contractType } = req.body;
+  const { symbol, contractType, duration, durationUnit } = req.body;
+  
   if (state.locked || state.tradeInProgress) {
     return res.status(400).json({ 
       error: state.locked ? state.lockReason : 'Trade in progress.' 
@@ -796,6 +794,22 @@ app.post('/api/manual-trade', (req, res) => {
   }
   if (!['CALL', 'PUT'].includes(contractType)) {
     return res.status(400).json({ error: 'Invalid contract type. Use "CALL" or "PUT".' });
+  }
+
+  let dur = parseInt(duration) || CONFIG.DURATION_TICKS;
+  let unit = durationUnit || 't';
+  
+  if (unit === 't') {
+    if (dur < 1) dur = 1;
+    if (dur > 10) dur = 10;
+  }
+  if (unit === 's') {
+    if (dur < 5) dur = 5;
+    if (dur > 600) dur = 600;
+  }
+  if (unit === 'm') {
+    if (dur < 1) dur = 1;
+    if (dur > 10) dur = 10;
   }
 
   const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
@@ -810,7 +824,8 @@ app.post('/api/manual-trade', (req, res) => {
     contractType,
     barrier: null,
     direction: contractType,
-    entryPrice: null
+    entryPrice: null,
+    duration: dur
   };
 
   send({
@@ -819,13 +834,13 @@ app.post('/api/manual-trade', (req, res) => {
     basis: 'stake',
     contract_type: contractType,
     currency: state.currency || 'USD',
-    duration: CONFIG.DURATION_TICKS,
-    duration_unit: 't',
+    duration: dur,
+    duration_unit: unit,
     underlying_symbol: symbol,
     req_id: ++reqId
   });
 
-  addLog(`📤 Manual ${contractType} request for ${symbol} (${CONFIG.DURATION_TICKS} ticks)...`);
+  addLog(`📤 Manual ${contractType} request for ${symbol} (${dur} ${unit === 't' ? 'ticks' : unit === 's' ? 'seconds' : 'minutes'})...`);
   res.json({ success: true, message: 'Proposal requested' });
 });
 
