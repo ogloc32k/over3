@@ -2,10 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>QUANTCORE // MA CROSSOVER ENGINE</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
+    /* =========================================================================
+       CORE VARIABLES & RESET
+       ========================================================================= */
     :root {
       --bg-terminal: #05070a;
       --bg-panel: #0a0d14;
@@ -19,443 +22,721 @@
       --text-bright: #e2e8f0;
       --text-dim: #64748b;
     }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    
     body {
       background-color: var(--bg-terminal);
       color: var(--text-bright);
-      font-family: 'Consolas', 'Courier New', monospace;
+      font-family: 'Inter', 'Consolas', 'Courier New', monospace;
       height: 100vh;
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      padding: 15px;
+      padding: 8px;
     }
-    .master-nav-header {
+
+    /* =========================================================================
+       HEADER / NAVBAR
+       ========================================================================= */
+    .navbar {
       display: flex;
       justify-content: space-between;
       align-items: center;
       background: var(--bg-panel);
       border: 1px solid var(--border-glow);
-      border-radius: 4px;
-      padding: 10px 20px;
-      margin-bottom: 15px;
+      border-radius: 6px;
+      padding: 10px 16px;
+      margin-bottom: 12px;
+      flex-shrink: 0;
+      min-height: 52px;
     }
-    .brand-title { font-size: 14px; font-weight: bold; letter-spacing: 2px; }
-    .brand-title span { color: var(--neon-blue); margin: 0 6px; }
-    .nav-tabs-wrapper { display: flex; gap: 10px; }
-    .nav-tab-btn {
+
+    .brand {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      color: var(--text-bright);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .brand span { color: var(--neon-blue); }
+
+    .menu-toggle {
+      background: none;
+      border: 1px solid var(--border-glow);
+      color: var(--text-bright);
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 18px;
+      cursor: pointer;
+      display: none;
+    }
+    .menu-toggle:hover { background: var(--bg-card-hover); }
+
+    .nav-links {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .nav-btn {
       background: var(--bg-card);
       border: 1px solid var(--border-glow);
       color: var(--text-dim);
-      padding: 8px 16px;
-      font-size: 11px;
-      font-weight: bold;
+      padding: 6px 14px;
+      font-size: 10px;
+      font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 1px;
-      border-radius: 3px;
+      letter-spacing: 0.8px;
+      border-radius: 4px;
       cursor: pointer;
       transition: all 0.2s ease;
+      white-space: nowrap;
     }
-    .nav-tab-btn:hover { background: var(--bg-card-hover); color: var(--text-bright); }
-    .nav-tab-btn.active {
+    .nav-btn:hover { background: var(--bg-card-hover); color: var(--text-bright); }
+    .nav-btn.active {
       border-color: var(--neon-blue);
       color: var(--neon-blue);
-      background: rgba(0, 210, 255, 0.05);
-      box-shadow: 0 0 10px rgba(0, 210, 255, 0.15);
+      background: rgba(0, 210, 255, 0.08);
+      box-shadow: 0 0 12px rgba(0, 210, 255, 0.1);
     }
-    .spa-view { display: none; flex: 1; min-height: 0; }
-    .spa-view.active-view { display: flex; }
+
+    /* =========================================================================
+       VIEWS
+       ========================================================================= */
+    .view { display: none; flex: 1; min-height: 0; overflow-y: auto; }
+    .view.active { display: flex; flex-direction: column; }
+
+    /* =========================================================================
+       OPS VIEW – GRID
+       ========================================================================= */
     .dashboard-grid {
       display: grid;
-      grid-template-columns: 310px 1fr 360px;
-      gap: 15px;
-      width: 100%;
+      grid-template-columns: 1fr 1.6fr 1.2fr;
+      gap: 12px;
       height: 100%;
-    }
-    .panel-block {
-      background: var(--bg-panel);
-      border: 1px solid var(--border-glow);
-      border-radius: 4px;
-      display: flex;
-      flex-direction: column;
-      padding: 15px;
       min-height: 0;
     }
+
+    .panel {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-glow);
+      border-radius: 6px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+    }
+
     .panel-header {
-      font-size: 11px;
+      font-size: 9px;
       text-transform: uppercase;
-      letter-spacing: 1.5px;
+      letter-spacing: 1.2px;
       color: var(--text-dim);
-      font-weight: bold;
+      font-weight: 700;
       border-bottom: 1px solid var(--border-glow);
-      padding-bottom: 8px;
-      margin-bottom: 12px;
+      padding-bottom: 6px;
+      margin-bottom: 10px;
       display: flex;
       justify-content: space-between;
       align-items: center;
+      flex-shrink: 0;
     }
-    .cluster-list { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; flex: 1; }
+    .panel-header .badge {
+      font-size: 8px;
+      color: var(--neon-green);
+      background: rgba(0,255,136,0.08);
+      padding: 2px 8px;
+      border-radius: 2px;
+    }
+
+    /* ----- CLUSTER LIST ----- */
+    .cluster-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      overflow-y: auto;
+      flex: 1;
+    }
     .cluster-card {
       background: var(--bg-card);
       border: 1px solid var(--border-glow);
       border-radius: 4px;
-      padding: 12px;
+      padding: 8px 10px;
       cursor: pointer;
-      transition: all 0.3s ease;
+      transition: all 0.25s ease;
+      flex-shrink: 0;
     }
-    .cluster-card.active { border-color: var(--neon-blue); box-shadow: inset 4px 0 0 var(--neon-blue); background: #19243a; }
-    .cluster-card.trend-bull { border-color: var(--neon-green); box-shadow: 0 0 12px rgba(0,255,136,0.2); }
-    .cluster-card.trend-bear { border-color: var(--neon-red); box-shadow: 0 0 12px rgba(255,59,48,0.2); }
-    .cluster-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-    .cluster-name { font-size: 12px; font-weight: bold; }
-    .cluster-data { display: flex; justify-content: space-between; align-items: baseline; }
-    .cluster-price { font-size: 15px; font-weight: bold; }
-    .cluster-spread { font-size: 13px; font-weight: bold; color: var(--text-dim); }
+    .cluster-card.active {
+      border-color: var(--neon-blue);
+      box-shadow: inset 3px 0 0 var(--neon-blue);
+      background: #19243a;
+    }
+    .cluster-card.trend-bull { border-color: var(--neon-green); box-shadow: 0 0 10px rgba(0,255,136,0.15); }
+    .cluster-card.trend-bear { border-color: var(--neon-red); box-shadow: 0 0 10px rgba(255,59,48,0.15); }
+    .cluster-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2px;
+    }
+    .cluster-name { font-size: 10px; font-weight: 600; }
+    .cluster-data {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+    .cluster-price { font-size: 13px; font-weight: 700; }
+    .cluster-spread { font-size: 11px; font-weight: 600; color: var(--text-dim); }
     .cluster-spread.bull { color: var(--neon-green); }
     .cluster-spread.bear { color: var(--neon-red); }
 
-    .main-matrix-view { display: flex; flex-direction: column; gap: 15px; overflow-y: auto; flex: 1; }
-    .matrix-title-bar {
+    /* ----- MAIN MATRIX ----- */
+    .main-matrix {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .title-bar {
       display: flex;
       justify-content: space-between;
       align-items: center;
       background: var(--bg-card);
       border: 1px solid var(--border-glow);
-      padding: 12px 15px;
       border-radius: 4px;
+      padding: 8px 12px;
+      flex-shrink: 0;
       flex-wrap: wrap;
-      gap: 10px;
+      gap: 6px;
     }
-    .matrix-title-bar h1 { font-size: 14px; color: var(--neon-blue); }
-    .sys-status-pill { font-size: 11px; font-weight: bold; color: var(--neon-green); background: rgba(0, 255, 136, 0.1); padding: 4px 10px; border: 1px solid var(--neon-green); border-radius: 2px; }
+    .title-bar h1 { font-size: 12px; color: var(--neon-blue); margin: 0; }
+    .status-pill {
+      font-size: 9px;
+      font-weight: 700;
+      color: var(--neon-green);
+      background: rgba(0,255,136,0.08);
+      padding: 3px 10px;
+      border: 1px solid var(--neon-green);
+      border-radius: 3px;
+    }
 
-    .ma-display {
-      display: flex;
-      justify-content: space-around;
+    .ma-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
       background: var(--bg-card);
       border: 1px solid var(--border-glow);
       border-radius: 4px;
-      padding: 15px;
-      flex-wrap: wrap;
-      gap: 10px;
+      padding: 10px;
+      flex-shrink: 0;
     }
     .ma-item { text-align: center; }
-    .ma-item .label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; }
-    .ma-item .value { font-size: 20px; font-weight: bold; color: var(--neon-blue); }
+    .ma-item .label { font-size: 8px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+    .ma-item .value { font-size: 16px; font-weight: 700; color: var(--neon-blue); }
     .ma-item .value.fast { color: var(--neon-green); }
     .ma-item .value.slow { color: var(--neon-orange); }
 
-    .tail-strip { display: flex; gap: 8px; margin-top: 6px; justify-content: center; flex-wrap: wrap; }
-    .tail-node { background: var(--bg-terminal); border: 1px solid var(--border-glow); padding: 6px 14px; border-radius: 3px; font-size: 15px; font-weight: bold; }
+    .tail-box {
+      background: var(--bg-card);
+      border: 1px solid var(--border-glow);
+      border-radius: 4px;
+      padding: 8px 10px;
+      flex-shrink: 0;
+    }
+    .tail-box .tail-label { font-size: 8px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px; }
+    .tail-strip {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .tail-node {
+      background: var(--bg-terminal);
+      border: 1px solid var(--border-glow);
+      padding: 4px 10px;
+      border-radius: 3px;
+      font-size: 13px;
+      font-weight: 700;
+    }
     .tail-node.up { border-color: var(--neon-green); color: var(--neon-green); }
     .tail-node.down { border-color: var(--neon-red); color: var(--neon-red); }
     .tail-node.flat { border-color: var(--text-dim); color: var(--text-dim); }
 
-    .deck-group { background: var(--bg-card); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; margin-bottom: 15px; }
-    .deck-group:last-child { margin-bottom: 0; flex: 1; }
-    .action-button { display: block; width: 100%; padding: 13px; border-radius: 4px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; cursor: pointer; border: none; margin-bottom: 10px; }
-    .btn-arm { background: var(--neon-green); color: #05070a; }
-    .btn-disarm { background: var(--neon-red); color: #ffffff; margin-bottom: 0; }
-    .btn-manual-call { background: var(--neon-green); color: #05070a; }
-    .btn-manual-put { background: var(--neon-red); color: #ffffff; }
-    .btn-swap-profile { background: #19243a; color: var(--text-bright); border: 1px solid var(--border-glow); }
-
-    .manual-controls {
+    /* ----- OPERATIONAL DECK ----- */
+    .op-deck {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 10px;
+      overflow-y: auto;
     }
+    .deck-group {
+      background: var(--bg-card);
+      border: 1px solid var(--border-glow);
+      border-radius: 4px;
+      padding: 10px;
+    }
+    .deck-group .sub-header {
+      font-size: 8px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      letter-spacing: 0.8px;
+      margin-bottom: 6px;
+      font-weight: 700;
+    }
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 10px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      cursor: pointer;
+      border: none;
+      transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn-arm { background: var(--neon-green); color: #05070a; }
+    .btn-disarm { background: var(--neon-red); color: #fff; }
+    .btn-swap { background: #19243a; color: var(--text-bright); border: 1px solid var(--border-glow); }
+    .btn-call { background: var(--neon-green); color: #05070a; }
+    .btn-put { background: var(--neon-red); color: #fff; }
+
     .manual-row {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       align-items: center;
       flex-wrap: wrap;
+      margin-top: 4px;
     }
-    .manual-row select, .manual-row input {
+    .manual-row input, .manual-row select {
       background: var(--bg-terminal);
       border: 1px solid var(--border-glow);
       color: var(--text-bright);
-      padding: 6px 10px;
+      padding: 5px 8px;
       border-radius: 3px;
       font-family: inherit;
-      font-size: 12px;
+      font-size: 10px;
       outline: none;
       flex: 1;
-      min-width: 60px;
+      min-width: 40px;
     }
-    .manual-row select:focus, .manual-row input:focus {
-      border-color: var(--neon-blue);
-    }
-    .manual-row .btn-manual-call, .manual-row .btn-manual-put {
-      flex: 1;
-      padding: 8px 12px;
-      font-size: 11px;
-      margin: 0;
-    }
-    .manual-label {
-      font-size: 11px;
-      color: var(--text-dim);
-      text-transform: uppercase;
-      white-space: nowrap;
-    }
+    .manual-row input:focus, .manual-row select:focus { border-color: var(--neon-blue); }
+    .manual-row .btn { flex: 1; padding: 6px; font-size: 9px; margin: 0; }
 
-    .ledger-table { display: flex; flex-direction: column; gap: 10px; }
-    .ledger-row { display: flex; justify-content: space-between; font-size: 13px; border-bottom: 1px dashed var(--border-glow); padding-bottom: 6px; }
+    .ledger-table { display: flex; flex-direction: column; gap: 4px; }
+    .ledger-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      border-bottom: 1px dashed var(--border-glow);
+      padding-bottom: 4px;
+    }
     .ledger-lbl { color: var(--text-dim); }
-    .ledger-val { font-weight: bold; }
+    .ledger-val { font-weight: 700; }
 
-    .audit-log-panel { height: 140px; background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 4px; margin-top: 15px; padding: 12px; display: flex; flex-direction: column; }
-    .log-stream { background: #04060b; border: 1px solid #0d121c; flex: 1; border-radius: 2px; padding: 8px; overflow-y: auto; font-size: 11px; display: flex; flex-direction: column; }
-    .log-entry { margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid #131a26; display: flex; }
-    .log-ts { color: var(--neon-blue); margin-right: 10px; flex-shrink: 0; }
-    #lock-alert-banner { padding: 12px; border-radius: 4px; font-size: 12px; font-weight: bold; display: none; margin-bottom: 15px; }
+    /* ----- LOG PANEL ----- */
+    .log-panel {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-glow);
+      border-radius: 4px;
+      margin-top: 10px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      max-height: 120px;
+    }
+    .log-stream {
+      background: #04060b;
+      border: 1px solid #0d121c;
+      flex: 1;
+      border-radius: 3px;
+      padding: 6px;
+      overflow-y: auto;
+      font-size: 9px;
+      display: flex;
+      flex-direction: column;
+      min-height: 40px;
+      max-height: 80px;
+    }
+    .log-entry {
+      margin-bottom: 2px;
+      padding-bottom: 2px;
+      border-bottom: 1px solid #131a26;
+      display: flex;
+    }
+    .log-ts { color: var(--neon-blue); margin-right: 8px; flex-shrink: 0; font-size: 8px; }
+    .log-text { word-break: break-all; }
 
-    .analytics-layout { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; }
-    .audit-filter-bar { background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap; }
-    .filter-inputs-group { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-    .filter-inputs-group label { font-size: 11px; text-transform: uppercase; color: var(--text-dim); font-weight: bold; }
-    .input-date-field {
+    #lock-alert-banner {
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      display: none;
+      margin-bottom: 8px;
+      flex-shrink: 0;
+    }
+
+    /* =========================================================================
+       ANALYTICS VIEW
+       ========================================================================= */
+    .analytics-layout {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      height: 100%;
+      overflow-y: auto;
+      padding-bottom: 8px;
+    }
+    .filter-bar {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-glow);
+      border-radius: 4px;
+      padding: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .filter-bar label { font-size: 9px; text-transform: uppercase; color: var(--text-dim); font-weight: 700; }
+    .filter-bar input {
       background: var(--bg-card);
       border: 1px solid var(--border-glow);
       color: var(--text-bright);
-      padding: 6px 10px;
+      padding: 4px 8px;
       font-family: inherit;
-      font-size: 12px;
+      font-size: 10px;
       border-radius: 3px;
       outline: none;
     }
-    .input-date-field:focus { border-color: var(--neon-blue); }
-    .preset-buttons-strip { display: flex; gap: 6px; flex-wrap: wrap; }
+    .filter-bar input:focus { border-color: var(--neon-blue); }
+    .preset-strip { display: flex; gap: 4px; flex-wrap: wrap; }
     .btn-preset {
       background: var(--bg-card);
       border: 1px solid var(--border-glow);
       color: var(--text-bright);
-      padding: 6px 12px;
-      font-size: 11px;
+      padding: 4px 10px;
+      font-size: 9px;
       cursor: pointer;
       border-radius: 3px;
-      font-weight: bold;
-      transition: all 0.2s ease;
+      font-weight: 600;
+      transition: all 0.2s;
     }
-    .btn-preset:hover { background: var(--bg-card-hover); border-color: var(--text-dim); }
+    .btn-preset:hover { background: var(--bg-card-hover); }
     .btn-preset.active-preset {
       background: var(--neon-blue);
       color: #000;
-      font-weight: bold;
       border-color: var(--neon-blue);
-      box-shadow: 0 0 8px rgba(0, 210, 255, 0.4);
     }
-    .summary-metrics-ribbon { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
-    .metric-ribbon-card { background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; }
-    .metric-ribbon-card .m-lbl { font-size: 11px; text-transform: uppercase; color: var(--text-dim); font-weight: bold; letter-spacing: 0.5px; }
-    .metric-ribbon-card .m-val { font-size: 24px; font-weight: bold; margin-top: 5px; }
-    .charts-matrix-grid { display: grid; grid-template-columns: 320px 320px 1fr; gap: 15px; flex: 1; min-height: 380px; }
-    .chart-container-panel { background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; display: flex; flex-direction: column; }
-    .chart-canvas-wrapper { flex: 1; position: relative; display: flex; justify-content: center; align-items: center; min-height: 0; }
 
-    .settings-layout { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; padding: 20px; }
-    .settings-section { background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 4px; padding: 20px; }
-    .settings-section h3 { color: var(--neon-blue); font-size: 14px; margin-bottom: 15px; letter-spacing: 1px; }
-    .settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 15px; }
-    .setting-item { display: flex; flex-direction: column; gap: 4px; }
-    .setting-item label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
-    .setting-item input { background: var(--bg-card); border: 1px solid var(--border-glow); color: var(--text-bright); padding: 6px 10px; border-radius: 3px; font-family: inherit; font-size: 13px; outline: none; }
-    .setting-item input:focus { border-color: var(--neon-blue); }
-    .settings-actions { margin-top: 20px; display: flex; gap: 15px; }
-    .btn-save-settings { background: var(--neon-green); color: #05070a; border: none; padding: 10px 30px; font-weight: bold; border-radius: 4px; cursor: pointer; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
-    .btn-save-settings:hover { opacity: 0.8; }
-    .settings-status { color: var(--neon-green); font-size: 12px; padding: 6px 0; }
-
-    #sys-clock {
-      position: fixed;
-      bottom: 15px;
-      right: 20px;
+    .metrics-ribbon {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .metric-card {
       background: var(--bg-panel);
       border: 1px solid var(--border-glow);
-      padding: 6px 14px;
       border-radius: 4px;
-      font-size: 13px;
+      padding: 10px;
+      text-align: center;
+    }
+    .metric-card .m-lbl { font-size: 8px; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
+    .metric-card .m-val { font-size: 16px; font-weight: 700; margin-top: 2px; }
+
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1.2fr;
+      gap: 10px;
+      flex: 1;
+      min-height: 200px;
+    }
+    .chart-box {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-glow);
+      border-radius: 4px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      min-height: 150px;
+    }
+    .chart-box .ch-label { font-size: 9px; text-transform: uppercase; color: var(--text-dim); font-weight: 700; margin-bottom: 6px; }
+    .chart-wrap { flex: 1; position: relative; min-height: 80px; }
+
+    /* =========================================================================
+       SETTINGS VIEW
+       ========================================================================= */
+    .settings-layout {
+      padding: 12px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .settings-section {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-glow);
+      border-radius: 4px;
+      padding: 12px;
+    }
+    .settings-section h3 { color: var(--neon-blue); font-size: 12px; margin-bottom: 10px; letter-spacing: 0.5px; }
+    .settings-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 8px;
+    }
+    .setting-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .setting-item label { font-size: 8px; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
+    .setting-item input {
+      background: var(--bg-card);
+      border: 1px solid var(--border-glow);
+      color: var(--text-bright);
+      padding: 4px 8px;
+      border-radius: 3px;
+      font-family: inherit;
+      font-size: 11px;
+      outline: none;
+    }
+    .setting-item input:focus { border-color: var(--neon-blue); }
+    .settings-actions { margin-top: 10px; display: flex; gap: 10px; align-items: center; }
+    .btn-save { background: var(--neon-green); color: #05070a; border: none; padding: 8px 24px; font-weight: 700; border-radius: 4px; cursor: pointer; font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; }
+    .btn-save:hover { opacity: 0.85; }
+    .settings-status { color: var(--neon-green); font-size: 10px; }
+
+    /* =========================================================================
+       CLOCK
+       ========================================================================= */
+    #clock {
+      position: fixed;
+      bottom: 8px;
+      right: 12px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-glow);
+      padding: 4px 12px;
+      border-radius: 4px;
+      font-size: 11px;
       color: var(--text-dim);
       font-family: 'Consolas', monospace;
       z-index: 999;
-      letter-spacing: 1px;
+      letter-spacing: 0.5px;
     }
-    #sys-clock span { color: var(--neon-blue); }
+    #clock span { color: var(--neon-blue); }
+
+    /* =========================================================================
+       MOBILE RESPONSIVE
+       ========================================================================= */
+    @media (max-width: 1024px) {
+      .dashboard-grid { grid-template-columns: 1fr 1.4fr 1fr; }
+      .charts-grid { grid-template-columns: 1fr 1fr; }
+    }
+
+    @media (max-width: 768px) {
+      body { padding: 6px; }
+      .navbar { padding: 8px 12px; }
+      .brand { font-size: 11px; }
+      .menu-toggle { display: block; }
+      .nav-links {
+        display: none;
+        flex-direction: column;
+        width: 100%;
+        padding-top: 8px;
+        border-top: 1px solid var(--border-glow);
+        margin-top: 8px;
+      }
+      .nav-links.open { display: flex; }
+      .nav-btn { width: 100%; text-align: center; padding: 8px; font-size: 10px; }
+
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+      .panel { padding: 8px; }
+      .ma-grid { grid-template-columns: repeat(2, 1fr); }
+      .charts-grid { grid-template-columns: 1fr; }
+      .metrics-ribbon { grid-template-columns: repeat(2, 1fr); }
+      .settings-grid { grid-template-columns: 1fr; }
+
+      .cluster-card { padding: 6px 8px; }
+      .cluster-price { font-size: 12px; }
+      .ma-item .value { font-size: 14px; }
+
+      .log-panel { max-height: 100px; }
+      .log-stream { max-height: 60px; }
+
+      #clock { font-size: 9px; padding: 2px 8px; bottom: 4px; right: 8px; }
+    }
+
+    @media (max-width: 480px) {
+      .panel-header { font-size: 8px; }
+      .cluster-name { font-size: 9px; }
+      .cluster-price { font-size: 11px; }
+      .cluster-spread { font-size: 9px; }
+      .ma-item .value { font-size: 12px; }
+      .title-bar h1 { font-size: 10px; }
+      .status-pill { font-size: 8px; padding: 2px 8px; }
+      .btn { font-size: 9px; padding: 8px; }
+      .manual-row input, .manual-row select { font-size: 9px; padding: 4px 6px; }
+      .metric-card .m-val { font-size: 14px; }
+      .log-stream { font-size: 8px; }
+    }
   </style>
 </head>
 <body>
 
-  <header class="master-nav-header">
-    <div class="brand-title">QUANTCORE<span>//</span>MA CROSSOVER ENGINE</div>
-    <div class="nav-tabs-wrapper">
-      <button class="nav-tab-btn active" id="tab-link-ops" onclick="changeSpaView('ops')">📟 System Execution Console</button>
-      <button class="nav-tab-btn" id="tab-link-analytics" onclick="changeSpaView('analytics')">📊 Institutional Performance Deck</button>
-      <button class="nav-tab-btn" id="tab-link-settings" onclick="changeSpaView('settings')">⚙️ Settings</button>
+  <!-- ======================================================================
+       NAVBAR
+       ====================================================================== -->
+  <nav class="navbar">
+    <div class="brand">QUANTCORE<span>//</span>MA</div>
+    <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu">☰</button>
+    <div class="nav-links" id="navLinks">
+      <button class="nav-btn active" data-view="ops" onclick="switchView('ops')">📟 Console</button>
+      <button class="nav-btn" data-view="analytics" onclick="switchView('analytics')">📊 Analytics</button>
+      <button class="nav-btn" data-view="settings" onclick="switchView('settings')">⚙️ Settings</button>
     </div>
-  </header>
+  </nav>
 
-  <!-- Ops View -->
-  <div class="spa-view active-view" id="view-ops">
+  <!-- ======================================================================
+       VIEW: OPS
+       ====================================================================== -->
+  <div class="view active" id="view-ops">
     <div class="dashboard-grid">
-      <!-- left -->
-      <div class="panel-block">
+      <!-- LEFT: CLUSTER LIST -->
+      <div class="panel">
         <div class="panel-header">
           <span>Pipeline Cluster Array</span>
-          <span style="color:var(--neon-green); font-size:9px;">● LIVE SCANNING</span>
+          <span class="badge">● LIVE</span>
         </div>
         <div class="cluster-list" id="ui-cluster-list"></div>
       </div>
 
-      <!-- middle -->
-      <div class="panel-block">
+      <!-- MIDDLE: MAIN MATRIX -->
+      <div class="panel">
         <div class="panel-header">Primary Analytical Stage</div>
-        <div class="main-matrix-view">
+        <div class="main-matrix">
           <div id="lock-alert-banner"></div>
-          <div class="matrix-title-bar">
+
+          <div class="title-bar">
             <h1 id="ui-focused-title">Active Focus: Volatility 75 Index</h1>
-            <span class="sys-status-pill" id="ui-sys-status">CONNECTING...</span>
+            <span class="status-pill" id="ui-sys-status">CONNECTING...</span>
           </div>
 
-          <div class="ma-display">
-            <div class="ma-item">
-              <div class="label">Fast MA (8)</div>
-              <div class="value fast" id="ui-fast-ma">—</div>
-            </div>
-            <div class="ma-item">
-              <div class="label">Slow MA (21)</div>
-              <div class="value slow" id="ui-slow-ma">—</div>
-            </div>
-            <div class="ma-item">
-              <div class="label">Spread (%)</div>
-              <div class="value" id="ui-spread" style="color:var(--neon-blue);">—</div>
-            </div>
-            <div class="ma-item">
-              <div class="label">Volatility (%)</div>
-              <div class="value" id="ui-volatility" style="color:var(--neon-orange);">—</div>
-            </div>
+          <div class="ma-grid">
+            <div class="ma-item"><div class="label">Fast MA (8)</div><div class="value fast" id="ui-fast-ma">—</div></div>
+            <div class="ma-item"><div class="label">Slow MA (21)</div><div class="value slow" id="ui-slow-ma">—</div></div>
+            <div class="ma-item"><div class="label">Spread (%)</div><div class="value" id="ui-spread" style="color:var(--neon-blue);">—</div></div>
+            <div class="ma-item"><div class="label">Volatility (%)</div><div class="value" id="ui-volatility" style="color:var(--neon-orange);">—</div></div>
           </div>
 
-          <div style="background:var(--bg-card); border:1px solid var(--border-glow); border-radius:4px; padding:12px;">
-            <div style="color:var(--text-dim); font-size:11px; margin-bottom:6px;">Last 5 Price Ticks</div>
+          <div class="tail-box">
+            <div class="tail-label">Last 5 Price Ticks</div>
             <div class="tail-strip" id="ui-tail-strip">
-              <span class="tail-node">—</span>
-              <span class="tail-node">—</span>
-              <span class="tail-node">—</span>
-              <span class="tail-node">—</span>
-              <span class="tail-node">—</span>
+              <span class="tail-node">—</span><span class="tail-node">—</span><span class="tail-node">—</span><span class="tail-node">—</span><span class="tail-node">—</span>
             </div>
           </div>
-        </div>
-
-        <div class="audit-log-panel">
-          <div class="panel-header">Live System Audit Log Pipeline</div>
-          <div class="log-stream" id="ops-log-stream"></div>
         </div>
       </div>
 
-      <!-- right -->
-      <div class="panel-block">
+      <!-- RIGHT: OPERATIONAL DECK -->
+      <div class="panel">
         <div class="panel-header">Operational Deck</div>
-        <div class="deck-group">
-          <button class="action-button btn-arm" onclick="sendControl('start')">Arm Automation Matrix</button>
-          <button class="action-button btn-disarm" onclick="sendControl('stop')">Disarm Engine</button>
-          <button class="action-button btn-swap-profile" onclick="swapEnvironment()">Switch Account Profile</button>
-        </div>
-        <div class="deck-group">
-          <div class="panel-header" style="border:none; padding:0; margin-bottom:10px;">Direct Tactical Interventions</div>
-          <div class="manual-controls">
+        <div class="op-deck">
+          <div class="deck-group">
+            <button class="btn btn-arm" onclick="sendControl('start')">Arm Automation</button>
+            <button class="btn btn-disarm" onclick="sendControl('stop')">Disarm Engine</button>
+            <button class="btn btn-swap" onclick="swapEnvironment()">Switch Profile</button>
+          </div>
+
+          <div class="deck-group">
+            <div class="sub-header">Direct Tactical Interventions</div>
             <div class="manual-row">
-              <span class="manual-label">Duration</span>
-              <input type="number" id="manual-duration" value="5" min="1" max="600" style="flex:0.5; min-width:50px;">
+              <input type="number" id="manual-duration" value="5" min="1" max="600" style="flex:0.6; min-width:40px;">
               <select id="manual-unit">
-                <option value="t">Ticks (1-10)</option>
-                <option value="s">Seconds (5-600)</option>
-                <option value="m">Minutes (1-10)</option>
+                <option value="t">Ticks</option>
+                <option value="s">Sec</option>
+                <option value="m">Min</option>
               </select>
             </div>
-            <div class="manual-row">
-              <button class="action-button btn-manual-call" onclick="fireManual('CALL')" style="margin-bottom:0;">Buy CALL</button>
-              <button class="action-button btn-manual-put" onclick="fireManual('PUT')" style="margin-bottom:0;">Buy PUT</button>
+            <div class="manual-row" style="margin-top:4px;">
+              <button class="btn btn-call" onclick="fireManual('CALL')">CALL</button>
+              <button class="btn btn-put" onclick="fireManual('PUT')">PUT</button>
+            </div>
+          </div>
+
+          <div class="deck-group" style="flex:1;">
+            <div class="sub-header">Account Registry</div>
+            <div class="ledger-table">
+              <div class="ledger-row"><span class="ledger-lbl">Profile</span><span class="ledger-val" id="ui-ledger-mode" style="color:var(--neon-blue);">LOADING</span></div>
+              <div class="ledger-row"><span class="ledger-lbl">Balance</span><span class="ledger-val" id="ui-ledger-bal">---</span></div>
+              <div class="ledger-row"><span class="ledger-lbl">Session PnL</span><span class="ledger-val" id="ui-ledger-session-pnl" style="color:var(--neon-green);">$0.00</span></div>
+              <div class="ledger-row"><span class="ledger-lbl">Daily PnL</span><span class="ledger-val" id="ui-ledger-daily-pnl" style="color:var(--neon-green);">$0.00</span></div>
+              <div class="ledger-row"><span class="ledger-lbl">Risk (1%)</span><span class="ledger-val" id="ui-ledger-stake" style="color:var(--neon-orange);">$0.00</span></div>
             </div>
           </div>
         </div>
-        <div class="deck-group">
-          <div class="panel-header" style="border:none; padding:0; margin-bottom:10px;">Account Registry Metrics</div>
-          <div class="ledger-table">
-            <div class="ledger-row"><span class="ledger-lbl">Assigned Profile</span><span class="ledger-val" id="ui-ledger-mode" style="color:var(--neon-blue);">LOADING</span></div>
-            <div class="ledger-row"><span class="ledger-lbl">Liquidity Balance</span><span class="ledger-val" id="ui-ledger-bal">---</span></div>
-            <div class="ledger-row"><span class="ledger-lbl">Session Realized PnL</span><span class="ledger-val" id="ui-ledger-session-pnl" style="color:var(--neon-green);">$0.00</span></div>
-            <div class="ledger-row"><span class="ledger-lbl">Daily PnL (24h)</span><span class="ledger-val" id="ui-ledger-daily-pnl" style="color:var(--neon-green);">$0.00</span></div>
-            <div class="ledger-row"><span class="ledger-lbl">Dynamically Risk (1%)</span><span class="ledger-val" id="ui-ledger-stake" style="color:var(--neon-orange);">$0.00</span></div>
-          </div>
-        </div>
       </div>
+    </div>
+
+    <!-- LOG PANEL -->
+    <div class="log-panel">
+      <div class="panel-header" style="border:none; padding:0; margin-bottom:4px;">Live System Audit Log</div>
+      <div class="log-stream" id="ops-log-stream"></div>
     </div>
   </div>
 
-  <!-- Analytics View -->
-  <div class="spa-view" id="view-analytics">
+  <!-- ======================================================================
+       VIEW: ANALYTICS
+       ====================================================================== -->
+  <div class="view" id="view-analytics">
     <div class="analytics-layout">
-      <div class="audit-filter-bar">
-        <div class="filter-inputs-group">
-          <label>Query Range Start</label>
-          <input type="date" class="input-date-field" id="date-picker-start" value="2026-06-01" onchange="applyManualDateFilter()">
-          <label>Query Range End</label>
-          <input type="date" class="input-date-field" id="date-picker-end" value="2026-06-21" onchange="applyManualDateFilter()">
-        </div>
-        <div class="preset-buttons-strip">
-          <button class="btn-preset" id="preset-hour" onclick="applyTimeframePreset(this, 'hour')">1 Hour</button>
+      <div class="filter-bar">
+        <label>From</label>
+        <input type="date" id="date-picker-start" value="2026-06-01" onchange="applyManualDateFilter()">
+        <label>To</label>
+        <input type="date" id="date-picker-end" value="2026-06-21" onchange="applyManualDateFilter()">
+        <div class="preset-strip">
+          <button class="btn-preset" id="preset-hour" onclick="applyTimeframePreset(this, 'hour')">1H</button>
           <button class="btn-preset active-preset" id="preset-session" onclick="applyTimeframePreset(this, 'session')">Session</button>
-          <button class="btn-preset" id="preset-24h" onclick="applyTimeframePreset(this, '24h')">24 Hours</button>
-          <button class="btn-preset" id="preset-month" onclick="applyTimeframePreset(this, 'month')">1 Month</button>
-          <button class="btn-preset" id="preset-6months" onclick="applyTimeframePreset(this, '6months')">6 Months</button>
-          <button class="btn-preset" id="preset-1year" onclick="applyTimeframePreset(this, '1year')">1 Year</button>
-          <button class="btn-preset" id="preset-clear" onclick="applyTimeframePreset(this, 'clear')">Clear</button>
+          <button class="btn-preset" id="preset-24h" onclick="applyTimeframePreset(this, '24h')">24H</button>
+          <button class="btn-preset" id="preset-month" onclick="applyTimeframePreset(this, 'month')">1M</button>
+          <button class="btn-preset" id="preset-6months" onclick="applyTimeframePreset(this, '6months')">6M</button>
+          <button class="btn-preset" id="preset-1year" onclick="applyTimeframePreset(this, '1year')">1Y</button>
+          <button class="btn-preset" id="preset-clear" onclick="applyTimeframePreset(this, 'clear')">✕</button>
         </div>
       </div>
-      <div class="summary-metrics-ribbon">
-        <div class="metric-ribbon-card">
-          <div class="m-lbl">Total Accumulated Net Profit</div>
-          <div class="m-val" id="meta-net-profit" style="color:var(--neon-green);">$0.00</div>
-        </div>
-        <div class="metric-ribbon-card">
-          <div class="m-lbl">Institutional Profit Factor</div>
-          <div class="m-val" id="meta-profit-factor" style="color:var(--neon-blue);">N/A</div>
-        </div>
-        <div class="metric-ribbon-card">
-          <div class="m-lbl">Strategy Hit Strike Rate</div>
-          <div class="m-val" id="meta-strike-rate" style="color:var(--text-bright);">0.0%</div>
-        </div>
-        <div class="metric-ribbon-card">
-          <div class="m-lbl">Peak Execution Session Drawdown</div>
-          <div class="m-val" id="meta-drawdown" style="color:var(--neon-red);">0.0%</div>
-        </div>
+
+      <div class="metrics-ribbon">
+        <div class="metric-card"><div class="m-lbl">Net Profit</div><div class="m-val" id="meta-net-profit" style="color:var(--neon-green);">$0.00</div></div>
+        <div class="metric-card"><div class="m-lbl">Profit Factor</div><div class="m-val" id="meta-profit-factor" style="color:var(--neon-blue);">N/A</div></div>
+        <div class="metric-card"><div class="m-lbl">Strike Rate</div><div class="m-val" id="meta-strike-rate">0.0%</div></div>
+        <div class="metric-card"><div class="m-lbl">Max Drawdown</div><div class="m-val" id="meta-drawdown" style="color:var(--neon-red);">0.0%</div></div>
       </div>
-      <div class="charts-matrix-grid">
-        <div class="chart-container-panel">
-          <div class="panel-header">Strike Distribution (Ratio)</div>
-          <div class="chart-canvas-wrapper">
-            <canvas id="chart-pie-winloss"></canvas>
-          </div>
-        </div>
-        <div class="chart-container-panel">
-          <div class="panel-header">Asset Performance Contribution</div>
-          <div class="chart-canvas-wrapper">
-            <canvas id="chart-donut-assets"></canvas>
-          </div>
-        </div>
-        <div class="chart-container-panel">
-          <div class="panel-header">Session Capital Growth Curve Trendline</div>
-          <div class="chart-canvas-wrapper">
-            <canvas id="chart-line-equity"></canvas>
-          </div>
-        </div>
+
+      <div class="charts-grid">
+        <div class="chart-box"><div class="ch-label">Win/Loss Ratio</div><div class="chart-wrap"><canvas id="chart-pie-winloss"></canvas></div></div>
+        <div class="chart-box"><div class="ch-label">Asset Contribution</div><div class="chart-wrap"><canvas id="chart-donut-assets"></canvas></div></div>
+        <div class="chart-box"><div class="ch-label">Equity Curve</div><div class="chart-wrap"><canvas id="chart-line-equity"></canvas></div></div>
       </div>
     </div>
   </div>
 
-  <!-- Settings View -->
-  <div class="spa-view" id="view-settings">
+  <!-- ======================================================================
+       VIEW: SETTINGS
+       ====================================================================== -->
+  <div class="view" id="view-settings">
     <div class="settings-layout">
       <div class="settings-section">
         <h3>📊 MA Crossover Parameters</h3>
@@ -464,13 +745,13 @@
           <div class="setting-item"><label>Slow MA Period</label><input type="number" id="config-SLOW_MA_PERIOD" step="1" /></div>
           <div class="setting-item"><label>Min Spread %</label><input type="number" id="config-MIN_SPREAD_PERCENT" step="0.01" /></div>
           <div class="setting-item"><label>Min Volatility %</label><input type="number" id="config-MIN_VOLATILITY_PERCENT" step="0.01" /></div>
-          <div class="setting-item"><label>Duration (ticks)</label><input type="number" id="config-DURATION_TICKS" step="1" /></div>
+          <div class="setting-item"><label>Auto Duration (ticks)</label><input type="number" id="config-DURATION_TICKS" step="1" /></div>
         </div>
       </div>
       <div class="settings-section">
         <h3>⏱ Timing & Cooldowns</h3>
         <div class="settings-grid">
-          <div class="setting-item"><label>Min Trigger Interval (ms)</label><input type="number" id="config-MIN_TRIGGER_INTERVAL" step="1000" /></div>
+          <div class="setting-item"><label>Trigger Interval (ms)</label><input type="number" id="config-MIN_TRIGGER_INTERVAL" step="1000" /></div>
           <div class="setting-item"><label>Max Consecutive Losses</label><input type="number" id="config-MAX_CONSECUTIVE_LOSSES" step="1" /></div>
           <div class="setting-item"><label>Loss Cooldown (ms)</label><input type="number" id="config-LOSS_COOLDOWN_MS" step="1000" /></div>
         </div>
@@ -479,8 +760,8 @@
         <h3>💰 Risk Management</h3>
         <div class="settings-grid">
           <div class="setting-item"><label>Risk per Trade (%)</label><input type="number" id="config-RISK_PERCENT" step="0.1" /></div>
-          <div class="setting-item"><label>Daily Take Profit (%)</label><input type="number" id="config-TP_PERCENT" step="0.1" /></div>
-          <div class="setting-item"><label>Daily Stop Loss (%)</label><input type="number" id="config-SL_PERCENT" step="0.1" /></div>
+          <div class="setting-item"><label>Daily TP (%)</label><input type="number" id="config-TP_PERCENT" step="0.1" /></div>
+          <div class="setting-item"><label>Daily SL (%)</label><input type="number" id="config-SL_PERCENT" step="0.1" /></div>
           <div class="setting-item"><label>Min Stake ($)</label><input type="number" id="config-MIN_STAKE" step="0.01" /></div>
         </div>
       </div>
@@ -490,21 +771,47 @@
           <div class="setting-item"><label>Cooldown Ticks</label><input type="number" id="config-COOLDOWN_TICKS" step="1" /></div>
           <div class="setting-item"><label>Settle Ticks</label><input type="number" id="config-SETTLE_TICKS" step="1" /></div>
           <div class="setting-item"><label>Settlement Timeout (ms)</label><input type="number" id="config-SETTLEMENT_TIMEOUT_MS" step="1000" /></div>
-          <div class="setting-item"><label>P&L Sync Interval (ms)</label><input type="number" id="config-PNL_SYNC_INTERVAL_MS" step="1000" /></div>
+          <div class="setting-item"><label>P&L Sync (ms)</label><input type="number" id="config-PNL_SYNC_INTERVAL_MS" step="1000" /></div>
         </div>
       </div>
       <div class="settings-actions">
-        <button class="btn-save-settings" onclick="saveSettings()">Apply Settings</button>
+        <button class="btn-save" onclick="saveSettings()">Apply Settings</button>
         <span class="settings-status" id="settings-status"></span>
       </div>
     </div>
   </div>
 
-  <div id="sys-clock"><span id="clock-display">00:00:00</span> EAT</div>
+  <!-- ======================================================================
+       CLOCK
+       ====================================================================== -->
+  <div id="clock"><span id="clock-display">00:00:00</span> EAT</div>
 
   <script>
     // =========================================================================
-    // 1. LIVE OPERATIONS ENGINE
+    // 1. NAVIGATION
+    // =========================================================================
+    function switchView(viewId) {
+      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+      document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('view-' + viewId).classList.add('active');
+      document.querySelector(`.nav-btn[data-view="${viewId}"]`).classList.add('active');
+      // Close mobile menu
+      document.getElementById('navLinks').classList.remove('open');
+      // If analytics, render charts if not already
+      if (viewId === 'analytics') {
+        renderPrototypeCharts();
+        applyTimeframePreset(document.getElementById('preset-session'), 'session');
+      }
+      if (viewId === 'settings') loadConfigToUI();
+    }
+
+    // Mobile menu toggle
+    document.getElementById('menuToggle').addEventListener('click', function() {
+      document.getElementById('navLinks').classList.toggle('open');
+    });
+
+    // =========================================================================
+    // 2. LIVE OPERATIONS ENGINE
     // =========================================================================
     const MARKETS_CFG = {
       'R_10': 'Volatility 10 Index',
@@ -543,16 +850,10 @@
     function fireManual(type) {
       const duration = parseInt(document.getElementById('manual-duration').value) || 5;
       const unit = document.getElementById('manual-unit').value;
-      
-      fetch('/api/manual-trade', { 
-        method: 'POST', 
-        headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({ 
-          symbol: currentFocus, 
-          contractType: type,
-          duration: duration,
-          durationUnit: unit
-        }) 
+      fetch('/api/manual-trade', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: currentFocus, contractType: type, duration: duration, durationUnit: unit })
       })
         .then(res => res.json())
         .then(data => {
@@ -562,6 +863,7 @@
         .catch(err => alert('Network error: ' + err.message));
     }
 
+    // ---- SSE ----
     const sse = new EventSource('/api/logs');
     sse.onopen = function() {
       console.log('✅ SSE connection opened');
@@ -594,6 +896,9 @@
       }
     };
 
+    // =========================================================================
+    // 3. RENDER OPS UI
+    // =========================================================================
     function renderOpsUI(state) {
       serverMode = state.tradingMode;
       document.getElementById('ui-ledger-mode').innerText = state.tradingMode.toUpperCase();
@@ -617,33 +922,33 @@
       if (state.locked) {
         if (state.active) {
           alertBanner.style.display = "block";
-          alertBanner.style.background = "rgba(0,255,136,0.15)";
-          alertBanner.style.borderColor = "var(--neon-green)";
+          alertBanner.style.background = "rgba(0,255,136,0.12)";
+          alertBanner.style.border = "1px solid var(--neon-green)";
           alertBanner.style.color = "var(--neon-green)";
-          alertBanner.innerText = `⏳ AUTO ON – RESUMING TRADING AT MIDNIGHT (${state.lockReason || 'Daily limit reached'})`;
+          alertBanner.innerText = `⏳ AUTO ON – RESUMING AT MIDNIGHT (${state.lockReason || 'Daily limit reached'})`;
           statusPill.innerText = "PAUSED (ARMED)"; statusPill.style.color = "var(--neon-green)";
-          statusPill.style.borderColor = "var(--neon-green)"; statusPill.style.background = "rgba(0,255,136,0.1)";
+          statusPill.style.borderColor = "var(--neon-green)"; statusPill.style.background = "rgba(0,255,136,0.08)";
         } else {
           alertBanner.style.display = "block";
-          alertBanner.style.background = "rgba(255,59,48,0.15)";
-          alertBanner.style.borderColor = "var(--neon-red)";
+          alertBanner.style.background = "rgba(255,59,48,0.12)";
+          alertBanner.style.border = "1px solid var(--neon-red)";
           alertBanner.style.color = "var(--neon-red)";
           alertBanner.innerText = state.lockReason || "Trading paused due to daily limit.";
-          statusPill.innerText = "HALTED / SYSTEM LOCK"; statusPill.style.color = "var(--neon-red)";
-          statusPill.style.borderColor = "var(--neon-red)"; statusPill.style.background = "rgba(255,59,48,0.1)";
+          statusPill.innerText = "HALTED"; statusPill.style.color = "var(--neon-red)";
+          statusPill.style.borderColor = "var(--neon-red)"; statusPill.style.background = "rgba(255,59,48,0.08)";
         }
       } else {
         alertBanner.style.display = "none";
         if (state.active) {
-          statusPill.innerText = "CORE AUTOMATION ARMED"; statusPill.style.color = "var(--neon-green)";
-          statusPill.style.borderColor = "var(--neon-green)"; statusPill.style.background = "rgba(0,255,136,0.1)";
+          statusPill.innerText = "ARMED"; statusPill.style.color = "var(--neon-green)";
+          statusPill.style.borderColor = "var(--neon-green)"; statusPill.style.background = "rgba(0,255,136,0.08)";
         } else {
-          statusPill.innerText = "DATA PIPELINE ACTIVE (IDLE)"; statusPill.style.color = "var(--text-dim)";
+          statusPill.innerText = "IDLE"; statusPill.style.color = "var(--text-dim)";
           statusPill.style.borderColor = "var(--border-glow)"; statusPill.style.background = "var(--bg-card)";
         }
       }
 
-      // ----- SMART COLORING: Only most extreme gets colored -----
+      // --- Smart coloring: only most extreme ---
       const allSpreads = [];
       const metricsMap = {};
       for (const sym in MARKETS_CFG) {
@@ -654,16 +959,12 @@
           allSpreads.push({ sym, sp });
         }
       }
-      
-      // Find most positive and most negative
-      let mostPositive = null;
-      let mostNegative = null;
+      let mostPositive = null, mostNegative = null;
       allSpreads.forEach(item => {
         if (mostPositive === null || item.sp > mostPositive.sp) mostPositive = item;
         if (mostNegative === null || item.sp < mostNegative.sp) mostNegative = item;
       });
 
-      // Cluster cards
       const clusterBox = document.getElementById('ui-cluster-list');
       clusterBox.innerHTML = '';
       for (const sym in MARKETS_CFG) {
@@ -676,20 +977,13 @@
           if (metric.fastMA !== null && metric.fastMA !== undefined && metric.slowMA !== null && metric.slowMA !== undefined) {
             sp = ((metric.fastMA - metric.slowMA) / metric.price * 100);
             spread = sp.toFixed(2) + '%';
-            // Only color if it's the most extreme
-            if (mostPositive && sym === mostPositive.sym && sp > 0) {
-              trendClass = 'trend-bull';
-            } else if (mostNegative && sym === mostNegative.sym && sp < 0) {
-              trendClass = 'trend-bear';
-            }
+            if (mostPositive && sym === mostPositive.sym && sp > 0) trendClass = 'trend-bull';
+            else if (mostNegative && sym === mostNegative.sym && sp < 0) trendClass = 'trend-bear';
           }
         }
-
         clusterBox.innerHTML += `
           <div class="cluster-card ${isActive ? 'active' : ''} ${trendClass}" onclick="setFocusMarket('${sym}')">
-            <div class="cluster-meta">
-              <span class="cluster-name">${MARKETS_CFG[sym]}</span>
-            </div>
+            <div class="cluster-meta"><span class="cluster-name">${MARKETS_CFG[sym]}</span></div>
             <div class="cluster-data">
               <span class="cluster-price">$${price}</span>
               <span class="cluster-spread ${trendClass === 'trend-bull' ? 'bull' : (trendClass === 'trend-bear' ? 'bear' : '')}">${spread}</span>
@@ -698,7 +992,7 @@
         `;
       }
 
-      // Focused market details
+      // Focused market
       const focusMetric = state.marketMetrics && state.marketMetrics[currentFocus] ? state.marketMetrics[currentFocus] : null;
       document.getElementById('ui-focused-title').innerText = `Active Focus: ${MARKETS_CFG[currentFocus]}`;
       
@@ -714,7 +1008,6 @@
         }
         document.getElementById('ui-volatility').innerText = focusMetric.volatility !== null && focusMetric.volatility !== undefined ? focusMetric.volatility.toFixed(2) + '%' : '—';
 
-        // Tail
         const tailBox = document.getElementById('ui-tail-strip');
         tailBox.innerHTML = '';
         const lastPrices = focusMetric.lastPrices || [];
@@ -744,28 +1037,7 @@
     }
 
     // =========================================================================
-    // 2. SPA VIEW SWITCHING
-    // =========================================================================
-    function changeSpaView(target) {
-      document.querySelectorAll('.spa-view').forEach(v => v.classList.remove('active-view'));
-      document.querySelectorAll('.nav-tab-btn').forEach(b => b.classList.remove('active'));
-      if (target === 'ops') {
-        document.getElementById('view-ops').classList.add('active-view');
-        document.getElementById('tab-link-ops').classList.add('active');
-      } else if (target === 'analytics') {
-        document.getElementById('view-analytics').classList.add('active-view');
-        document.getElementById('tab-link-analytics').classList.add('active');
-        renderPrototypeCharts();
-        applyTimeframePreset(document.getElementById('preset-session'), 'session');
-      } else if (target === 'settings') {
-        document.getElementById('view-settings').classList.add('active-view');
-        document.getElementById('tab-link-settings').classList.add('active');
-        loadConfigToUI();
-      }
-    }
-
-    // =========================================================================
-    // 3. SETTINGS LOGIC
+    // 4. SETTINGS
     // =========================================================================
     async function loadConfigToUI() {
       try {
@@ -791,16 +1063,14 @@
         else if (!isNaN(val) && val !== '') val = parseFloat(val);
         config[key] = val;
       });
-
       try {
         const resp = await fetch('/api/config', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(config)
         });
         const result = await resp.json();
         if (result.success) {
-          document.getElementById('settings-status').innerText = '✅ Settings applied successfully!';
+          document.getElementById('settings-status').innerText = '✅ Settings applied!';
         } else {
           document.getElementById('settings-status').innerText = '❌ Error: ' + result.error;
         }
@@ -811,7 +1081,7 @@
     }
 
     // =========================================================================
-    // 4. ANALYTICS
+    // 5. ANALYTICS
     // =========================================================================
     let activeCharts = {};
     function renderPrototypeCharts() {
@@ -820,40 +1090,28 @@
       const gridBorderColor = '#232f48';
 
       const ctxPie = document.getElementById('chart-pie-winloss').getContext('2d');
-      activeCharts.winLoss = new Chart(ctxPie, { type: 'pie', data: { labels: ['Wins', 'Losses'], datasets: [{ data: [0, 0], backgroundColor: ['#00ff88', '#ff3b30'], borderColor: '#101524', borderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: darkThemeText, font: { family: 'Consolas' } } } } } });
+      activeCharts.winLoss = new Chart(ctxPie, {
+        type: 'pie',
+        data: { labels: ['Wins', 'Losses'], datasets: [{ data: [0, 0], backgroundColor: ['#00ff88', '#ff3b30'], borderColor: '#101524', borderWidth: 2 }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: darkThemeText, font: { size: 9 } } } } }
+      });
 
-      const assetLabels = ['Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index', 'Volatility 75 Index', 'Volatility 100 Index'];
+      const assetLabels = ['R_10', 'R_25', 'R_50', 'R_75', 'R_100'];
       const assetColors = ['#00d2ff', '#ff9500', '#94a3b8', '#00ff88', '#a855f7'];
       const ctxDonut = document.getElementById('chart-donut-assets').getContext('2d');
-      activeCharts.assets = new Chart(ctxDonut, { type: 'doughnut', data: { labels: assetLabels, datasets: [{ data: [0, 0, 0, 0, 0], backgroundColor: assetColors, borderColor: '#101524', borderWidth: 2 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: darkThemeText, font: { family: 'Consolas' } } } } } });
+      activeCharts.assets = new Chart(ctxDonut, {
+        type: 'doughnut',
+        data: { labels: assetLabels, datasets: [{ data: [0, 0, 0, 0, 0], backgroundColor: assetColors, borderColor: '#101524', borderWidth: 2 }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: darkThemeText, font: { size: 9 } } } } }
+      });
 
       const ctxLine = document.getElementById('chart-line-equity').getContext('2d');
       activeCharts.equity = new Chart(ctxLine, {
         type: 'line',
-        data: {
-          labels: [],
-          datasets: [{
-            label: 'Cumulative P&L ($)',
-            data: [0],
-            borderColor: '#00ff88',
-            backgroundColor: 'transparent',
-            borderWidth: 4,
-            pointRadius: 4,
-            pointBackgroundColor: '#00ff88',
-            pointBorderColor: '#ffffff',
-            pointBorderWidth: 1,
-            tension: 0.3,
-            showLine: true,
-            fill: false
-          }]
-        },
+        data: { labels: [], datasets: [{ label: 'Cumulative P&L ($)', data: [0], borderColor: '#00ff88', backgroundColor: 'transparent', borderWidth: 3, pointRadius: 3, tension: 0.3 }] },
         options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            x: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText } },
-            y: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText } }
-          },
+          responsive: true, maintainAspectRatio: false,
+          scales: { x: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText, font: { size: 8 } } }, y: { grid: { color: gridBorderColor }, ticks: { color: darkThemeText, font: { size: 8 } } } },
           plugins: { legend: { display: false } }
         }
       });
@@ -862,32 +1120,23 @@
     function computeFromRawData(rawData) {
       let wins = 0, losses = 0, grossProfit = 0, grossLoss = 0;
       const assetMap = {};
-      const sortedTrades = rawData.slice().sort((a, b) => {
-        const da = new Date(a.created_at);
-        const db = new Date(b.created_at);
-        return da - db;
-      });
+      const sortedTrades = rawData.slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
       const equityCurve = [];
       let cumProfit = 0;
       sortedTrades.forEach(t => {
         const pnl = t.profit_loss || 0;
         cumProfit += pnl;
         equityCurve.push(cumProfit);
-        if (pnl > 0) { wins++; grossProfit += pnl; }
-        else if (pnl < 0) { losses++; grossLoss += Math.abs(pnl); }
+        if (pnl > 0) { wins++; grossProfit += pnl; } else if (pnl < 0) { losses++; grossLoss += Math.abs(pnl); }
         const asset = t.asset || 'Unknown';
         assetMap[asset] = (assetMap[asset] || 0) + pnl;
       });
-      
-      const assetFullNames = ['Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index', 'Volatility 75 Index', 'Volatility 100 Index'];
-      const assetData = assetFullNames.map(name => assetMap[name] || 0);
-      
+      const assetLabels = ['Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index', 'Volatility 75 Index', 'Volatility 100 Index'];
+      const assetData = assetLabels.map(name => assetMap[name] || 0);
       if (equityCurve.length === 0) equityCurve.push(0);
-      
       const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? Infinity : 0);
       const totalTrades = wins + losses;
       const strikeRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
-      
       return { wins, losses, profitFactor, strikeRate, assetData, equityCurve };
     }
 
@@ -896,17 +1145,14 @@
         document.querySelectorAll('.btn-preset').forEach(btn => btn.classList.remove('active-preset'));
         clickedButton.classList.add('active-preset');
       }
-
       if (presetMode === 'clear') {
-        updateUIElements({ profit: '$0.00', pf: 'N/A', strike: '0.0%', drawdown: '0.00%' }, { winLoss: [0, 0], assets: [0,0,0,0,0], equity: [0] }, null);
+        updateUIElements({ profit: '$0.00', pf: 'N/A', strike: '0.0%', drawdown: '0.00%' }, { winLoss: [0, 0], assets: [0,0,0,0,0], equity: [0] });
         return;
       }
-
       try {
         const response = await fetch(`/api/ledger/analytics?mode=${presetMode}`);
         const data = await response.json();
         if (data.error) throw new Error(data.error);
-
         let winLoss, assets, equity, pf, strike, drawdown;
         if (presetMode === 'session') {
           const totalTrades = data.totalTrades || 0;
@@ -929,16 +1175,11 @@
           strike = data.strikeRate + '%';
           drawdown = data.drawdown + '%';
         }
-
         updateUIElements({
           profit: `$${parseFloat(data.totalProfit).toFixed(2)}`,
-          pf: pf,
-          strike: strike,
-          drawdown: drawdown
-        }, { winLoss, assets, equity }, null);
-      } catch (err) {
-        console.error("Fetch Error:", err);
-      }
+          pf: pf, strike: strike, drawdown: drawdown
+        }, { winLoss, assets, equity });
+      } catch (err) { console.error("Fetch Error:", err); }
     }
 
     async function applyManualDateFilter() {
@@ -955,17 +1196,14 @@
         const pf = data.profitFactor || '0.00';
         const strike = data.strikeRate + '%';
         const drawdown = data.drawdown + '%';
-
         updateUIElements({
           profit: `$${parseFloat(data.totalProfit).toFixed(2)}`,
-          pf: pf,
-          strike: strike,
-          drawdown: drawdown
-        }, { winLoss, assets, equity }, null);
+          pf: pf, strike: strike, drawdown: drawdown
+        }, { winLoss, assets, equity });
       } catch (err) { console.error("Filter Error:", err); }
     }
 
-    function updateUIElements(metrics, chartData, customLineLabels) {
+    function updateUIElements(metrics, chartData) {
       document.getElementById('meta-net-profit').innerText = metrics.profit;
       document.getElementById('meta-profit-factor').innerText = metrics.pf;
       document.getElementById('meta-strike-rate').innerText = metrics.strike;
@@ -978,33 +1216,19 @@
       activeCharts.assets.update('none');
 
       const equityData = chartData.equity;
-      const labels = customLineLabels || equityData.map((_, i) => `T${i+1}`);
+      const labels = equityData.map((_, i) => `T${i+1}`);
       activeCharts.equity.data.labels = labels;
-      activeCharts.equity.data.datasets[0] = {
-        label: 'Cumulative P&L ($)',
-        data: equityData,
-        borderColor: '#00ff88',
-        backgroundColor: 'transparent',
-        borderWidth: 4,
-        pointRadius: 4,
-        pointBackgroundColor: '#00ff88',
-        pointBorderColor: '#ffffff',
-        pointBorderWidth: 1,
-        tension: 0.3,
-        showLine: true,
-        fill: false
-      };
+      activeCharts.equity.data.datasets[0].data = equityData;
       activeCharts.equity.update('none');
     }
 
     // =========================================================================
-    // 5. SYSTEM CLOCK
+    // 6. CLOCK
     // =========================================================================
     function updateClock() {
       const now = new Date();
       const options = { timeZone: 'Africa/Nairobi', hour12: false };
-      const timeStr = now.toLocaleTimeString('en-US', options);
-      document.getElementById('clock-display').textContent = timeStr;
+      document.getElementById('clock-display').textContent = now.toLocaleTimeString('en-US', options);
     }
     setInterval(updateClock, 1000);
     updateClock();
