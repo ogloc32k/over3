@@ -15,16 +15,14 @@ const STATE_FILE = '/var/data/deriv_multimarket_state.json';
 const CONFIG_FILE = '/var/data/deriv_config.json';
 
 // =====================================================================
-//  DEFAULT CONFIG
+//  DEFAULT CONFIG (MA Crossover)
 // =====================================================================
 const DEFAULT_CONFIG = {
-    WINDOW_TICKS: 10,
-    DURATION_TICKS: 7,
-    RISE_THRESHOLD_LOW: 20,
-    RISE_THRESHOLD_HIGH: 40,
-    SUPPORT_THRESHOLD_LOW: 20,
-    SUPPORT_THRESHOLD_HIGH: 40,
-    VIRTUAL_LOSS_LIMIT: 4,
+    FAST_MA_PERIOD: 8,
+    SLOW_MA_PERIOD: 21,
+    MIN_SPREAD_PERCENT: 0.15,      // minimum % difference between fast and slow MA
+    MIN_VOLATILITY_PERCENT: 0.4,   // minimum recent price range % to avoid flat markets
+    DURATION_TICKS: 12,
     MIN_TRIGGER_INTERVAL: 20000,
     MAX_CONSECUTIVE_LOSSES: 2,
     LOSS_COOLDOWN_MS: 120000,
@@ -272,73 +270,71 @@ app.post('/api/control', (req, res) => {
 
 // ---------- Markets Configuration ----------
 const MARKETS = {
-  'R_10':  { id: 'R_10',  name: 'Volatility 10 Index' },
-  'R_25':  { id: 'R_25',  name: 'Volatility 25 Index' },
-  'R_50':  { id: 'R_50',  name: 'Volatility 50 Index' },
-  'R_75':  { id: 'R_75',  name: 'Volatility 75 Index' },
-  'R_100': { id: 'R_100', name: 'Volatility 100 Index' }
+  'R_10':  { id: 'R_10',  name: 'Volatility 10 Index',  dp: 0 },
+  'R_25':  { id: 'R_25',  name: 'Volatility 25 Index',  dp: 0 },
+  'R_50':  { id: 'R_50',  name: 'Volatility 50 Index',  dp: 0 },
+  'R_75':  { id: 'R_75',  name: 'Volatility 75 Index',  dp: 0 },
+  'R_100': { id: 'R_100', name: 'Volatility 100 Index', dp: 0 }
 };
 const BUFFER_CAPACITY = 1000;
 
-// =====================================================================
-//  PIPELINE CLASS
-// =====================================================================
-class Pipeline {
+// ---------- Pipeline Class (MA + Volatility) ----------
+class MultiMarketPipeline {
   constructor() {
     this.buffers = {};
-    for (const sym in MARKETS) {
-      this.buffers[sym] = [];
+    this.maFast = {};
+    this.maSlow = {};
+    this.lastPrices = {};
+    for (const symbol in MARKETS) {
+      this.buffers[symbol] = [];
+      this.maFast[symbol] = null;
+      this.maSlow[symbol] = null;
+      this.lastPrices[symbol] = null;
     }
+  }
+
+  // Simple moving average
+  _ma(arr, period) {
+    if (arr.length < period) return null;
+    const slice = arr.slice(-period);
+    return slice.reduce((a,b) => a+b, 0) / period;
+  }
+
+  // Price range % over last N ticks
+  _volatility(arr, period) {
+    if (arr.length < period) return 0;
+    const slice = arr.slice(-period);
+    const min = Math.min(...slice);
+    const max = Math.max(...slice);
+    if (min === 0) return 0;
+    return (max - min) / min * 100;
   }
 
   feed(symbol, price) {
     const buf = this.buffers[symbol];
     buf.push(price);
     if (buf.length > BUFFER_CAPACITY) buf.shift();
-    return this.analyze(symbol, price);
-  }
 
-  analyze(symbol, currentPrice) {
-    const buf = this.buffers[symbol];
-    if (buf.length < CONFIG.WINDOW_TICKS + 1) return null;
+    this.lastPrices[symbol] = price;
 
-    const window = buf.slice(-CONFIG.WINDOW_TICKS);
-    let totalRise = 0;
-    let totalFall = 0;
-    for (let i = 1; i < window.length; i++) {
-      const diff = window[i] - window[i-1];
-      if (diff > 0) totalRise += diff;
-      else totalFall += Math.abs(diff);
-    }
-    const avgRise = totalRise / CONFIG.WINDOW_TICKS;
-    const avgFall = totalFall / CONFIG.WINDOW_TICKS;
-    const risePct = (avgRise / currentPrice) * 100;
-    const supportPct = (avgFall / currentPrice) * 100;
-
-    const sma = window.reduce((a,b) => a+b, 0) / CONFIG.WINDOW_TICKS;
-    const aboveTrendline = currentPrice > sma;
-    const belowTrendline = currentPrice < sma;
-
-    const lastPrices = buf.slice(-5);
+    const fastMA = this._ma(buf, CONFIG.FAST_MA_PERIOD);
+    const slowMA = this._ma(buf, CONFIG.SLOW_MA_PERIOD);
+    const vol = this._volatility(buf, 20); // 20 ticks volatility
 
     return {
       symbol,
-      price: currentPrice,
-      risePct,
-      supportPct,
-      sma,
-      aboveTrendline,
-      belowTrendline,
-      lastPrices
+      price,
+      fastMA,
+      slowMA,
+      volatility: vol,
+      lastPrices: buf.slice(-5)
     };
   }
 }
 
-const pipeline = new Pipeline();
+const engine = new MultiMarketPipeline();
 
-// =====================================================================
-//  STATE
-// =====================================================================
+// ============ STATE ============
 const state = {
   active: false,
   tradingMode: 'demo',
@@ -358,11 +354,7 @@ const state = {
   logs: [],
   lastTriggerTime: 0,
   lossCooldownUntil: 0,
-  pendingSettlement: false,
-  // Virtual loss per market
-  virtualLossCounts: {},
-  // Simulated virtual trades
-  simulatedTrades: {}
+  pendingSettlement: false
 };
 
 function sanitizeState() {
@@ -370,31 +362,28 @@ function sanitizeState() {
   return rest;
 }
 
-// =====================================================================
-//  STRATEGY CHECK
-// =====================================================================
+// ============ STRATEGY CHECK (MA Crossover) ============
 function checkStrategy(symbol, metric) {
   if (!metric) return null;
-  const { risePct, supportPct, aboveTrendline, belowTrendline } = metric;
+  const { fastMA, slowMA, price, volatility } = metric;
+  if (fastMA === null || slowMA === null || price === 0) return null;
 
-  if (risePct < CONFIG.RISE_THRESHOLD_LOW &&
-      supportPct > CONFIG.SUPPORT_THRESHOLD_HIGH &&
-      aboveTrendline) {
-    return { direction: 'CALL', score: supportPct };
+  // 1. Volatility filter
+  if (volatility < CONFIG.MIN_VOLATILITY_PERCENT) return null;
+
+  // 2. Spread filter (in % of price)
+  const spread = Math.abs(fastMA - slowMA) / price * 100;
+  if (spread < CONFIG.MIN_SPREAD_PERCENT) return null;
+
+  // 3. Direction
+  if (fastMA > slowMA) {
+    return { direction: 'CALL', score: spread };
+  } else {
+    return { direction: 'PUT', score: spread };
   }
-
-  if (risePct > CONFIG.RISE_THRESHOLD_HIGH &&
-      supportPct < CONFIG.SUPPORT_THRESHOLD_LOW &&
-      belowTrendline) {
-    return { direction: 'PUT', score: risePct };
-  }
-
-  return null;
 }
 
-// =====================================================================
-//  P&L SYNC & LIMITS
-// =====================================================================
+// ============ P&L SYNC & LIMITS ============
 async function syncDailyPnlFromDB() {
   try {
     const now = new Date();
@@ -444,9 +433,7 @@ function checkDailyLimits() {
   return false;
 }
 
-// =====================================================================
-//  STATE PERSISTENCE
-// =====================================================================
+// ============ STATE PERSISTENCE ============
 function saveState() {
   try {
     const dir = path.dirname(STATE_FILE);
@@ -483,24 +470,24 @@ function loadState() {
   } catch(e) {}
 }
 
-// =====================================================================
-//  SETTLEMENT (Real Trade)
-// =====================================================================
-function settleRealTrade(trade) {
-  if (!trade || !trade.contractId || state.balance == null) {
-    addLog("⚠️ Trade closed or never executed. Resetting state.");
-    state.tradeInProgress = false;
-    state.activeRealTrade = null;
-    state.settleTicksRemaining = 0;
+// ============ SETTLEMENT ============
+function settleRealTrade() {
+  if (!state.activeRealTrade || !state.activeRealTrade.contractId || state.balance == null) {
+    if (state.activeRealTrade) {
+      addLog("⚠️ Trade closed or never executed. Resetting state.");
+      state.tradeInProgress = false;
+      state.activeRealTrade = null;
+    }
+    state.pendingSettlement = false;
     return;
   }
 
-  const profit = state.balance - trade.balanceBefore;
+  const profit = state.balance - state.activeRealTrade.balanceBefore;
   state.sessionPnl += profit;
   state.dailyPnl += profit;
 
   const isWin = profit >= 0;
-  const grossPayout = isWin ? (trade.stake + profit) : 0;
+  const grossPayout = isWin ? (state.activeRealTrade.stake + profit) : 0;
 
   if (isWin) {
     consecutiveLosses = 0;
@@ -513,25 +500,26 @@ function settleRealTrade(trade) {
   }
 
   saveTradeToCloud({
-    contract_id: trade.contractId,
-    asset: MARKETS[trade.symbol]?.name || trade.symbol,
-    contractType: trade.contractType,
-    stake: trade.stake,
+    contract_id: state.activeRealTrade.contractId,
+    asset: MARKETS[state.activeRealTrade.symbol]?.name || state.activeRealTrade.symbol,
+    contractType: state.activeRealTrade.contractType,
+    stake: state.activeRealTrade.stake,
     payout: grossPayout,
     isWin: isWin,
     barrier: null,
     exitTick: null,
-    entry_price: trade.entryPrice || null,
+    entry_price: state.activeRealTrade.entryPrice || null,
     exit_price: null,
     duration_ticks: CONFIG.DURATION_TICKS
   });
 
-  addLog(`[Settlement] ${trade.symbol} | ${trade.contractType} | Result: ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
+  addLog(`[Settlement] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | Result: ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
 
   state.tradeInProgress = false;
   state.activeRealTrade = null;
   state.settleTicksRemaining = 0;
   state.cooldownTicksLeft = CONFIG.COOLDOWN_TICKS;
+  state.pendingSettlement = false;
 
   const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
   state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
@@ -545,93 +533,108 @@ function settleRealTrade(trade) {
 let consecutiveLosses = 0;
 
 // =====================================================================
-//  PROCESS LIVE FEED
+// ENTRY LOGIC
 // =====================================================================
 function processLiveFeed(symbol, price) {
-  console.log(`📈 Tick: ${symbol} @ ${price}`);
-
-  const metric = pipeline.feed(symbol, price);
-  if (!metric) return;
-
-  state.marketMetrics[symbol] = metric;
-
-  // --- Virtual trades simulation ---
-  if (!state.simulatedTrades[symbol]) {
-    state.simulatedTrades[symbol] = [];
-  }
-
-  const virtualTrades = state.simulatedTrades[symbol];
-  for (let i = virtualTrades.length - 1; i >= 0; i--) {
-    const vt = virtualTrades[i];
-    vt.ticksRemaining--;
-    if (vt.ticksRemaining <= 0) {
-      const win = (vt.direction === 'CALL' && price > vt.entryPrice) ||
-                  (vt.direction === 'PUT' && price < vt.entryPrice);
-      if (win) {
-        state.virtualLossCounts[symbol] = 0;
-        addLog(`🟢 Virtual ${symbol} ${vt.direction} at ${vt.entryPrice} -> WIN (exit ${price})`);
-      } else {
-        state.virtualLossCounts[symbol] = (state.virtualLossCounts[symbol] || 0) + 1;
-        addLog(`🔴 Virtual ${symbol} ${vt.direction} at ${vt.entryPrice} -> LOSS (exit ${price})`);
-      }
-      virtualTrades.splice(i, 1);
-    }
-  }
-
-  // --- Real trade logic ---
-  if (state.tradeInProgress || state.settleTicksRemaining > 0) return;
-  if (!state.active || state.locked || state.cooldownTicksLeft > 0) return;
-
-  const now = Date.now();
-  if (now < state.lossCooldownUntil) return;
-  if (now - state.lastTriggerTime < CONFIG.MIN_TRIGGER_INTERVAL) return;
-
-  const lossCount = state.virtualLossCounts[symbol] || 0;
-  const signal = checkStrategy(symbol, metric);
-  if (!signal) return;
-
-  if (lossCount < CONFIG.VIRTUAL_LOSS_LIMIT) {
-    // Simulate virtual trade
-    const vt = {
-      direction: signal.direction,
-      entryPrice: metric.price,
-      ticksRemaining: CONFIG.DURATION_TICKS
-    };
-    state.simulatedTrades[symbol].push(vt);
-    addLog(`💭 Virtual ${signal.direction} signal for ${symbol} at ${metric.price}. VL: ${lossCount}/${CONFIG.VIRTUAL_LOSS_LIMIT}`);
+  if (state.pendingSettlement) {
+    broadcastSSE({ state: sanitizeState() });
     return;
   }
 
-  // --- Real trade ---
-  state.virtualLossCounts[symbol] = 0;
-  const stake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
-  state.currentStake = Math.round(Math.min(stake, state.balance) * 100) / 100;
+  if (state.settleTicksRemaining > 0) {
+    state.settleTicksRemaining--;
+    if (state.settleTicksRemaining === 0) {
+      state.pendingSettlement = true;
+      addLog(`⏳ ${CONFIG.SETTLE_TICKS} ticks elapsed. Waiting for balance update to settle ${state.activeRealTrade?.symbol}...`);
+      setTimeout(() => {
+        if (state.pendingSettlement) {
+          addLog(`⚠️ Balance update timeout. Forcing settlement now.`);
+          state.pendingSettlement = false;
+          settleRealTrade();
+        }
+      }, CONFIG.SETTLEMENT_TIMEOUT_MS);
+    }
+    broadcastSSE({ state: sanitizeState() });
+    return;
+  }
 
-  state.tradeInProgress = true;
-  state.activeRealTrade = {
-    symbol,
-    stake: state.currentStake,
-    balanceBefore: state.balance,
-    contractType: signal.direction,
-    barrier: null,
-    direction: signal.direction,
-    entryPrice: metric.price,
-  };
+  const metric = engine.feed(symbol, price);
+  if (!metric) return;
 
-  addLog(`🔥 REAL ${signal.direction} trade for ${symbol} at ${metric.price} (after ${CONFIG.VIRTUAL_LOSS_LIMIT} VLs)`);
+  state.marketMetrics[symbol] = metric;
+  if (state.cooldownTicksLeft > 0) state.cooldownTicksLeft--;
 
-  state.lastTriggerTime = now;
-  send({
-    proposal: 1,
-    amount: state.currentStake,
-    basis: 'stake',
-    contract_type: signal.direction,
-    currency: state.currency || 'USD',
-    duration: CONFIG.DURATION_TICKS,
-    duration_unit: 't',
-    underlying_symbol: symbol,
-    req_id: ++reqId
-  });
+  if (!state.active || state.locked || state.tradeInProgress || state.cooldownTicksLeft > 0) {
+    broadcastSSE({ state: sanitizeState() });
+    return;
+  }
+
+  const now = Date.now();
+  if (now < state.lossCooldownUntil) {
+    broadcastSSE({ state: sanitizeState() });
+    return;
+  }
+  if (now - state.lastTriggerTime < CONFIG.MIN_TRIGGER_INTERVAL) {
+    broadcastSSE({ state: sanitizeState() });
+    return;
+  }
+
+  // Find best market (largest MA spread)
+  let bestCandidate = null;
+  let bestScore = -Infinity;
+
+  for (const sym in MARKETS) {
+    const m = state.marketMetrics[sym];
+    if (!m) continue;
+    const signal = checkStrategy(sym, m);
+    if (signal) {
+      if (signal.score > bestScore) {
+        bestScore = signal.score;
+        bestCandidate = { symbol: sym, ...signal };
+      }
+    }
+  }
+
+  if (bestCandidate) {
+    const { symbol, direction } = bestCandidate;
+
+    state.pendingSettlement = false;
+    state.tradeInProgress = true;
+    const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
+    state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
+
+    const contractType = direction; // 'CALL' or 'PUT'
+    const metric = state.marketMetrics[symbol];
+    const spread = ((metric.fastMA - metric.slowMA) / metric.price * 100).toFixed(2);
+    addLog(`🔥 Signal: ${symbol} | ${direction} | Spread: ${spread}%`);
+
+    state.activeRealTrade = {
+      symbol,
+      stake: state.currentStake,
+      balanceBefore: state.balance,
+      contractType,
+      barrier: null,
+      direction: direction,
+      entryPrice: null
+    };
+
+    state.lastTriggerTime = now;
+
+    addLog(`📤 Requesting ${direction} proposal for ${symbol} (${CONFIG.DURATION_TICKS} ticks)...`);
+    send({
+      proposal: 1,
+      amount: state.currentStake,
+      basis: 'stake',
+      contract_type: contractType,
+      currency: state.currency || 'USD',
+      duration: CONFIG.DURATION_TICKS,
+      duration_unit: 't',
+      underlying_symbol: symbol,
+      req_id: ++reqId
+    });
+  }
+
+  broadcastSSE({ state: sanitizeState() });
 }
 
 // ------------------ WEBSOCKET CONNECTION ------------------
@@ -686,8 +689,6 @@ async function connectDeriv() {
       send({ balance: 1, subscribe: 1, req_id: ++reqId });
       for (const key in MARKETS) send({ ticks_history: key, count: BUFFER_CAPACITY, end: 'latest', req_id: ++reqId });
 
-      setInterval(() => { broadcastSSE({ state: sanitizeState() }); }, 5000);
-
       keepAliveLoop = setInterval(() => {
         send({ ping: 1 });
         watchdogTimer = setTimeout(() => { if (derivWs) derivWs.terminate(); }, 3000);
@@ -716,6 +717,7 @@ function handleMessage(msg) {
     state.tradeInProgress = false;
     state.activeRealTrade = null;
     state.settleTicksRemaining = 0;
+    state.pendingSettlement = false;
     return;
   }
 
@@ -724,6 +726,7 @@ function handleMessage(msg) {
       addLog(`❌ Proposal Error: ${msg.error.message}`);
       state.tradeInProgress = false;
       state.activeRealTrade = null;
+      state.pendingSettlement = false;
     } else {
       send({
         buy: msg.proposal.id,
@@ -738,7 +741,8 @@ function handleMessage(msg) {
   if (msg.msg_type === 'balance') {
     state.balance = parseFloat(msg.balance.balance);
     if (state.pendingSettlement && state.activeRealTrade) {
-      settleRealTrade(state.activeRealTrade);
+      state.pendingSettlement = false;
+      settleRealTrade();
     }
     if (state.dailyPnl !== undefined) {
       state.dailyStartBalance = state.balance - state.dailyPnl;
@@ -748,9 +752,9 @@ function handleMessage(msg) {
   else if (msg.msg_type === 'history') {
     const symbol = msg.echo_req.ticks_history;
     const prices = msg.history.prices.map(p => parseFloat(p));
-    prices.forEach(p => pipeline.feed(symbol, p));
+    prices.forEach(p => engine.feed(symbol, p));
     addLog(`✅ History synchronized for ${symbol}`);
-    send({ ticks: symbol, subscribe: 1, req_id: ++reqId });
+    send({ ticks: symbol, req_id: ++reqId });
   }
   else if (msg.msg_type === 'tick') {
     processLiveFeed(msg.tick.symbol, parseFloat(msg.tick.quote));
@@ -759,8 +763,7 @@ function handleMessage(msg) {
     if (state.activeRealTrade) {
       state.activeRealTrade.contractId = msg.buy.contract_id;
       state.activeRealTrade.entryPrice = msg.buy.price;
-      state.settleTicksRemaining = CONFIG.DURATION_TICKS;
-      state.tradeInProgress = true;
+      state.settleTicksRemaining = CONFIG.SETTLE_TICKS;
       addLog(`💰 Trade Executed: Contract ID ${msg.buy.contract_id} at price ${msg.buy.price}`);
     }
   }
@@ -783,7 +786,9 @@ app.post('/api/manual-trade', (req, res) => {
 
   const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
   state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
+  state.pendingSettlement = false;
   state.tradeInProgress = true;
+
   state.activeRealTrade = {
     symbol,
     stake: state.currentStake,
