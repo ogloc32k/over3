@@ -110,12 +110,22 @@
     .cluster-name { font-size: 12px; font-weight: bold; }
     .cluster-data { display: flex; justify-content: space-between; align-items: baseline; }
     .cluster-price { font-size: 15px; font-weight: bold; }
-    .cluster-spread { font-size: 13px; font-weight: bold; color: var(--neon-blue); }
+    .cluster-spread { font-size: 13px; font-weight: bold; color: var(--text-dim); }
     .cluster-spread.bull { color: var(--neon-green); }
     .cluster-spread.bear { color: var(--neon-red); }
 
     .main-matrix-view { display: flex; flex-direction: column; gap: 15px; overflow-y: auto; flex: 1; }
-    .matrix-title-bar { display: flex; justify-content: space-between; align-items: center; background: var(--bg-card); border: 1px solid var(--border-glow); padding: 12px 15px; border-radius: 4px; }
+    .matrix-title-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--bg-card);
+      border: 1px solid var(--border-glow);
+      padding: 12px 15px;
+      border-radius: 4px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
     .matrix-title-bar h1 { font-size: 14px; color: var(--neon-blue); }
     .sys-status-pill { font-size: 11px; font-weight: bold; color: var(--neon-green); background: rgba(0, 255, 136, 0.1); padding: 4px 10px; border: 1px solid var(--neon-green); border-radius: 2px; }
 
@@ -126,6 +136,8 @@
       border: 1px solid var(--border-glow);
       border-radius: 4px;
       padding: 15px;
+      flex-wrap: wrap;
+      gap: 10px;
     }
     .ma-item { text-align: center; }
     .ma-item .label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; }
@@ -133,7 +145,7 @@
     .ma-item .value.fast { color: var(--neon-green); }
     .ma-item .value.slow { color: var(--neon-orange); }
 
-    .tail-strip { display: flex; gap: 8px; margin-top: 6px; justify-content: center; }
+    .tail-strip { display: flex; gap: 8px; margin-top: 6px; justify-content: center; flex-wrap: wrap; }
     .tail-node { background: var(--bg-terminal); border: 1px solid var(--border-glow); padding: 6px 14px; border-radius: 3px; font-size: 15px; font-weight: bold; }
     .tail-node.up { border-color: var(--neon-green); color: var(--neon-green); }
     .tail-node.down { border-color: var(--neon-red); color: var(--neon-red); }
@@ -144,9 +156,48 @@
     .action-button { display: block; width: 100%; padding: 13px; border-radius: 4px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; cursor: pointer; border: none; margin-bottom: 10px; }
     .btn-arm { background: var(--neon-green); color: #05070a; }
     .btn-disarm { background: var(--neon-red); color: #ffffff; margin-bottom: 0; }
-    .btn-manual-call { background: var(--neon-green); color: #05070a; width: 48%; }
-    .btn-manual-put { background: var(--neon-red); color: #ffffff; width: 48%; }
+    .btn-manual-call { background: var(--neon-green); color: #05070a; }
+    .btn-manual-put { background: var(--neon-red); color: #ffffff; }
     .btn-swap-profile { background: #19243a; color: var(--text-bright); border: 1px solid var(--border-glow); }
+
+    .manual-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .manual-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .manual-row select, .manual-row input {
+      background: var(--bg-terminal);
+      border: 1px solid var(--border-glow);
+      color: var(--text-bright);
+      padding: 6px 10px;
+      border-radius: 3px;
+      font-family: inherit;
+      font-size: 12px;
+      outline: none;
+      flex: 1;
+      min-width: 60px;
+    }
+    .manual-row select:focus, .manual-row input:focus {
+      border-color: var(--neon-blue);
+    }
+    .manual-row .btn-manual-call, .manual-row .btn-manual-put {
+      flex: 1;
+      padding: 8px 12px;
+      font-size: 11px;
+      margin: 0;
+    }
+    .manual-label {
+      font-size: 11px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
 
     .ledger-table { display: flex; flex-direction: column; gap: 10px; }
     .ledger-row { display: flex; justify-content: space-between; font-size: 13px; border-bottom: 1px dashed var(--border-glow); padding-bottom: 6px; }
@@ -160,8 +211,8 @@
     #lock-alert-banner { padding: 12px; border-radius: 4px; font-size: 12px; font-weight: bold; display: none; margin-bottom: 15px; }
 
     .analytics-layout { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; }
-    .audit-filter-bar { background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; display: flex; justify-content: space-between; align-items: center; gap: 20px; }
-    .filter-inputs-group { display: flex; align-items: center; gap: 12px; }
+    .audit-filter-bar { background: var(--bg-panel); border: 1px solid var(--border-glow); border-radius: 4px; padding: 15px; display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap; }
+    .filter-inputs-group { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
     .filter-inputs-group label { font-size: 11px; text-transform: uppercase; color: var(--text-dim); font-weight: bold; }
     .input-date-field {
       background: var(--bg-card);
@@ -312,9 +363,20 @@
         </div>
         <div class="deck-group">
           <div class="panel-header" style="border:none; padding:0; margin-bottom:10px;">Direct Tactical Interventions</div>
-          <div style="display:flex; justify-content:space-between;">
-            <button class="action-button btn-manual-call" onclick="fireManual('CALL')" style="margin-bottom:0;">Buy CALL</button>
-            <button class="action-button btn-manual-put" onclick="fireManual('PUT')" style="margin-bottom:0;">Buy PUT</button>
+          <div class="manual-controls">
+            <div class="manual-row">
+              <span class="manual-label">Duration</span>
+              <input type="number" id="manual-duration" value="5" min="1" max="600" style="flex:0.5; min-width:50px;">
+              <select id="manual-unit">
+                <option value="t">Ticks (1-10)</option>
+                <option value="s">Seconds (5-600)</option>
+                <option value="m">Minutes (1-10)</option>
+              </select>
+            </div>
+            <div class="manual-row">
+              <button class="action-button btn-manual-call" onclick="fireManual('CALL')" style="margin-bottom:0;">Buy CALL</button>
+              <button class="action-button btn-manual-put" onclick="fireManual('PUT')" style="margin-bottom:0;">Buy PUT</button>
+            </div>
           </div>
         </div>
         <div class="deck-group">
@@ -479,7 +541,19 @@
     }
 
     function fireManual(type) {
-      fetch('/api/manual-trade', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: currentFocus, contractType: type }) })
+      const duration = parseInt(document.getElementById('manual-duration').value) || 5;
+      const unit = document.getElementById('manual-unit').value;
+      
+      fetch('/api/manual-trade', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ 
+          symbol: currentFocus, 
+          contractType: type,
+          duration: duration,
+          durationUnit: unit
+        }) 
+      })
         .then(res => res.json())
         .then(data => {
           if (data.error) alert('Manual trade failed: ' + data.error);
@@ -569,6 +643,26 @@
         }
       }
 
+      // ----- SMART COLORING: Only most extreme gets colored -----
+      const allSpreads = [];
+      const metricsMap = {};
+      for (const sym in MARKETS_CFG) {
+        const metric = state.marketMetrics && state.marketMetrics[sym] ? state.marketMetrics[sym] : null;
+        if (metric && metric.fastMA !== null && metric.fastMA !== undefined && metric.slowMA !== null && metric.slowMA !== undefined) {
+          const sp = ((metric.fastMA - metric.slowMA) / metric.price * 100);
+          metricsMap[sym] = sp;
+          allSpreads.push({ sym, sp });
+        }
+      }
+      
+      // Find most positive and most negative
+      let mostPositive = null;
+      let mostNegative = null;
+      allSpreads.forEach(item => {
+        if (mostPositive === null || item.sp > mostPositive.sp) mostPositive = item;
+        if (mostNegative === null || item.sp < mostNegative.sp) mostNegative = item;
+      });
+
       // Cluster cards
       const clusterBox = document.getElementById('ui-cluster-list');
       clusterBox.innerHTML = '';
@@ -582,8 +676,12 @@
           if (metric.fastMA !== null && metric.fastMA !== undefined && metric.slowMA !== null && metric.slowMA !== undefined) {
             sp = ((metric.fastMA - metric.slowMA) / metric.price * 100);
             spread = sp.toFixed(2) + '%';
-            if (sp > 0) trendClass = 'trend-bull';
-            else if (sp < 0) trendClass = 'trend-bear';
+            // Only color if it's the most extreme
+            if (mostPositive && sym === mostPositive.sym && sp > 0) {
+              trendClass = 'trend-bull';
+            } else if (mostNegative && sym === mostNegative.sym && sp < 0) {
+              trendClass = 'trend-bear';
+            }
           }
         }
 
@@ -594,7 +692,7 @@
             </div>
             <div class="cluster-data">
               <span class="cluster-price">$${price}</span>
-              <span class="cluster-spread ${sp > 0 ? 'bull' : (sp < 0 ? 'bear' : '')}">${spread}</span>
+              <span class="cluster-spread ${trendClass === 'trend-bull' ? 'bull' : (trendClass === 'trend-bear' ? 'bear' : '')}">${spread}</span>
             </div>
           </div>
         `;
