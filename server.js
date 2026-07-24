@@ -210,13 +210,27 @@ app.get('/api/ledger/analytics', async (req, res) => {
 // --- REQUIRED: Live Logging System ---
 const sseClients = new Set();
 let logId = 1;
+
 function addLog(msg) {
   const entry = { id: logId++, time: new Date().toISOString(), message: msg };
   state.logs.unshift(entry);
   if (state.logs.length > 250) state.logs.pop();
-  broadcastSSE({ logs: [entry], state: sanitizeState() });
+  broadcastSSE({ logs: [entry], state: getFullState() });
 }
+
+function getFullState() {
+  const { logs, ...rest } = state;
+  return { ...rest, marketMetrics: state.marketMetrics || {} };
+}
+
 function broadcastSSE(payload) {
+  if (!payload.state) {
+    payload.state = getFullState();
+  }
+  // Ensure marketMetrics is always included
+  if (payload.state && !payload.state.marketMetrics) {
+    payload.state.marketMetrics = state.marketMetrics || {};
+  }
   sseClients.forEach(c => c.write(`data: ${JSON.stringify(payload)}\n\n`));
 }
 
@@ -228,7 +242,13 @@ app.get('/api/logs', (req, res) => {
   res.flushHeaders();
   const client = res;
   sseClients.add(client);
-  client.write(`data: ${JSON.stringify({ state: sanitizeState(), logs: state.logs.slice(0, 50) })}\n\n`);
+  
+  // Send initial state
+  client.write(`data: ${JSON.stringify({ 
+    state: getFullState(), 
+    logs: state.logs.slice(0, 50) 
+  })}\n\n`);
+  
   req.on('close', () => {
     sseClients.delete(client);
     client.end();
@@ -270,11 +290,11 @@ app.post('/api/control', (req, res) => {
 
 // ---------- Markets Configuration ----------
 const MARKETS = {
-  'R_10':  { id: 'R_10',  name: 'Volatility 10 Index',  dp: 0 },
-  'R_25':  { id: 'R_25',  name: 'Volatility 25 Index',  dp: 0 },
-  'R_50':  { id: 'R_50',  name: 'Volatility 50 Index',  dp: 0 },
-  'R_75':  { id: 'R_75',  name: 'Volatility 75 Index',  dp: 0 },
-  'R_100': { id: 'R_100', name: 'Volatility 100 Index', dp: 0 }
+  'R_10':  { id: 'R_10',  name: 'Volatility 10 Index' },
+  'R_25':  { id: 'R_25',  name: 'Volatility 25 Index' },
+  'R_50':  { id: 'R_50',  name: 'Volatility 50 Index' },
+  'R_75':  { id: 'R_75',  name: 'Volatility 75 Index' },
+  'R_100': { id: 'R_100', name: 'Volatility 100 Index' }
 };
 const BUFFER_CAPACITY = 1000;
 
@@ -282,13 +302,9 @@ const BUFFER_CAPACITY = 1000;
 class MultiMarketPipeline {
   constructor() {
     this.buffers = {};
-    this.maFast = {};
-    this.maSlow = {};
     this.lastPrices = {};
     for (const symbol in MARKETS) {
       this.buffers[symbol] = [];
-      this.maFast[symbol] = null;
-      this.maSlow[symbol] = null;
       this.lastPrices[symbol] = null;
     }
   }
@@ -319,7 +335,7 @@ class MultiMarketPipeline {
     const slowMA = this._ma(buf, CONFIG.SLOW_MA_PERIOD);
     const vol = this._volatility(buf, 20);
 
-    return {
+    const result = {
       symbol,
       price,
       fastMA,
@@ -327,6 +343,11 @@ class MultiMarketPipeline {
       volatility: vol,
       lastPrices: buf.slice(-5)
     };
+
+    // Store in state for broadcasting
+    state.marketMetrics[symbol] = result;
+
+    return result;
   }
 }
 
@@ -354,11 +375,6 @@ const state = {
   lossCooldownUntil: 0,
   pendingSettlement: false
 };
-
-function sanitizeState() {
-  const { logs, ...rest } = state;
-  return rest;
-}
 
 // ============ STRATEGY CHECK (MA Crossover) ============
 function checkStrategy(symbol, metric) {
@@ -395,7 +411,7 @@ async function syncDailyPnlFromDB() {
       state.dailyStartBalance = state.balance - state.dailyPnl;
     }
     checkDailyLimits();
-    broadcastSSE({ state: sanitizeState() });
+    broadcastSSE({ state: getFullState() });
     return total;
   } catch (err) {
     console.error('❌ Failed to sync daily P&L:', err.message);
@@ -521,7 +537,7 @@ function settleRealTrade() {
 
   syncDailyPnlFromDB().then(() => {
     saveState();
-    broadcastSSE({ state: sanitizeState() });
+    broadcastSSE({ state: getFullState() });
   });
 }
 
@@ -532,7 +548,7 @@ let consecutiveLosses = 0;
 // =====================================================================
 function processLiveFeed(symbol, price) {
   if (state.pendingSettlement) {
-    broadcastSSE({ state: sanitizeState() });
+    broadcastSSE({ state: getFullState() });
     return;
   }
 
@@ -549,28 +565,27 @@ function processLiveFeed(symbol, price) {
         }
       }, CONFIG.SETTLEMENT_TIMEOUT_MS);
     }
-    broadcastSSE({ state: sanitizeState() });
+    broadcastSSE({ state: getFullState() });
     return;
   }
 
   const metric = engine.feed(symbol, price);
   if (!metric) return;
 
-  state.marketMetrics[symbol] = metric;
   if (state.cooldownTicksLeft > 0) state.cooldownTicksLeft--;
 
   if (!state.active || state.locked || state.tradeInProgress || state.cooldownTicksLeft > 0) {
-    broadcastSSE({ state: sanitizeState() });
+    broadcastSSE({ state: getFullState() });
     return;
   }
 
   const now = Date.now();
   if (now < state.lossCooldownUntil) {
-    broadcastSSE({ state: sanitizeState() });
+    broadcastSSE({ state: getFullState() });
     return;
   }
   if (now - state.lastTriggerTime < CONFIG.MIN_TRIGGER_INTERVAL) {
-    broadcastSSE({ state: sanitizeState() });
+    broadcastSSE({ state: getFullState() });
     return;
   }
 
@@ -628,7 +643,7 @@ function processLiveFeed(symbol, price) {
     });
   }
 
-  broadcastSSE({ state: sanitizeState() });
+  broadcastSSE({ state: getFullState() });
 }
 
 // ------------------ WEBSOCKET CONNECTION ------------------
@@ -666,7 +681,7 @@ async function connectDeriv() {
     state.currency = targetAccount.currency || 'USD';
 
     await syncDailyPnlFromDB();
-    broadcastSSE({ state: sanitizeState() });
+    broadcastSSE({ state: getFullState() });
 
     const otpRes = await fetch(`https://api.derivws.com/trading/v1/options/accounts/${targetAccount.account_id}/otp`, {
       method: 'POST',
@@ -683,7 +698,10 @@ async function connectDeriv() {
       send({ balance: 1, subscribe: 1, req_id: ++reqId });
       for (const key in MARKETS) send({ ticks_history: key, count: BUFFER_CAPACITY, end: 'latest', req_id: ++reqId });
 
-      setInterval(() => { broadcastSSE({ state: sanitizeState() }); }, 5000);
+      // Periodic state broadcast every 3 seconds
+      setInterval(() => {
+        broadcastSSE({ state: getFullState() });
+      }, 3000);
 
       keepAliveLoop = setInterval(() => {
         send({ ping: 1 });
@@ -743,7 +761,7 @@ function handleMessage(msg) {
     if (state.dailyPnl !== undefined) {
       state.dailyStartBalance = state.balance - state.dailyPnl;
     }
-    broadcastSSE({ state: sanitizeState() });
+    broadcastSSE({ state: getFullState() });
   }
   else if (msg.msg_type === 'history') {
     const symbol = msg.echo_req.ticks_history;
