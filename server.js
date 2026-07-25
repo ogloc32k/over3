@@ -15,27 +15,21 @@ const STATE_FILE = '/var/data/deriv_multimarket_state.json';
 const CONFIG_FILE = '/var/data/deriv_config.json';
 
 // =====================================================================
-//  DEFAULT CONFIG (Price Action + MA Confirmation)
+//  DEFAULT CONFIG (Price Action + Bollinger + RSI)
 // =====================================================================
 const DEFAULT_CONFIG = {
-    // ---------- Price Action ----------
-    SUPPORT_RESISTANCE_LOOKBACK: 50,    // ticks to scan for levels
-    MIN_BOUNCES: 2,                     // minimum touches to confirm a level
-    TOUCH_TOLERANCE: 0.2,               // % tolerance for level touches
-    BREAKOUT_THRESHOLD: 0.1,            // % above resistance to confirm breakout
-    BREAKDOWN_THRESHOLD: 0.1,           // % below support to confirm breakdown
-
-    // ---------- MA Confirmation ----------
-    FAST_MA_PERIOD: 8,
-    SLOW_MA_PERIOD: 21,
-    MIN_SPREAD_PERCENT: 0.15,
-
-    // ---------- Volatility ----------
-    MIN_VOLATILITY_PERCENT: 0.4,
+    // ---------- Analysis ----------
+    ANALYSIS_WINDOW: 500,           // ticks to analyze
+    BOLLINGER_PERIOD: 20,           // Bollinger Bands period
+    BOLLINGER_STD: 2,               // standard deviations for bands
+    RSI_PERIOD: 20,                 // RSI period
+    OVERSOLD_THRESHOLD: 30,         // support % >= this for CALL
+    OVERBOUGHT_THRESHOLD: 30,       // resistance % >= this for PUT
+    MIN_VOLATILITY_PERCENT: 0.3,    // minimum volatility to trade
 
     // ---------- Trade Execution ----------
-    DURATION_TICKS: 10,
-    MIN_TRIGGER_INTERVAL: 20000,
+    DURATION_SECONDS: 45,           // trade duration in seconds
+    MIN_TRIGGER_INTERVAL: 30000,    // 30 seconds between auto trades
     MAX_CONSECUTIVE_LOSSES: 2,
     LOSS_COOLDOWN_MS: 120000,
     RISK_PERCENT: 1,
@@ -44,7 +38,7 @@ const DEFAULT_CONFIG = {
     MIN_STAKE: 0.35,
     COOLDOWN_TICKS: 1,
     SETTLE_TICKS: 5,
-    SETTLEMENT_TIMEOUT_MS: 10000,
+    SETTLEMENT_TIMEOUT_MS: 15000,
     PNL_SYNC_INTERVAL_MS: 300000
 };
 
@@ -69,7 +63,7 @@ function saveConfig(config) {
 let CONFIG = loadConfig();
 
 // =====================================================================
-//  SCHEDULED RESTART
+//  SCHEDULED RESTART (03:00 EAT)
 // =====================================================================
 function scheduleRestart() {
   const now = Date.now();
@@ -297,7 +291,7 @@ const MARKETS = {
   'R_75':  { id: 'R_75',  name: 'Volatility 75 Index' },
   'R_100': { id: 'R_100', name: 'Volatility 100 Index' }
 };
-const BUFFER_CAPACITY = 1000;
+const BUFFER_CAPACITY = 2000; // increased for 500-tick analysis
 
 // ---------- Pipeline Class ----------
 class MultiMarketPipeline {
@@ -310,10 +304,131 @@ class MultiMarketPipeline {
     }
   }
 
-  _ma(arr, period) {
+  // ---- Moving Average ----
+  _sma(arr, period) {
     if (arr.length < period) return null;
     const slice = arr.slice(-period);
     return slice.reduce((a,b) => a+b, 0) / period;
+  }
+
+  // ---- Standard Deviation ----
+  _stdDev(arr, period) {
+    if (arr.length < period) return 0;
+    const slice = arr.slice(-period);
+    const mean = slice.reduce((a,b) => a+b, 0) / period;
+    const squaredDiffs = slice.map(x => Math.pow(x - mean, 2));
+    return Math.sqrt(squaredDiffs.reduce((a,b) => a+b, 0) / period);
+  }
+
+  // ---- RSI (20 period) ----
+  _rsi(arr, period) {
+    if (arr.length < period + 1) return 50;
+    const slice = arr.slice(-period - 1);
+    let gains = 0, losses = 0;
+    for (let i = 1; i < slice.length; i++) {
+      const diff = slice[i] - slice[i-1];
+      if (diff >= 0) gains += diff;
+      else losses += Math.abs(diff);
+    }
+    const avgGain = gains / period;
+    const avgLoss = losses / period;
+    if (avgLoss === 0) return 100;
+    const rs = avgGain / avgLoss;
+    return 100 - (100 / (1 + rs));
+  }
+
+  // ---- Bollinger Bands ----
+  _bollinger(arr, period, stdDev) {
+    const middle = this._sma(arr, period);
+    if (middle === null) return { upper: null, lower: null, middle: null };
+    const std = this._stdDev(arr, period);
+    return {
+      upper: middle + (stdDev * std),
+      lower: middle - (stdDev * std),
+      middle: middle
+    };
+  }
+
+  feed(symbol, price) {
+    const buf = this.buffers[symbol];
+    buf.push(price);
+    if (buf.length > BUFFER_CAPACITY) buf.shift();
+    this.lastPrices[symbol] = price;
+
+    const analysisWindow = Math.min(CONFIG.ANALYSIS_WINDOW, buf.length);
+    if (analysisWindow < 50) {
+      // Not enough data yet
+      const result = {
+        symbol,
+        price,
+        risePct: 0,
+        fallPct: 0,
+        rsi: 50,
+        bbUpper: null,
+        bbLower: null,
+        bbMiddle: null,
+        support: null,
+        resistance: null,
+        isBreakout: false,
+        isBreakdown: false,
+        step: 0,
+        volatility: 0,
+        lastPrices: buf.slice(-5)
+      };
+      state.marketMetrics[symbol] = result;
+      return result;
+    }
+
+    const window = buf.slice(-analysisWindow);
+
+    // ---- Rise % and Fall % (Support/Resistance) ----
+    let rises = 0, falls = 0;
+    for (let i = 1; i < window.length; i++) {
+      if (window[i] > window[i-1]) rises++;
+      else if (window[i] < window[i-1]) falls++;
+    }
+    const risePct = (rises / window.length) * 100;
+    const fallPct = (falls / window.length) * 100;
+
+    // ---- Volatility ----
+    const vol = this._volatility(buf, 20);
+
+    // ---- Bollinger Bands (20 period) ----
+    const bb = this._bollinger(buf, CONFIG.BOLLINGER_PERIOD, CONFIG.BOLLINGER_STD);
+
+    // ---- RSI (20 period) ----
+    const rsi = this._rsi(buf, CONFIG.RSI_PERIOD);
+
+    // ---- Support/Resistance Levels ----
+    const sr = this._findSupportResistance(window);
+
+    // ---- Breakout/Breakdown ----
+    const isBreakout = this._detectBreakout(price, sr);
+    const isBreakdown = this._detectBreakdown(price, sr);
+
+    // ---- Step Calculation ----
+    const step = this._getEntryStep(price, sr, risePct, fallPct, rsi, bb, vol);
+
+    const result = {
+      symbol,
+      price,
+      risePct,
+      fallPct,
+      rsi,
+      bbUpper: bb.upper,
+      bbLower: bb.lower,
+      bbMiddle: bb.middle,
+      support: sr.support,
+      resistance: sr.resistance,
+      isBreakout,
+      isBreakdown,
+      step,
+      volatility: vol,
+      lastPrices: buf.slice(-5)
+    };
+
+    state.marketMetrics[symbol] = result;
+    return result;
   }
 
   _volatility(arr, period) {
@@ -325,48 +440,13 @@ class MultiMarketPipeline {
     return (max - min) / min * 100;
   }
 
-  feed(symbol, price) {
-    const buf = this.buffers[symbol];
-    buf.push(price);
-    if (buf.length > BUFFER_CAPACITY) buf.shift();
-    this.lastPrices[symbol] = price;
-
-    const fastMA = this._ma(buf, CONFIG.FAST_MA_PERIOD);
-    const slowMA = this._ma(buf, CONFIG.SLOW_MA_PERIOD);
-    const vol = this._volatility(buf, 20);
-
-    // --- Support/Resistance Detection ---
-    const sr = this._findSupportResistance(buf);
-    const isBreakout = this._detectBreakout(price, sr);
-    const isBreakdown = this._detectBreakdown(price, sr);
-    const step = this._getEntryStep(price, sr, fastMA, slowMA, vol);
-
-    const result = {
-      symbol,
-      price,
-      fastMA,
-      slowMA,
-      volatility: vol,
-      support: sr.support,
-      resistance: sr.resistance,
-      isBreakout,
-      isBreakdown,
-      step, // 0,1,2,3
-      lastPrices: buf.slice(-5)
-    };
-
-    state.marketMetrics[symbol] = result;
-    return result;
-  }
-
-  _findSupportResistance(buf) {
-    const lookback = Math.min(CONFIG.SUPPORT_RESISTANCE_LOOKBACK, buf.length);
+  _findSupportResistance(window) {
+    const lookback = Math.min(50, window.length);
     if (lookback < 10) return { support: null, resistance: null };
 
-    const recent = buf.slice(-lookback);
-    const tolerance = CONFIG.TOUCH_TOLERANCE / 100;
+    const recent = window.slice(-lookback);
+    const tolerance = 0.002; // 0.2%
 
-    // Find local lows (support) and local highs (resistance)
     const lows = [];
     const highs = [];
 
@@ -379,7 +459,6 @@ class MultiMarketPipeline {
       }
     }
 
-    // Find most significant support (clustered lows)
     let support = null;
     let supportBounces = 0;
     const sortedLows = lows.sort((a,b) => a - b);
@@ -396,7 +475,6 @@ class MultiMarketPipeline {
       }
     }
 
-    // Find most significant resistance
     let resistance = null;
     let resistanceBounces = 0;
     const sortedHighs = highs.sort((a,b) => a - b);
@@ -413,61 +491,50 @@ class MultiMarketPipeline {
       }
     }
 
-    // Only return if enough bounces
-    if (supportBounces < CONFIG.MIN_BOUNCES) support = null;
-    if (resistanceBounces < CONFIG.MIN_BOUNCES) resistance = null;
+    if (supportBounces < 2) support = null;
+    if (resistanceBounces < 2) resistance = null;
 
     return { support, resistance };
   }
 
   _detectBreakout(price, sr) {
     if (!sr.resistance) return false;
-    const threshold = CONFIG.BREAKOUT_THRESHOLD / 100;
-    return price > sr.resistance * (1 + threshold);
+    return price > sr.resistance * 1.001; // 0.1% above
   }
 
   _detectBreakdown(price, sr) {
     if (!sr.support) return false;
-    const threshold = CONFIG.BREAKDOWN_THRESHOLD / 100;
-    return price < sr.support * (1 - threshold);
+    return price < sr.support * 0.999; // 0.1% below
   }
 
-  _getEntryStep(price, sr, fastMA, slowMA, vol) {
-    // Step 3: Ready for entry (all conditions met)
-    // Step 2: Near entry (price near level + MA aligned)
-    // Step 1: Level detected (support/resistance exists)
-    // Step 0: No setup
-
-    if (!sr.support && !sr.resistance) return 0;
-
+  _getEntryStep(price, sr, risePct, fallPct, rsi, bb, vol) {
     let step = 0;
+    const oversold = CONFIG.OVERSOLD_THRESHOLD;
+    const overbought = CONFIG.OVERBOUGHT_THRESHOLD;
 
-    // Step 1: Level exists
-    if (sr.support || sr.resistance) step = 1;
-
-    // Step 2: Price near level OR MA aligned
-    let nearLevel = false;
-    if (sr.resistance) {
-      const dist = (sr.resistance - price) / price * 100;
-      if (dist < 0.3 && dist > 0) nearLevel = true;
-    }
-    if (sr.support) {
-      const dist = (price - sr.support) / price * 100;
-      if (dist < 0.3 && dist > 0) nearLevel = true;
+    // Step 1: Basic conditions met
+    if (bb.upper !== null && bb.lower !== null && sr.support && sr.resistance) {
+      step = 1;
     }
 
-    const maAligned = fastMA !== null && slowMA !== null && Math.abs(fastMA - slowMA) / price * 100 > CONFIG.MIN_SPREAD_PERCENT;
-    const volOk = vol > CONFIG.MIN_VOLATILITY_PERCENT;
+    // Step 2: Near entry
+    let oversoldCondition = (fallPct >= oversold && price < bb.lower && rsi < 30);
+    let overboughtCondition = (risePct >= overbought && price > bb.upper && rsi > 70);
 
-    if ((nearLevel || maAligned) && step === 1) step = 2;
+    if ((oversoldCondition || overboughtCondition) && vol >= CONFIG.MIN_VOLATILITY_PERCENT && step >= 1) {
+      step = 2;
+    }
 
-    // Step 3: Breakout/breakdown confirmed + MA aligned + vol ok
+    // Step 3: Ready for entry (breakout/breakdown confirmed)
     const isBreakout = this._detectBreakout(price, sr);
     const isBreakdown = this._detectBreakdown(price, sr);
-    const directionAligned = (isBreakout && fastMA > slowMA) || (isBreakdown && fastMA < slowMA);
 
-    if ((isBreakout || isBreakdown) && directionAligned && volOk && step >= 2) {
-      step = 3;
+    if (step === 2) {
+      if (oversoldCondition && isBreakout) {
+        step = 3; // CALL entry ready
+      } else if (overboughtCondition && isBreakdown) {
+        step = 3; // PUT entry ready
+      }
     }
 
     return step;
@@ -488,11 +555,10 @@ const state = {
   lossCooldownUntil: 0, pendingSettlement: false
 };
 
-// ============ STRATEGY CHECK (Price Action + MA) ============
+// ============ STRATEGY CHECK ============
 function checkStrategy(symbol, metric) {
   if (!metric) return null;
-
-  const { price, support, resistance, isBreakout, isBreakdown, fastMA, slowMA, volatility, step } = metric;
+  const { price, support, resistance, isBreakout, isBreakdown, risePct, fallPct, rsi, bbUpper, bbLower, volatility, step } = metric;
 
   // Must be step 3 (ready for entry)
   if (step < 3) return null;
@@ -500,18 +566,22 @@ function checkStrategy(symbol, metric) {
   // Volatility filter
   if (volatility < CONFIG.MIN_VOLATILITY_PERCENT) return null;
 
-  // MA confirmation
-  const spread = fastMA !== null && slowMA !== null ? Math.abs(fastMA - slowMA) / price * 100 : 0;
-  if (spread < CONFIG.MIN_SPREAD_PERCENT) return null;
-
-  // Direction: breakout + MA bullish = CALL
-  if (isBreakout && fastMA > slowMA) {
-    return { direction: 'CALL', score: spread };
+  // ---- CALL (mean reversion up) ----
+  // Conditions: oversold (fallPct >= 30%), price below BB lower, RSI < 30, breakout above support
+  if (fallPct >= CONFIG.OVERSOLD_THRESHOLD &&
+      bbLower !== null && price < bbLower &&
+      rsi < 30 &&
+      isBreakout) {
+    return { direction: 'CALL', score: fallPct };
   }
 
-  // Direction: breakdown + MA bearish = PUT
-  if (isBreakdown && fastMA < slowMA) {
-    return { direction: 'PUT', score: spread };
+  // ---- PUT (mean reversion down) ----
+  // Conditions: overbought (risePct >= 30%), price above BB upper, RSI > 70, breakdown below resistance
+  if (risePct >= CONFIG.OVERBOUGHT_THRESHOLD &&
+      bbUpper !== null && price > bbUpper &&
+      rsi > 70 &&
+      isBreakdown) {
+    return { direction: 'PUT', score: risePct };
   }
 
   return null;
@@ -636,7 +706,8 @@ function settleRealTrade() {
     exitTick: null,
     entry_price: state.activeRealTrade.entryPrice || null,
     exit_price: null,
-    duration_ticks: state.activeRealTrade.duration || CONFIG.DURATION_TICKS
+    duration_ticks: null,
+    duration_seconds: CONFIG.DURATION_SECONDS
   });
 
   addLog(`[Settlement] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | Result: ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
@@ -664,7 +735,7 @@ function processLiveFeed(symbol, price) {
     state.settleTicksRemaining--;
     if (state.settleTicksRemaining === 0) {
       state.pendingSettlement = true;
-      addLog(`⏳ ${CONFIG.SETTLE_TICKS} ticks elapsed. Waiting for balance update...`);
+      addLog(`⏳ ${CONFIG.SETTLE_TICKS} ticks elapsed. Waiting for balance update to settle ${state.activeRealTrade?.symbol}...`);
       setTimeout(() => {
         if (state.pendingSettlement) {
           addLog(`⚠️ Balance update timeout. Forcing settlement now.`);
@@ -711,20 +782,23 @@ function processLiveFeed(symbol, price) {
     state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
     const metric = state.marketMetrics[symbol];
-    addLog(`🔥 Signal: ${symbol} | ${direction} | Support: ${metric.support?.toFixed(2) || 'N/A'} | Resistance: ${metric.resistance?.toFixed(2) || 'N/A'}`);
+    const rsi = metric.rsi ? metric.rsi.toFixed(1) : 'N/A';
+    const fallPct = metric.fallPct ? metric.fallPct.toFixed(1) + '%' : 'N/A';
+    const risePct = metric.risePct ? metric.risePct.toFixed(1) + '%' : 'N/A';
+    addLog(`🔥 Signal: ${symbol} | ${direction} | Rise: ${risePct} | Fall: ${fallPct} | RSI: ${rsi}`);
 
     state.activeRealTrade = {
       symbol, stake: state.currentStake, balanceBefore: state.balance,
       contractType: direction, barrier: null, direction: direction,
-      entryPrice: null, duration: CONFIG.DURATION_TICKS
+      entryPrice: null, duration: CONFIG.DURATION_SECONDS
     };
 
     state.lastTriggerTime = now;
-    addLog(`📤 Requesting ${direction} proposal for ${symbol} (${CONFIG.DURATION_TICKS} ticks)...`);
+    addLog(`📤 Requesting ${direction} proposal for ${symbol} (${CONFIG.DURATION_SECONDS} seconds)...`);
     send({
       proposal: 1, amount: state.currentStake, basis: 'stake',
       contract_type: direction, currency: state.currency || 'USD',
-      duration: CONFIG.DURATION_TICKS, duration_unit: 't',
+      duration: CONFIG.DURATION_SECONDS, duration_unit: 's',
       underlying_symbol: symbol, req_id: ++reqId
     });
   }
@@ -873,8 +947,10 @@ app.post('/api/manual-trade', (req, res) => {
     return res.status(400).json({ error: 'Invalid contract type. Use "CALL" or "PUT".' });
   }
 
-  let dur = parseInt(duration) || CONFIG.DURATION_TICKS;
-  let unit = durationUnit || 't';
+  let dur = parseInt(duration) || CONFIG.DURATION_SECONDS;
+  let unit = durationUnit || 's';
+  
+  // Validate based on unit
   if (unit === 't') { if (dur < 1) dur = 1; if (dur > 10) dur = 10; }
   if (unit === 's') { if (dur < 5) dur = 5; if (dur > 600) dur = 600; }
   if (unit === 'm') { if (dur < 1) dur = 1; if (dur > 10) dur = 10; }
