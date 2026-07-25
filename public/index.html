@@ -11,8 +11,8 @@
        ============================================================ */
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background: #0b0e14; /* deep slate, no pure black */
-      color: #d1d4dc; /* soft off-white for primary text */
+      background: #0b0e14;
+      color: #d1d4dc;
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
       height: 100vh;
       display: flex;
@@ -23,26 +23,26 @@
       -webkit-tap-highlight-color: transparent;
     }
     :root {
-      --bg-terminal: #0b0e14;       /* main background */
-      --bg-panel: #131722;          /* panels, sidebars */
-      --bg-card: #1e222d;           /* cards, table rows */
-      --bg-surface: #2a2f3d;        /* hover states, deeper surfaces */
-      --border-subtle: #2a2f3d;     /* subtle borders */
-      --border-active: #2962ff;     /* muted professional blue for active states */
-      --text-primary: #d1d4dc;      /* primary data */
-      --text-secondary: #787b86;    /* labels, headers, micro-text */
-      --text-muted: #5a5d68;        /* even more muted */
-      --green-profit: #2ead68;      /* desaturated green for profit / CALL */
-      --red-loss: #e33e5a;          /* desaturated red for loss / PUT */
-      --orange-warn: #d48c3a;       /* muted orange for warnings */
-      --neon-blue: #2962ff;         /* accent blue – active states only */
+      --bg-terminal: #0b0e14;
+      --bg-panel: #131722;
+      --bg-card: #1e222d;
+      --bg-surface: #2a2f3d;
+      --border-subtle: #2a2f3d;
+      --border-active: #2962ff;
+      --text-primary: #d1d4dc;
+      --text-secondary: #787b86;
+      --text-muted: #5a5d68;
+      --green-profit: #4ade80;      /* pastel green – support / positive */
+      --red-loss: #f87171;          /* pastel red – resistance / negative */
+      --orange-warn: #fbbf24;       /* brightened warning */
+      --neon-blue: #2962ff;
       --header-height: 44px;
       --sidebar-width: 220px;
       --tab-height: 60px;
     }
 
     /* ============================================================
-       SCROLLBAR STYLING (optional, professional)
+       SCROLLBAR
        ============================================================ */
     ::-webkit-scrollbar { width: 4px; height: 4px; }
     ::-webkit-scrollbar-track { background: var(--bg-terminal); }
@@ -88,9 +88,9 @@
       align-items: center;
       gap: 6px;
     }
-    .header-status.on { border-color: var(--green-profit); color: var(--green-profit); background: rgba(46,173,104,0.06); }
-    .header-status.off { border-color: var(--red-loss); color: var(--red-loss); background: rgba(227,62,90,0.06); }
-    .header-status.paused { border-color: var(--orange-warn); color: var(--orange-warn); background: rgba(212,140,58,0.06); }
+    .header-status.on { border-color: var(--green-profit); color: var(--green-profit); background: rgba(74,222,128,0.06); }
+    .header-status.off { border-color: var(--red-loss); color: var(--red-loss); background: rgba(248,113,113,0.06); }
+    .header-status.paused { border-color: var(--orange-warn); color: var(--orange-warn); background: rgba(251,191,36,0.06); }
     .header-status .cooldown { color: var(--orange-warn); font-weight: 700; }
     .header-status .lock { color: var(--red-loss); }
 
@@ -178,12 +178,12 @@
     .sidebar-controls .btn:active { transform: scale(0.96); }
     .sidebar-controls .btn.start {
       background: var(--green-profit);
-      color: #fff;
+      color: #0b0e14;
       border-color: var(--green-profit);
     }
     .sidebar-controls .btn.stop {
       background: var(--red-loss);
-      color: #fff;
+      color: #0b0e14;
       border-color: var(--red-loss);
     }
     .sidebar-controls .btn.swap {
@@ -192,15 +192,44 @@
       border-color: var(--border-subtle);
     }
     .sidebar-controls .btn.swap:hover { background: var(--bg-surface); }
-    .sidebar-controls .btn.call {
-      background: var(--green-profit);
-      color: #fff;
-      border-color: var(--green-profit);
+
+    /* ---- SUBDUED CALL / PUT BUTTONS ---- */
+    .sidebar-trade-btns {
+      display: flex;
+      gap: 4px;
     }
-    .sidebar-controls .btn.put {
-      background: var(--red-loss);
-      color: #fff;
+    .sidebar-trade-btns .btn {
+      flex: 1;
+      padding: 4px 8px;
+      border-radius: 3px;
+      font-size: 8px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      cursor: pointer;
+      border: 1px solid var(--border-subtle);
+      transition: all 0.15s;
+      text-align: center;
+      touch-action: manipulation;
+      min-height: 26px;
+      line-height: 1.2;
+      background: var(--bg-card);
+      color: var(--text-secondary);
+    }
+    .sidebar-trade-btns .btn:active { transform: scale(0.96); }
+    .sidebar-trade-btns .btn.call {
+      border-color: var(--green-profit);
+      color: var(--green-profit);
+    }
+    .sidebar-trade-btns .btn.call:hover {
+      background: rgba(74,222,128,0.06);
+    }
+    .sidebar-trade-btns .btn.put {
       border-color: var(--red-loss);
+      color: var(--red-loss);
+    }
+    .sidebar-trade-btns .btn.put:hover {
+      background: rgba(248,113,113,0.06);
     }
 
     .sidebar-duration {
@@ -234,12 +263,6 @@
     }
     .sidebar-duration input:focus,
     .sidebar-duration select:focus { border-color: var(--neon-blue); }
-
-    .sidebar-trade-btns {
-      display: flex;
-      gap: 4px;
-    }
-    .sidebar-trade-btns .btn { flex: 1; }
 
     /* ---- MAIN CONTENT ---- */
     .app-main {
@@ -301,13 +324,13 @@
       text-transform: uppercase;
       font-size: 7px;
     }
-    .focus-bar .right .badge.breakout { background: rgba(46,173,104,0.12); color: var(--green-profit); border: 1px solid var(--green-profit); }
-    .focus-bar .right .badge.breakdown { background: rgba(227,62,90,0.12); color: var(--red-loss); border: 1px solid var(--red-loss); }
+    .focus-bar .right .badge.breakout { background: rgba(74,222,128,0.12); color: var(--green-profit); border: 1px solid var(--green-profit); }
+    .focus-bar .right .badge.breakdown { background: rgba(248,113,113,0.12); color: var(--red-loss); border: 1px solid var(--red-loss); }
     .focus-bar .right .badge.idle { background: rgba(120,123,134,0.08); color: var(--text-secondary); border: 1px solid var(--border-subtle); }
 
-    /* ---- DATA TABLE ---- */
+    /* ---- DATA TABLE – DYNAMIC SCALING + RIGHT ALIGNMENT ---- */
     .table-container {
-      flex: 1;
+      flex: 1;                     /* fills remaining vertical space */
       overflow-y: auto;
       background: var(--bg-panel);
       border: 1px solid var(--border-subtle);
@@ -319,9 +342,12 @@
       font-size: 9px;
       min-width: 600px;
     }
-    .data-table th {
+    .data-table thead {
       position: sticky;
       top: 0;
+      z-index: 2;
+    }
+    .data-table th {
       background: var(--bg-surface);
       color: var(--text-secondary);
       font-weight: 600;
@@ -329,7 +355,6 @@
       letter-spacing: 0.3px;
       font-size: 7px;
       padding: 4px 6px;
-      text-align: left;
       border-bottom: 1px solid var(--border-subtle);
       white-space: nowrap;
     }
@@ -346,13 +371,30 @@
     }
     .data-table tr:hover { background: var(--bg-surface); }
     .data-table tr.active { background: var(--bg-surface); border-left: 2px solid var(--neon-blue); }
-    .data-table tr.step-3 { background: rgba(46,173,104,0.04); }
-    .data-table tr.step-2 { background: rgba(212,140,58,0.03); }
+    .data-table tr.step-3 { background: rgba(74,222,128,0.04); }
+    .data-table tr.step-2 { background: rgba(251,191,36,0.03); }
     .data-table tr.step-1 { background: rgba(41,98,255,0.02); }
     .data-table tr.step-0 { opacity: 0.6; }
-    .data-table .col-asset { font-weight: 600; color: var(--text-primary); }
-    .data-table .col-price { font-family: 'Consolas', monospace; font-weight: 700; color: var(--text-primary); }
-    .data-table .col-sr { font-size: 7px; color: var(--text-secondary); }
+
+    /* ---- RIGHT-ALIGNED NUMERIC COLUMNS (with tabular numerals) ---- */
+    .data-table .col-asset {
+      text-align: left;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .data-table .col-price,
+    .data-table .col-sr,
+    .data-table .col-rsi,
+    .data-table .col-ma,
+    .data-table .col-vol,
+    .data-table .col-diff {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-feature-settings: "tnum";
+      font-family: 'Consolas', monospace;
+    }
+    .data-table .col-price { font-weight: 700; color: var(--text-primary); }
+    .data-table .col-sr { font-size: 8px; color: var(--text-secondary); }
     .data-table .col-sr .s { color: var(--green-profit); }
     .data-table .col-sr .r { color: var(--red-loss); }
     .data-table .col-status { text-align: center; }
@@ -360,13 +402,14 @@
     .data-table .col-rsi { font-weight: 600; }
     .data-table .col-rsi.overbought { color: var(--red-loss); }
     .data-table .col-rsi.oversold { color: var(--green-profit); }
-    .data-table .col-ma { font-family: 'Consolas', monospace; font-size: 8px; }
     .data-table .col-ma .fast { color: var(--green-profit); }
     .data-table .col-ma .slow { color: var(--orange-warn); }
     .data-table .col-vol { font-size: 8px; color: var(--text-secondary); }
     .data-table .col-diff { font-weight: 600; }
     .data-table .col-diff.positive { color: var(--green-profit); }
     .data-table .col-diff.negative { color: var(--red-loss); }
+    .data-table .col-step { text-align: center; }
+
     .data-table .col-step .step-badge {
       font-size: 6px;
       font-weight: 700;
@@ -376,12 +419,12 @@
       letter-spacing: 0.2px;
       border: 1px solid transparent;
     }
-    .step-badge.step-3 { background: rgba(46,173,104,0.12); color: var(--green-profit); border-color: var(--green-profit); }
-    .step-badge.step-2 { background: rgba(212,140,58,0.12); color: var(--orange-warn); border-color: var(--orange-warn); }
+    .step-badge.step-3 { background: rgba(74,222,128,0.12); color: var(--green-profit); border-color: var(--green-profit); }
+    .step-badge.step-2 { background: rgba(251,191,36,0.12); color: var(--orange-warn); border-color: var(--orange-warn); }
     .step-badge.step-1 { background: rgba(41,98,255,0.10); color: var(--neon-blue); border-color: var(--neon-blue); }
     .step-badge.step-0 { background: rgba(120,123,134,0.08); color: var(--text-secondary); border-color: var(--border-subtle); }
 
-    /* ---- TABS (Analytics, Logs, Settings) ---- */
+    /* ---- TABS ---- */
     .tab-pages {
       flex: 1;
       display: none;
@@ -390,7 +433,7 @@
     }
     .tab-pages.active { display: block; }
 
-    /* Analytics layout */
+    /* ---- ANALYTICS ---- */
     .analytics-grid {
       display: flex;
       flex-direction: column;
@@ -483,7 +526,7 @@
       min-height: 80px;
     }
 
-    /* Logs */
+    /* ---- LOGS ---- */
     .log-stream {
       background: var(--bg-terminal);
       border: 1px solid var(--border-subtle);
@@ -527,7 +570,7 @@
     }
     .log-header .clear-btn:active { transform: scale(0.95); }
 
-    /* Settings */
+    /* ---- SETTINGS ---- */
     .settings-grid {
       padding: 2px 0 10px;
       display: flex;
@@ -572,7 +615,7 @@
     }
     .btn-save {
       background: var(--green-profit);
-      color: #fff;
+      color: #0b0e14;
       border: none;
       padding: 4px 14px;
       font-weight: 700;
@@ -782,22 +825,22 @@
         <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">⚙️ Settings</button>
       </div>
 
-      <!-- DASHBOARD (Data Table) -->
+      <!-- DASHBOARD (Data Table – dynamic scaling) -->
       <div class="tab-pages active" id="tab-dashboard">
         <div class="table-container">
           <table class="data-table" id="dataTable">
             <thead>
               <tr>
-                <th>Asset</th>
-                <th>Price</th>
-                <th>S/R</th>
-                <th>Breakout</th>
-                <th>RSI</th>
-                <th>Fast MA</th>
-                <th>Slow MA</th>
-                <th>Vol</th>
-                <th>MA Diff</th>
-                <th>Step</th>
+                <th class="col-asset">Asset</th>
+                <th class="col-price">Price</th>
+                <th class="col-sr">S/R</th>
+                <th class="col-status">Breakout</th>
+                <th class="col-rsi">RSI</th>
+                <th class="col-ma">Fast MA</th>
+                <th class="col-ma">Slow MA</th>
+                <th class="col-vol">Vol</th>
+                <th class="col-diff">MA Diff</th>
+                <th class="col-step">Step</th>
               </tr>
             </thead>
             <tbody id="tableBody">
@@ -1066,7 +1109,7 @@
         document.getElementById('f-vol').textContent = 'Vol: —';
       }
 
-      // Data table
+      // Data table – full dynamic scaling
       const tbody = document.getElementById('tableBody');
       tbody.innerHTML = '';
       let bestScore = -Infinity, bestSym = null;
@@ -1181,13 +1224,13 @@
       const ctxDonut = document.getElementById('chart-donut').getContext('2d');
       charts.donut = new Chart(ctxDonut, {
         type: 'doughnut',
-        data: { labels: ['R_10', 'R_25', 'R_50', 'R_75', 'R_100'], datasets: [{ data: [0,0,0,0,0], backgroundColor: ['#2962ff','#d48c3a','#787b86','#2ead68','#e33e5a'], borderColor: '#131722', borderWidth: 2 }] },
+        data: { labels: ['R_10', 'R_25', 'R_50', 'R_75', 'R_100'], datasets: [{ data: [0,0,0,0,0], backgroundColor: ['#2962ff','#fbbf24','#787b86','#4ade80','#f87171'], borderColor: '#131722', borderWidth: 2 }] },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: dark, font: { size: 8 } } } } }
       });
       const ctxLine = document.getElementById('chart-line').getContext('2d');
       charts.line = new Chart(ctxLine, {
         type: 'line',
-        data: { labels: [], datasets: [{ label: 'P&L', data: [0], borderColor: '#2ead68', backgroundColor: 'transparent', borderWidth: 3, pointRadius: 2, tension: 0.3 }] },
+        data: { labels: [], datasets: [{ label: 'P&L', data: [0], borderColor: '#4ade80', backgroundColor: 'transparent', borderWidth: 3, pointRadius: 2, tension: 0.3 }] },
         options: {
           responsive: true, maintainAspectRatio: false,
           scales: { x: { grid: { color: grid }, ticks: { color: dark, font: { size: 7 } } }, y: { grid: { color: grid }, ticks: { color: dark, font: { size: 7 } } } },
