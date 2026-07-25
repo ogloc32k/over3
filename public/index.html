@@ -98,7 +98,7 @@
     .tab-page.active { display: block; }
 
     /* =========================================================================
-       TAB 1: DASHBOARD (Mobile-First)
+       TAB 1: DASHBOARD
        ========================================================================= */
     .dashboard-grid {
       display: flex;
@@ -107,7 +107,7 @@
       height: 100%;
     }
 
-    /* Metrics Bar - Very Top */
+    /* Metrics Bar */
     .metrics-bar {
       display: grid;
       grid-template-columns: repeat(5, 1fr);
@@ -141,15 +141,15 @@
 
     /* Controls Row */
     .controls-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 4px;
+      display: flex;
+      gap: 6px;
       flex-shrink: 0;
     }
-    .btn {
+    .controls-row .btn {
+      flex: 1;
       padding: 8px;
       border-radius: 6px;
-      font-size: 9px;
+      font-size: 10px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.5px;
@@ -158,14 +158,12 @@
       transition: all 0.2s;
       text-align: center;
       touch-action: manipulation;
-      min-height: 34px;
+      min-height: 36px;
     }
     .btn:active { transform: scale(0.96); }
-    .btn.arm { background: var(--neon-green); color: #05070a; }
-    .btn.disarm { background: var(--neon-red); color: #fff; }
-    .btn.swap { background: #19243a; color: var(--text-bright); border: 1px solid var(--border-glow); }
-    .btn.call { background: var(--neon-green); color: #05070a; }
-    .btn.put { background: var(--neon-red); color: #fff; }
+    .btn.start { background: var(--neon-green); color: #05070a; }
+    .btn.stop { background: var(--neon-red); color: #fff; }
+    .btn.swap { background: #19243a; color: var(--text-bright); border: 1px solid var(--border-glow); flex: 0.6; }
 
     /* Focus Card */
     .focus-card {
@@ -264,40 +262,66 @@
     .tail-strip .tick.flat { border-color: var(--text-dim); color: var(--text-dim); }
 
     /* Manual Trade */
-    .manual-row {
+    .manual-section {
       display: flex;
+      flex-direction: column;
       gap: 4px;
-      align-items: center;
       flex-shrink: 0;
     }
-    .manual-row input, .manual-row select {
-      background: var(--bg-terminal);
-      border: 1px solid var(--border-glow);
-      color: var(--text-bright);
-      padding: 4px 6px;
-      border-radius: 4px;
-      font-family: inherit;
-      font-size: 9px;
-      outline: none;
-      flex: 1;
-      min-height: 30px;
+    .manual-duration-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
     }
-    .manual-row input:focus, .manual-row select:focus { border-color: var(--neon-blue); }
-    .manual-row label {
-      font-size: 7px;
+    .manual-duration-row label {
+      font-size: 8px;
       color: var(--text-dim);
       font-weight: 600;
       text-transform: uppercase;
       white-space: nowrap;
     }
-    .manual-btns {
-      display: flex;
-      gap: 4px;
-      flex: 2;
+    .manual-duration-row input,
+    .manual-duration-row select {
+      background: var(--bg-terminal);
+      border: 1px solid var(--border-glow);
+      color: var(--text-bright);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 10px;
+      outline: none;
+      flex: 1;
+      min-height: 30px;
     }
-    .manual-btns .btn { flex: 1; padding: 6px; font-size: 8px; min-height: 28px; }
+    .manual-duration-row input:focus,
+    .manual-duration-row select:focus { border-color: var(--neon-blue); }
 
-    /* Cluster Cards */
+    .manual-buttons {
+      display: flex;
+      gap: 6px;
+    }
+    .manual-buttons .btn {
+      flex: 1;
+      padding: 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+      text-align: center;
+      touch-action: manipulation;
+      min-height: 40px;
+    }
+    .manual-buttons .btn.call { background: var(--neon-green); color: #05070a; }
+    .manual-buttons .btn.put { background: var(--neon-red); color: #fff; }
+    .manual-buttons .btn:active { transform: scale(0.96); }
+
+    /* =========================================================================
+       CLUSTER CARDS - Large, Clean, with Conditions on Left
+       ========================================================================= */
     .cluster-title {
       font-size: 8px;
       text-transform: uppercase;
@@ -310,7 +334,7 @@
     .cluster-list {
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 6px;
       flex: 1;
       overflow-y: auto;
       min-height: 80px;
@@ -319,45 +343,46 @@
     .cluster-card {
       background: var(--bg-card);
       border: 1px solid var(--border-glow);
-      border-radius: 6px;
-      padding: 6px 8px;
+      border-radius: 8px;
+      padding: 10px 12px;
       cursor: pointer;
       transition: all 0.2s;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
       flex-shrink: 0;
     }
     .cluster-card.active { border-color: var(--neon-blue); background: #19243a; }
-    .cluster-card.step-3 { border-color: var(--neon-green); background: rgba(0,255,136,0.06); box-shadow: 0 0 12px rgba(0,255,136,0.06); }
+    .cluster-card.step-3 { border-color: var(--neon-green); background: rgba(0,255,136,0.06); box-shadow: 0 0 16px rgba(0,255,136,0.08); }
     .cluster-card.step-2 { border-color: var(--neon-orange); background: rgba(255,149,0,0.04); }
     .cluster-card.step-1 { border-color: var(--neon-blue); background: rgba(0,210,255,0.03); }
     .cluster-card.step-0 { opacity: 0.5; }
 
-    .cluster-left .name { font-size: 9px; font-weight: 600; }
-    .cluster-left .price { font-size: 10px; font-weight: 700; font-family: 'Consolas', monospace; }
-    .cluster-left .sr-mini { font-size: 6px; color: var(--text-dim); margin-top: 1px; }
-    .cluster-left .sr-mini .s { color: var(--neon-green); }
-    .cluster-left .sr-mini .r { color: var(--neon-red); }
-
-    .cluster-right {
-      text-align: right;
+    /* Top row: name + price + badge */
+    .cluster-header {
       display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 1px;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
     }
-    .cluster-right .score {
-      font-size: 7px;
+    .cluster-header .name {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-bright);
+    }
+    .cluster-header .right-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .cluster-header .score {
+      font-size: 10px;
       color: var(--text-dim);
       font-weight: 600;
     }
-    .cluster-right .score .best { color: var(--neon-gold, #ffd700); }
-    .cluster-right .step-badge {
-      font-size: 6px;
+    .cluster-header .score .best { color: #ffd700; }
+    .cluster-header .step-badge {
+      font-size: 8px;
       font-weight: 700;
-      padding: 1px 5px;
-      border-radius: 6px;
+      padding: 2px 8px;
+      border-radius: 8px;
       text-transform: uppercase;
       letter-spacing: 0.3px;
     }
@@ -365,6 +390,74 @@
     .step-badge.step-2 { background: rgba(255,149,0,0.15); color: var(--neon-orange); border: 1px solid var(--neon-orange); }
     .step-badge.step-1 { background: rgba(0,210,255,0.12); color: var(--neon-blue); border: 1px solid var(--neon-blue); }
     .step-badge.step-0 { background: rgba(100,116,139,0.1); color: var(--text-dim); border: 1px solid var(--text-dim); }
+
+    /* Price + S/R row */
+    .cluster-price-row {
+      display: flex;
+      gap: 16px;
+      align-items: baseline;
+      margin-bottom: 6px;
+      flex-wrap: wrap;
+    }
+    .cluster-price-row .price {
+      font-size: 16px;
+      font-weight: 700;
+      font-family: 'Consolas', monospace;
+      color: var(--neon-blue);
+    }
+    .cluster-price-row .sr {
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+    .cluster-price-row .sr .s { color: var(--neon-green); }
+    .cluster-price-row .sr .r { color: var(--neon-red); }
+
+    /* Conditions row - 5 items with values, left-aligned */
+    .cluster-conditions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      background: var(--bg-terminal);
+      border-radius: 6px;
+      padding: 6px 8px;
+      margin-top: 2px;
+      border: 1px solid var(--border-glow);
+    }
+    .cluster-conditions .cond {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .cluster-conditions .cond.pass { color: var(--neon-green); }
+    .cluster-conditions .cond.fail { color: var(--neon-red); }
+    .cluster-conditions .cond .icon { font-size: 12px; }
+    .cluster-conditions .cond .label { font-size: 9px; opacity: 0.8; }
+    .cluster-conditions .cond .val { font-size: 9px; font-weight: 700; }
+
+    /* Ticks on cluster card */
+    .cluster-ticks {
+      display: flex;
+      gap: 4px;
+      margin-top: 6px;
+    }
+    .cluster-ticks .ctick {
+      background: var(--bg-card);
+      border: 1px solid var(--border-glow);
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 600;
+      font-family: 'Consolas', monospace;
+      min-width: 30px;
+      text-align: center;
+    }
+    .cluster-ticks .ctick.up { border-color: var(--neon-green); color: var(--neon-green); }
+    .cluster-ticks .ctick.down { border-color: var(--neon-red); color: var(--neon-red); }
+    .cluster-ticks .ctick.flat { border-color: var(--text-dim); color: var(--text-dim); }
 
     #lock-alert {
       background: rgba(255,59,48,0.12);
@@ -637,7 +730,7 @@
     #clock span { color: var(--neon-blue); }
 
     /* =========================================================================
-       DESKTOP OVERRIDES
+       RESPONSIVE
        ========================================================================= */
     @media (min-width: 769px) {
       body { padding: 12px; }
@@ -679,13 +772,17 @@
         color: var(--neon-blue);
         background: rgba(0,210,255,0.08);
       }
-      .cluster-list { max-height: 300px; }
+      .cluster-list { max-height: 350px; }
       .metrics-bar { grid-template-columns: repeat(5, 1fr); }
       .focus-metrics { grid-template-columns: repeat(6, 1fr); }
       .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
       .settings-subgrid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
       .log-stream { height: 300px; max-height: 400px; }
       #clock { bottom: 20px; right: 20px; }
+      .cluster-conditions .cond { font-size: 11px; padding: 3px 8px; }
+      .cluster-conditions .cond .icon { font-size: 14px; }
+      .cluster-conditions .cond .val { font-size: 10px; }
+      .cluster-price-row .price { font-size: 18px; }
     }
 
     @media (max-width: 768px) {
@@ -693,7 +790,15 @@
       .tab-bar { display: flex; }
       .focus-metrics { grid-template-columns: repeat(3, 1fr); }
       .metrics-bar { grid-template-columns: repeat(3, 1fr); }
-      .controls-row { grid-template-columns: 1fr 1fr 1fr; }
+      .cluster-conditions { gap: 4px; padding: 4px 6px; }
+      .cluster-conditions .cond { font-size: 8px; padding: 1px 4px; }
+      .cluster-conditions .cond .icon { font-size: 10px; }
+      .cluster-conditions .cond .val { font-size: 7px; }
+      .cluster-conditions .cond .label { display: none; }
+      .cluster-price-row .price { font-size: 14px; }
+      .cluster-price-row .sr { font-size: 9px; }
+      .cluster-header .name { font-size: 10px; }
+      .cluster-card { padding: 8px 10px; }
     }
 
     @media (max-width: 420px) {
@@ -702,16 +807,22 @@
       .focus-name { font-size: 10px; }
       .focus-price { font-size: 14px; }
       .focus-metric .val { font-size: 8px; }
-      .cluster-card { padding: 4px 6px; }
-      .btn { font-size: 8px; padding: 6px; min-height: 28px; }
+      .controls-row .btn { font-size: 9px; padding: 6px; min-height: 30px; }
+      .manual-buttons .btn { font-size: 10px; padding: 8px; min-height: 36px; }
       .tab-item .icon { font-size: 20px; }
       .tab-item .label { font-size: 6px; }
       .metrics-bar .metric .val { font-size: 8px; }
-      .controls-row { grid-template-columns: 1fr 1fr 1fr; }
-      .cluster-left .sr-mini { font-size: 5px; }
-      .cluster-right .step-badge { font-size: 5px; padding: 1px 4px; }
-      .cluster-left .name { font-size: 8px; }
-      .cluster-left .price { font-size: 9px; }
+      .cluster-conditions .cond { font-size: 7px; padding: 1px 3px; }
+      .cluster-conditions .cond .icon { font-size: 8px; }
+      .cluster-conditions .cond .val { font-size: 6px; }
+      .cluster-price-row .price { font-size: 12px; }
+      .cluster-price-row .sr { font-size: 8px; }
+      .cluster-header .name { font-size: 9px; }
+      .cluster-card { padding: 6px 8px; }
+      .cluster-ticks .ctick { font-size: 8px; min-width: 22px; padding: 1px 4px; }
+      .tail-strip .tick { font-size: 8px; min-width: 22px; padding: 1px 4px; }
+      .cluster-header .step-badge { font-size: 6px; padding: 1px 6px; }
+      .cluster-header .score { font-size: 8px; }
     }
   </style>
 </head>
@@ -759,9 +870,9 @@
 
         <!-- Controls -->
         <div class="controls-row">
-          <button class="btn arm" onclick="sendControl('start')">🔓 Arm</button>
-          <button class="btn disarm" onclick="sendControl('stop')">🔒 Disarm</button>
-          <button class="btn swap" onclick="swapEnvironment()">🔄 Swap</button>
+          <button class="btn start" onclick="sendControl('start')">▶ Start</button>
+          <button class="btn stop" onclick="sendControl('stop')">⏹ Stop</button>
+          <button class="btn swap" onclick="swapEnvironment()">🔄</button>
         </div>
 
         <!-- Focus Card -->
@@ -789,15 +900,17 @@
         </div>
 
         <!-- Manual Trade -->
-        <div class="manual-row">
-          <label>Dur</label>
-          <input type="number" id="manual-duration" value="7" min="1" max="10">
-          <select id="manual-unit">
-            <option value="t" selected>Ticks</option>
-            <option value="s">Sec</option>
-            <option value="m">Min</option>
-          </select>
-          <div class="manual-btns">
+        <div class="manual-section">
+          <div class="manual-duration-row">
+            <label>Dur</label>
+            <input type="number" id="manual-duration" value="7" min="1" max="10">
+            <select id="manual-unit">
+              <option value="t" selected>Ticks</option>
+              <option value="s">Sec</option>
+              <option value="m">Min</option>
+            </select>
+          </div>
+          <div class="manual-buttons">
             <button class="btn call" onclick="fireManual('CALL')">📈 CALL</button>
             <button class="btn put" onclick="fireManual('PUT')">📉 PUT</button>
           </div>
@@ -1051,7 +1164,7 @@
     function renderUI(state) {
       serverMode = state.tradingMode;
 
-      // Header status with cooldown/lock
+      // Header
       const header = document.getElementById('header-status');
       const now = Date.now();
       let cooldownText = '';
@@ -1162,11 +1275,10 @@
         document.getElementById('f-tail').innerHTML = '<span class="tick">—</span><span class="tick">—</span><span class="tick">—</span><span class="tick">—</span><span class="tick">—</span>';
       }
 
-      // Cluster list
+      // Cluster list with conditions on left
       const clusterBox = document.getElementById('cluster-list');
       clusterBox.innerHTML = '';
       
-      // Find best score for "BEST" badge
       let bestScore = -Infinity;
       let bestSym = null;
       for (const sym in MARKETS_CFG) {
@@ -1182,6 +1294,9 @@
         const isActive = sym === currentFocus;
         let price = '—', step = 0, stepLabel = 'SCAN', stepClass = 'step-0', score = 0, isBest = false;
         let support = '—', resistance = '—';
+        let ticks = ['—', '—', '—', '—', '—'];
+        let condBreakout = false, condRSI = false, condBollinger = false, condVol = false, condMA = false;
+        let rsiVal = '—', volVal = '—', maVal = '—';
         
         if (metric) {
           price = metric.price ? metric.price.toFixed(2) : '—';
@@ -1194,21 +1309,71 @@
           else { stepLabel = 'SCAN'; stepClass = 'step-0'; }
           support = metric.support ? metric.support.toFixed(2) : '—';
           resistance = metric.resistance ? metric.resistance.toFixed(2) : '—';
+          
+          // Conditions
+          const cond = metric.conditions || {};
+          const vals = metric.condValues || {};
+          condBreakout = cond.breakout || false;
+          condRSI = cond.rsi || false;
+          condBollinger = cond.bollinger || false;
+          condVol = cond.volatility || false;
+          condMA = cond.ma || false;
+          rsiVal = vals.rsiValue !== undefined ? vals.rsiValue.toFixed(0) : '—';
+          volVal = vals.volValue !== undefined ? vals.volValue.toFixed(2) + '%' : '—';
+          maVal = vals.maValue !== undefined ? vals.maValue.toFixed(2) + '%' : '—';
+          
+          // Ticks
+          const lastPrices = metric.lastPrices || [];
+          const padded = lastPrices.slice(-5);
+          while (padded.length < 5) padded.unshift(null);
+          ticks = padded.map((p, idx) => {
+            if (p === null) return { val: '—', cls: '' };
+            let cls = 'flat';
+            if (idx > 0 && padded[idx-1] !== null) {
+              if (p > padded[idx-1]) cls = 'up';
+              else if (p < padded[idx-1]) cls = 'down';
+            }
+            return { val: p.toFixed(2), cls: cls };
+          });
         }
 
         const div = document.createElement('div');
         div.className = `cluster-card ${isActive ? 'active' : ''} ${stepClass}`;
         div.onclick = () => setFocusMarket(sym);
+        
+        let ticksHtml = ticks.map(t => 
+          `<span class="ctick ${t.cls}">${t.val}</span>`
+        ).join('');
+
+        // Determine direction label for ENTRY
+        let directionLabel = '';
+        if (step === 3 && metric) {
+          const isCall = metric.fastMA !== null && metric.slowMA !== null && metric.fastMA > metric.slowMA;
+          const isPut = metric.fastMA !== null && metric.slowMA !== null && metric.fastMA < metric.slowMA;
+          if (metric.isBreakout || isCall) directionLabel = '(CALL)';
+          else if (metric.isBreakdown || isPut) directionLabel = '(PUT)';
+        }
+        
         div.innerHTML = `
-          <div class="cluster-left">
-            <div class="name">${MARKETS_CFG[sym]}</div>
-            <div class="price">$${price}</div>
-            <div class="sr-mini"><span class="s">S: ${support}</span> <span class="r">R: ${resistance}</span></div>
+          <div class="cluster-header">
+            <span class="name">${MARKETS_CFG[sym]}</span>
+            <div class="right-group">
+              <span class="score">${isBest ? '🏆 ' : ''}${score > 0 ? score.toFixed(2) : ''}</span>
+              <span class="step-badge ${stepClass}">${stepLabel} ${directionLabel}</span>
+            </div>
           </div>
-          <div class="cluster-right">
-            <div class="score">${isBest ? '🏆 ' : ''}${score > 0 ? score.toFixed(2) : ''}</div>
-            <span class="step-badge ${stepClass}">${stepLabel}</span>
+          <div class="cluster-price-row">
+            <span class="price">$${price}</span>
+            <span class="sr"><span class="s">S: ${support}</span> <span class="r">R: ${resistance}</span></span>
           </div>
+          <div class="cluster-conditions">
+            <span class="cond ${condBreakout ? 'pass' : 'fail'}"><span class="icon">${condBreakout ? '✅' : '❌'}</span> <span class="label">Breakout</span></span>
+            <span class="cond ${condRSI ? 'pass' : 'fail'}"><span class="icon">${condRSI ? '✅' : '❌'}</span> <span class="label">RSI</span> <span class="val">${rsiVal}</span></span>
+            <span class="cond ${condBollinger ? 'pass' : 'fail'}"><span class="icon">${condBollinger ? '✅' : '❌'}</span> <span class="label">BB</span></span>
+            <span class="cond ${condVol ? 'pass' : 'fail'}"><span class="icon">${condVol ? '✅' : '❌'}</span> <span class="label">Vol</span> <span class="val">${volVal}</span></span>
+            <span class="cond ${condMA ? 'pass' : 'fail'}"><span class="icon">${condMA ? '✅' : '❌'}</span> <span class="label">MA</span> <span class="val">${maVal}</span></span>
+          </div>
+          <div class="cluster-ticks">${ticksHtml}</div>
         `;
         clusterBox.appendChild(div);
       }
