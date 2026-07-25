@@ -7,7 +7,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     /* ============================================================
-       ROOT & RESET – INSTITUTIONAL PALETTE
+       ROOT & RESET
        ============================================================ */
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -32,12 +32,13 @@
       --text-primary: #d1d4dc;
       --text-secondary: #787b86;
       --text-muted: #5a5d68;
-      --green-profit: #4ade80;      /* pastel green – support / positive */
-      --red-loss: #f87171;          /* pastel red – resistance / negative */
-      --orange-warn: #fbbf24;       /* brightened warning */
+      --green-profit: #4ade80;
+      --red-loss: #f87171;
+      --orange-warn: #fbbf24;
       --neon-blue: #2962ff;
       --header-height: 44px;
       --sidebar-width: 220px;
+      --sidebar-collapsed-width: 0px;
       --tab-height: 60px;
     }
 
@@ -50,7 +51,7 @@
     ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
 
     /* ============================================================
-       APP HEADER
+       GLOBAL HEADER (with tabs)
        ============================================================ */
     .app-header {
       background: var(--bg-panel);
@@ -64,6 +65,11 @@
       min-height: var(--header-height);
       z-index: 10;
     }
+    .app-header .left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
     .app-brand {
       font-size: 12px;
       font-weight: 700;
@@ -75,6 +81,37 @@
     }
     .app-brand span { color: var(--neon-blue); }
     .app-brand small { font-size: 7px; font-weight: 400; color: var(--text-secondary); letter-spacing: 0.3px; }
+
+    /* Header tabs */
+    .header-tabs {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+    .header-tabs .tab-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-secondary);
+      padding: 4px 12px;
+      font-size: 8px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .header-tabs .tab-btn:hover {
+      color: var(--text-primary);
+      background: var(--bg-card);
+      border-color: var(--border-subtle);
+    }
+    .header-tabs .tab-btn.active {
+      border-color: var(--neon-blue);
+      color: var(--neon-blue);
+      background: rgba(41,98,255,0.04);
+    }
+
     .header-status {
       font-size: 7px;
       font-weight: 600;
@@ -87,6 +124,7 @@
       display: flex;
       align-items: center;
       gap: 6px;
+      margin-left: 8px;
     }
     .header-status.on { border-color: var(--green-profit); color: var(--green-profit); background: rgba(74,222,128,0.06); }
     .header-status.off { border-color: var(--red-loss); color: var(--red-loss); background: rgba(248,113,113,0.06); }
@@ -102,9 +140,10 @@
       flex: 1;
       overflow: hidden;
       position: relative;
+      transition: all 0.2s;
     }
 
-    /* ---- SIDEBAR ---- */
+    /* ---- SIDEBAR (collapsible) ---- */
     .app-sidebar {
       width: var(--sidebar-width);
       background: var(--bg-panel);
@@ -115,7 +154,51 @@
       padding: 6px 8px;
       overflow-y: auto;
       gap: 6px;
+      transition: width 0.25s ease, padding 0.25s ease, border 0.25s ease;
+      position: relative;
     }
+    .app-sidebar.collapsed {
+      width: 0;
+      padding: 0;
+      border: none;
+      overflow: hidden;
+    }
+
+    /* Sidebar toggle button */
+    .sidebar-toggle {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      padding: 2px 6px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 12px;
+      line-height: 1;
+      transition: all 0.15s;
+      z-index: 5;
+    }
+    .sidebar-toggle:hover {
+      background: var(--bg-surface);
+      color: var(--text-primary);
+    }
+    .app-sidebar.collapsed .sidebar-toggle {
+      /* when collapsed, the sidebar is hidden, so the toggle is not visible */
+      display: none;
+    }
+
+    /* Internal sidebar content (hidden when collapsed) */
+    .sidebar-content {
+      opacity: 1;
+      transition: opacity 0.2s;
+    }
+    .app-sidebar.collapsed .sidebar-content {
+      opacity: 0;
+      pointer-events: none;
+    }
+
     .sidebar-metrics {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -193,7 +276,6 @@
     }
     .sidebar-controls .btn.swap:hover { background: var(--bg-surface); }
 
-    /* ---- SUBDUED CALL / PUT BUTTONS ---- */
     .sidebar-trade-btns {
       display: flex;
       gap: 4px;
@@ -272,9 +354,10 @@
       overflow: hidden;
       background: var(--bg-terminal);
       padding: 4px 8px 4px 8px;
+      transition: padding 0.25s;
     }
 
-    /* Focus bar */
+    /* ---- STICKY ASSET STATUS BAR (above data table) ---- */
     .focus-bar {
       display: flex;
       justify-content: space-between;
@@ -287,6 +370,12 @@
       margin-bottom: 4px;
       flex-wrap: wrap;
       gap: 4px;
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      background: var(--bg-panel); /* slightly different to stand out */
+      border-bottom: 1px solid var(--border-subtle);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
     }
     .focus-bar .left {
       display: flex;
@@ -328,9 +417,18 @@
     .focus-bar .right .badge.breakdown { background: rgba(248,113,113,0.12); color: var(--red-loss); border: 1px solid var(--red-loss); }
     .focus-bar .right .badge.idle { background: rgba(120,123,134,0.08); color: var(--text-secondary); border: 1px solid var(--border-subtle); }
 
-    /* ---- DATA TABLE – DYNAMIC SCALING + RIGHT ALIGNMENT ---- */
+    /* ---- TAB PAGES ---- */
+    .tab-pages {
+      flex: 1;
+      display: none;
+      overflow-y: auto;
+      padding: 4px 0;
+    }
+    .tab-pages.active { display: block; }
+
+    /* DATA TABLE – fills remaining space */
     .table-container {
-      flex: 1;                     /* fills remaining vertical space */
+      height: 100%;
       overflow-y: auto;
       background: var(--bg-panel);
       border: 1px solid var(--border-subtle);
@@ -376,12 +474,7 @@
     .data-table tr.step-1 { background: rgba(41,98,255,0.02); }
     .data-table tr.step-0 { opacity: 0.6; }
 
-    /* ---- RIGHT-ALIGNED NUMERIC COLUMNS (with tabular numerals) ---- */
-    .data-table .col-asset {
-      text-align: left;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
+    .data-table .col-asset { text-align: left; font-weight: 600; color: var(--text-primary); }
     .data-table .col-price,
     .data-table .col-sr,
     .data-table .col-rsi,
@@ -423,15 +516,6 @@
     .step-badge.step-2 { background: rgba(251,191,36,0.12); color: var(--orange-warn); border-color: var(--orange-warn); }
     .step-badge.step-1 { background: rgba(41,98,255,0.10); color: var(--neon-blue); border-color: var(--neon-blue); }
     .step-badge.step-0 { background: rgba(120,123,134,0.08); color: var(--text-secondary); border-color: var(--border-subtle); }
-
-    /* ---- TABS ---- */
-    .tab-pages {
-      flex: 1;
-      display: none;
-      overflow-y: auto;
-      padding: 4px 0;
-    }
-    .tab-pages.active { display: block; }
 
     /* ---- ANALYTICS ---- */
     .analytics-grid {
@@ -694,6 +778,30 @@
     }
     #clock span { color: var(--neon-blue); }
 
+    /* ---- SIDEBAR TOGGLE BUTTON (outside sidebar, when collapsed) ---- */
+    .sidebar-toggle-global {
+      display: none;
+      position: fixed;
+      left: 8px;
+      top: calc(var(--header-height) + 8px);
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      z-index: 20;
+      transition: all 0.15s;
+    }
+    .sidebar-toggle-global:hover {
+      background: var(--bg-surface);
+      color: var(--text-primary);
+    }
+    .app-sidebar.collapsed ~ .sidebar-toggle-global {
+      display: block;
+    }
+
     /* ============================================================
        RESPONSIVE
        ============================================================ */
@@ -710,6 +818,21 @@
         max-height: 140px;
         overflow-y: auto;
       }
+      .app-sidebar.collapsed {
+        height: 0;
+        padding: 0;
+        border: none;
+        max-height: 0;
+      }
+      .sidebar-toggle-global {
+        display: none !important;
+      }
+      .sidebar-content {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 3px;
+        flex: 1;
+      }
       .sidebar-metrics { flex: 1; min-width: 140px; }
       .sidebar-controls { flex: 2; min-width: 180px; }
       .sidebar-duration { flex: 1; min-width: 100px; }
@@ -723,87 +846,88 @@
       .data-table th, .data-table td { padding: 2px 4px; }
       .col-sr, .col-ma, .col-vol { display: none; }
       .col-diff { display: none; }
+      /* On mobile, header tabs hide; we show bottom nav */
+      .header-tabs { display: none; }
     }
 
     @media (min-width: 769px) {
       .tab-bar { display: none; }
-      .desktop-tabs {
-        display: flex;
-        gap: 4px;
-        margin-bottom: 4px;
-        flex-shrink: 0;
-      }
-      .desktop-tabs .tab-btn {
-        background: var(--bg-card);
-        border: 1px solid var(--border-subtle);
-        color: var(--text-secondary);
-        padding: 4px 12px;
-        font-size: 8px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        border-radius: 3px;
-        cursor: pointer;
-        transition: all 0.15s;
-      }
-      .desktop-tabs .tab-btn:hover { background: var(--bg-surface); color: var(--text-primary); }
-      .desktop-tabs .tab-btn.active {
-        border-color: var(--neon-blue);
-        color: var(--neon-blue);
-        background: rgba(41,98,255,0.04);
-      }
+      .header-tabs { display: flex; }
+      .sidebar-toggle-global { display: none; }
+      .app-sidebar .sidebar-toggle { display: block; }
+      .app-sidebar.collapsed .sidebar-toggle { display: none; }
     }
   </style>
 </head>
 <body>
 
-  <!-- HEADER -->
+  <!-- ============================================================
+       GLOBAL HEADER (with tabs)
+       ============================================================ -->
   <header class="app-header">
-    <div class="app-brand">QUANTCORE<span>//</span>TERMINAL <small>v6.0</small></div>
-    <span class="header-status" id="header-status">● IDLE</span>
+    <div class="left">
+      <div class="app-brand">QUANTCORE<span>//</span>TERMINAL <small>v6.0</small></div>
+      <div class="header-tabs" id="headerTabs">
+        <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">Dashboard</button>
+        <button class="tab-btn" data-tab="logs" onclick="switchTab('logs')">Logs</button>
+        <button class="tab-btn" data-tab="analytics" onclick="switchTab('analytics')">Analytics</button>
+        <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">Settings</button>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <span class="header-status" id="header-status">● IDLE</span>
+    </div>
   </header>
 
-  <!-- BODY: SIDEBAR + MAIN -->
-  <div class="app-body">
+  <!-- ============================================================
+       BODY: SIDEBAR + MAIN
+       ============================================================ -->
+  <div class="app-body" id="appBody">
 
-    <!-- SIDEBAR -->
-    <aside class="app-sidebar" id="sidebar">
-      <div class="sidebar-metrics">
-        <div class="metric"><div class="lbl">Profile</div><div class="val blue" id="m-profile">—</div></div>
-        <div class="metric"><div class="lbl">Balance</div><div class="val blue" id="m-balance">—</div></div>
-        <div class="metric"><div class="lbl">Session</div><div class="val green" id="m-session">$0.00</div></div>
-        <div class="metric"><div class="lbl">Daily</div><div class="val green" id="m-daily">$0.00</div></div>
-        <div class="metric" style="grid-column: span 2;"><div class="lbl">Risk</div><div class="val orange" id="m-stake">$0.00</div></div>
-      </div>
+    <!-- SIDEBAR (collapsible) -->
+    <aside class="app-sidebar" id="appSidebar">
+      <button class="sidebar-toggle" id="sidebarToggle" title="Collapse sidebar">◀</button>
+      <div class="sidebar-content">
+        <div class="sidebar-metrics">
+          <div class="metric"><div class="lbl">Profile</div><div class="val blue" id="m-profile">—</div></div>
+          <div class="metric"><div class="lbl">Balance</div><div class="val blue" id="m-balance">—</div></div>
+          <div class="metric"><div class="lbl">Session</div><div class="val green" id="m-session">$0.00</div></div>
+          <div class="metric"><div class="lbl">Daily</div><div class="val green" id="m-daily">$0.00</div></div>
+          <div class="metric" style="grid-column: span 2;"><div class="lbl">Risk</div><div class="val orange" id="m-stake">$0.00</div></div>
+        </div>
 
-      <div class="sidebar-controls">
-        <div class="row">
-          <button class="btn start" onclick="sendControl('start')">▶ Start</button>
-          <button class="btn stop" onclick="sendControl('stop')">⏹ Stop</button>
-          <button class="btn swap" onclick="swapEnvironment()">🔄</button>
+        <div class="sidebar-controls">
+          <div class="row">
+            <button class="btn start" onclick="sendControl('start')">▶ Start</button>
+            <button class="btn stop" onclick="sendControl('stop')">⏹ Stop</button>
+            <button class="btn swap" onclick="swapEnvironment()">🔄</button>
+          </div>
+        </div>
+
+        <div class="sidebar-duration">
+          <label>Dur</label>
+          <input type="number" id="manual-duration" value="7" min="1" max="10">
+          <select id="manual-unit">
+            <option value="t" selected>Ticks</option>
+            <option value="s">Sec</option>
+            <option value="m">Min</option>
+          </select>
+        </div>
+
+        <div class="sidebar-trade-btns">
+          <button class="btn call" onclick="fireManual('CALL')">📈 CALL</button>
+          <button class="btn put" onclick="fireManual('PUT')">📉 PUT</button>
         </div>
       </div>
-
-      <div class="sidebar-duration">
-        <label>Dur</label>
-        <input type="number" id="manual-duration" value="7" min="1" max="10">
-        <select id="manual-unit">
-          <option value="t" selected>Ticks</option>
-          <option value="s">Sec</option>
-          <option value="m">Min</option>
-        </select>
-      </div>
-
-      <div class="sidebar-trade-btns">
-        <button class="btn call" onclick="fireManual('CALL')">📈 CALL</button>
-        <button class="btn put" onclick="fireManual('PUT')">📉 PUT</button>
-      </div>
     </aside>
+
+    <!-- Global toggle when sidebar is collapsed (desktop) -->
+    <button class="sidebar-toggle-global" id="sidebarToggleGlobal" title="Expand sidebar">▶</button>
 
     <!-- MAIN CONTENT -->
     <main class="app-main">
 
-      <!-- Focus Bar -->
+      <!-- STICKY ASSET STATUS BAR -->
       <div class="focus-bar" id="focusBar">
         <div class="left">
           <span class="name" id="f-name">Volatility 75 Index</span>
@@ -817,15 +941,7 @@
         </div>
       </div>
 
-      <!-- Desktop Tabs -->
-      <div class="desktop-tabs" id="desktopTabs">
-        <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">📊 Dashboard</button>
-        <button class="tab-btn" data-tab="logs" onclick="switchTab('logs')">📋 Logs</button>
-        <button class="tab-btn" data-tab="analytics" onclick="switchTab('analytics')">📈 Analytics</button>
-        <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">⚙️ Settings</button>
-      </div>
-
-      <!-- DASHBOARD (Data Table – dynamic scaling) -->
+      <!-- TAB PAGES -->
       <div class="tab-pages active" id="tab-dashboard">
         <div class="table-container">
           <table class="data-table" id="dataTable">
@@ -850,7 +966,6 @@
         </div>
       </div>
 
-      <!-- LOGS -->
       <div class="tab-pages" id="tab-logs">
         <div class="log-header">
           <span class="title">📋 Live System Audit Log</span>
@@ -859,7 +974,6 @@
         <div class="log-stream" id="log-stream"></div>
       </div>
 
-      <!-- ANALYTICS -->
       <div class="tab-pages" id="tab-analytics">
         <div class="analytics-grid">
           <div class="filter-bar">
@@ -896,7 +1010,6 @@
         </div>
       </div>
 
-      <!-- SETTINGS -->
       <div class="tab-pages" id="tab-settings">
         <div class="settings-grid">
           <div class="settings-section"><h4>📊 Breakout Parameters</h4>
@@ -944,7 +1057,9 @@
     </main>
   </div>
 
-  <!-- BOTTOM TAB BAR (Mobile) -->
+  <!-- ============================================================
+       BOTTOM TAB BAR (Mobile)
+       ============================================================ -->
   <div class="tab-bar" id="tabBar">
     <button class="tab-item active" data-tab="dashboard" onclick="switchTab('dashboard')"><span class="icon">📊</span><span class="label">Markets</span></button>
     <button class="tab-item" data-tab="logs" onclick="switchTab('logs')"><span class="icon">📋</span><span class="label">Logs</span></button>
@@ -960,12 +1075,16 @@
     // TAB SWITCHING (Desktop + Mobile)
     // =========================================================================
     function switchTab(tabId) {
+      // Hide all tab pages
       document.querySelectorAll('.tab-pages').forEach(p => p.classList.remove('active'));
       document.getElementById('tab-' + tabId).classList.add('active');
-      document.querySelectorAll('.desktop-tabs .tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelector(`.desktop-tabs .tab-btn[data-tab="${tabId}"]`)?.classList.add('active');
+      // Header tabs
+      document.querySelectorAll('.header-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelector(`.header-tabs .tab-btn[data-tab="${tabId}"]`)?.classList.add('active');
+      // Mobile bottom tabs
       document.querySelectorAll('.tab-bar .tab-item').forEach(b => b.classList.remove('active'));
       document.querySelector(`.tab-bar .tab-item[data-tab="${tabId}"]`)?.classList.add('active');
+      // Init analytics if needed
       if (tabId === 'analytics') {
         setTimeout(() => {
           renderCharts();
@@ -975,6 +1094,27 @@
       if (tabId === 'settings') { loadConfig(); }
       if (tabId === 'logs') { scrollLogsToBottom(); }
     }
+
+    // =========================================================================
+    // SIDEBAR TOGGLE
+    // =========================================================================
+    function toggleSidebar() {
+      const sidebar = document.getElementById('appSidebar');
+      sidebar.classList.toggle('collapsed');
+      // Toggle button text/icon
+      const toggleBtn = document.getElementById('sidebarToggle');
+      const globalToggle = document.getElementById('sidebarToggleGlobal');
+      if (sidebar.classList.contains('collapsed')) {
+        toggleBtn.textContent = '▶';
+        globalToggle.style.display = 'block';
+      } else {
+        toggleBtn.textContent = '◀';
+        globalToggle.style.display = 'none';
+      }
+    }
+
+    document.getElementById('sidebarToggle').addEventListener('click', toggleSidebar);
+    document.getElementById('sidebarToggleGlobal').addEventListener('click', toggleSidebar);
 
     // =========================================================================
     // SSE CONNECTION
@@ -1109,7 +1249,7 @@
         document.getElementById('f-vol').textContent = 'Vol: —';
       }
 
-      // Data table – full dynamic scaling
+      // Data table
       const tbody = document.getElementById('tableBody');
       tbody.innerHTML = '';
       let bestScore = -Infinity, bestSym = null;
@@ -1321,10 +1461,11 @@
     // =========================================================================
     // INIT
     // =========================================================================
+    // Default to dashboard tab
     document.querySelectorAll('.tab-pages').forEach(p => p.classList.remove('active'));
     document.getElementById('tab-dashboard').classList.add('active');
-    document.querySelectorAll('.desktop-tabs .tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelector('.desktop-tabs .tab-btn[data-tab="dashboard"]')?.classList.add('active');
+    document.querySelectorAll('.header-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector('.header-tabs .tab-btn[data-tab="dashboard"]')?.classList.add('active');
     document.querySelectorAll('.tab-bar .tab-item').forEach(b => b.classList.remove('active'));
     document.querySelector('.tab-bar .tab-item[data-tab="dashboard"]')?.classList.add('active');
     console.log('🚀 QUANTCORE Terminal v6.0 loaded');
