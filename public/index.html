@@ -21,8 +21,8 @@
       --neon-red: #ff3b30;
       --text-bright: #e2e8f0;
       --text-dim: #64748b;
-      --tab-height: 60px;
-      --header-height: 56px;
+      --tab-height: 68px;
+      --header-height: 52px;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -46,20 +46,19 @@
     .app-header {
       background: var(--bg-panel);
       border-bottom: 1px solid var(--border-glow);
-      padding: 10px 16px;
+      padding: 8px 16px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       flex-shrink: 0;
       height: var(--header-height);
       min-height: var(--header-height);
-      position: relative;
       z-index: 10;
     }
     .app-brand {
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 700;
-      letter-spacing: 1px;
+      letter-spacing: 0.5px;
       color: var(--text-bright);
       display: flex;
       align-items: center;
@@ -67,16 +66,16 @@
     }
     .app-brand span { color: var(--neon-blue); }
     .app-brand small {
-      font-size: 9px;
+      font-size: 8px;
       font-weight: 400;
       color: var(--text-dim);
-      letter-spacing: 0.5px;
+      letter-spacing: 0.3px;
     }
     .header-status {
-      font-size: 9px;
+      font-size: 8px;
       font-weight: 600;
-      padding: 4px 12px;
-      border-radius: 12px;
+      padding: 3px 10px;
+      border-radius: 10px;
       border: 1px solid var(--border-glow);
       color: var(--text-dim);
       background: var(--bg-card);
@@ -98,7 +97,7 @@
       display: none;
       height: 100%;
       overflow-y: auto;
-      padding: 12px 16px 20px;
+      padding: 10px 12px 20px;
       -webkit-overflow-scrolling: touch;
       scroll-behavior: smooth;
     }
@@ -107,16 +106,24 @@
     }
 
     /* =========================================================================
-       TAB 1: MARKET VIEW
+       TAB 1: DASHBOARD (Merged Market + Controls)
        ========================================================================= */
+    .dashboard-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      height: 100%;
+    }
+
+    /* Focus Card */
     .focus-card {
       background: var(--bg-card);
       border: 1px solid var(--border-glow);
       border-radius: 10px;
-      padding: 14px 16px;
-      margin-bottom: 12px;
+      padding: 12px 14px;
       position: relative;
       overflow: hidden;
+      flex-shrink: 0;
     }
     .focus-card::before {
       content: '';
@@ -132,12 +139,11 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 6px;
       flex-wrap: wrap;
       gap: 4px;
     }
     .focus-name {
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 700;
       color: var(--neon-blue);
     }
@@ -146,12 +152,12 @@
       font-weight: 700;
       font-family: 'Consolas', monospace;
     }
-    .focus-price .currency { font-size: 13px; color: var(--text-dim); font-weight: 400; }
+    .focus-price .currency { font-size: 12px; color: var(--text-dim); font-weight: 400; }
 
     .sr-levels {
       display: flex;
       gap: 12px;
-      font-size: 11px;
+      font-size: 10px;
       color: var(--text-dim);
       margin-top: 4px;
       flex-wrap: wrap;
@@ -164,76 +170,79 @@
     .ma-grid-compact {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: 6px;
-      margin-top: 10px;
+      gap: 4px;
+      margin-top: 8px;
       background: var(--bg-terminal);
       border-radius: 6px;
-      padding: 8px;
+      padding: 6px;
     }
     .ma-item-compact {
       text-align: center;
-      padding: 4px 2px;
+      padding: 3px 2px;
       border-radius: 4px;
       background: var(--bg-card);
     }
     .ma-item-compact .lbl {
-      font-size: 7px;
+      font-size: 6px;
       text-transform: uppercase;
       color: var(--text-dim);
       font-weight: 600;
       letter-spacing: 0.3px;
     }
     .ma-item-compact .val {
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 700;
       font-family: 'Consolas', monospace;
       color: var(--neon-blue);
     }
-    .ma-item-compact .val.fast { color: var(--neon-green); }
-    .ma-item-compact .val.slow { color: var(--neon-orange); }
     .ma-item-compact .val.green { color: var(--neon-green); }
     .ma-item-compact .val.red { color: var(--neon-red); }
+    .ma-item-compact .val.orange { color: var(--neon-orange); }
 
     .tail-compact {
       display: flex;
       gap: 4px;
-      margin-top: 8px;
+      margin-top: 6px;
       justify-content: center;
     }
     .tail-compact .tick {
       background: var(--bg-terminal);
       border: 1px solid var(--border-glow);
-      padding: 4px 10px;
-      border-radius: 4px;
-      font-size: 12px;
+      padding: 3px 8px;
+      border-radius: 3px;
+      font-size: 11px;
       font-weight: 600;
       font-family: 'Consolas', monospace;
-      min-width: 36px;
+      min-width: 30px;
       text-align: center;
     }
     .tail-compact .tick.up { border-color: var(--neon-green); color: var(--neon-green); }
     .tail-compact .tick.down { border-color: var(--neon-red); color: var(--neon-red); }
     .tail-compact .tick.flat { border-color: var(--text-dim); color: var(--text-dim); }
 
-    /* Cluster List (Mobile) */
+    /* Cluster List */
     .cluster-title {
-      font-size: 10px;
+      font-size: 9px;
       text-transform: uppercase;
       color: var(--text-dim);
       font-weight: 600;
-      letter-spacing: 0.8px;
-      margin: 14px 0 8px;
+      letter-spacing: 0.6px;
+      margin: 10px 0 6px;
+      flex-shrink: 0;
     }
     .cluster-list-mobile {
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 5px;
+      flex: 1;
+      overflow-y: auto;
+      min-height: 100px;
     }
     .cluster-card-mobile {
       background: var(--bg-card);
       border: 1px solid var(--border-glow);
       border-radius: 8px;
-      padding: 10px 12px;
+      padding: 8px 10px;
       cursor: pointer;
       transition: all 0.2s;
       display: flex;
@@ -241,12 +250,12 @@
       align-items: center;
       position: relative;
       overflow: hidden;
+      flex-shrink: 0;
     }
     .cluster-card-mobile.active {
       border-color: var(--neon-blue);
       background: #19243a;
     }
-    /* Step-based styling */
     .cluster-card-mobile.step-3 {
       border-color: var(--neon-green);
       background: rgba(0,255,136,0.06);
@@ -265,18 +274,18 @@
     }
 
     .cluster-left .name {
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 600;
     }
     .cluster-left .price {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 700;
       font-family: 'Consolas', monospace;
     }
     .cluster-left .sr-mini {
-      font-size: 8px;
+      font-size: 7px;
       color: var(--text-dim);
-      margin-top: 2px;
+      margin-top: 1px;
     }
     .cluster-left .sr-mini .s { color: var(--neon-green); }
     .cluster-left .sr-mini .r { color: var(--neon-red); }
@@ -286,21 +295,21 @@
       display: flex;
       flex-direction: column;
       align-items: flex-end;
-      gap: 2px;
+      gap: 1px;
     }
     .cluster-right .spread {
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 600;
     }
     .cluster-right .spread.bull { color: var(--neon-green); }
     .cluster-right .spread.bear { color: var(--neon-red); }
     .cluster-right .step-badge {
-      font-size: 8px;
+      font-size: 7px;
       font-weight: 700;
-      padding: 2px 8px;
-      border-radius: 10px;
+      padding: 2px 6px;
+      border-radius: 8px;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.3px;
     }
     .step-badge.step-3 { background: rgba(0,255,136,0.15); color: var(--neon-green); border: 1px solid var(--neon-green); }
     .step-badge.step-2 { background: rgba(255,149,0,0.15); color: var(--neon-orange); border: 1px solid var(--neon-orange); }
@@ -311,12 +320,13 @@
       background: rgba(255,59,48,0.12);
       border: 1px solid var(--neon-red);
       color: var(--neon-red);
-      padding: 8px 12px;
+      padding: 6px 10px;
       border-radius: 6px;
-      font-size: 10px;
+      font-size: 9px;
       font-weight: 600;
       display: none;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
+      flex-shrink: 0;
     }
     #lock-alert-banner-mobile.green {
       background: rgba(0,255,136,0.12);
@@ -325,74 +335,59 @@
     }
 
     /* =========================================================================
-       TAB 2: CONTROLS
+       CONTROLS SECTION (Integrated in Dashboard)
        ========================================================================= */
-    .controls-grid {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
+    .controls-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      flex-shrink: 0;
     }
-    .control-section {
-      background: var(--bg-card);
-      border: 1px solid var(--border-glow);
-      border-radius: 10px;
-      padding: 14px 16px;
-    }
-    .control-section .section-title {
-      font-size: 10px;
-      text-transform: uppercase;
-      color: var(--text-dim);
-      font-weight: 600;
-      letter-spacing: 0.8px;
-      margin-bottom: 10px;
-    }
-
     .btn-mobile {
-      display: block;
-      width: 100%;
-      padding: 14px;
-      border-radius: 8px;
-      font-size: 12px;
+      padding: 10px;
+      border-radius: 6px;
+      font-size: 10px;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.8px;
+      letter-spacing: 0.5px;
       cursor: pointer;
       border: none;
       transition: all 0.2s;
       text-align: center;
       touch-action: manipulation;
-      min-height: 48px;
+      min-height: 40px;
     }
-    .btn-mobile:active { transform: scale(0.98); }
+    .btn-mobile:active { transform: scale(0.97); }
     .btn-mobile.arm { background: var(--neon-green); color: #05070a; }
     .btn-mobile.disarm { background: var(--neon-red); color: #fff; }
     .btn-mobile.swap { background: #19243a; color: var(--text-bright); border: 1px solid var(--border-glow); }
-    .btn-mobile.call { background: var(--neon-green); color: #05070a; flex: 1; }
-    .btn-mobile.put { background: var(--neon-red); color: #fff; flex: 1; }
+    .btn-mobile.call { background: var(--neon-green); color: #05070a; }
+    .btn-mobile.put { background: var(--neon-red); color: #fff; }
 
     .manual-row-mobile {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       align-items: center;
-      margin-bottom: 8px;
+      margin-top: 4px;
+      flex-shrink: 0;
     }
     .manual-row-mobile input,
     .manual-row-mobile select {
       background: var(--bg-terminal);
       border: 1px solid var(--border-glow);
       color: var(--text-bright);
-      padding: 10px 12px;
-      border-radius: 6px;
+      padding: 6px 8px;
+      border-radius: 4px;
       font-family: inherit;
-      font-size: 13px;
+      font-size: 11px;
       outline: none;
       flex: 1;
-      min-height: 44px;
+      min-height: 34px;
     }
     .manual-row-mobile input:focus,
     .manual-row-mobile select:focus { border-color: var(--neon-blue); }
     .manual-row-mobile label {
-      font-size: 10px;
+      font-size: 8px;
       color: var(--text-dim);
       font-weight: 600;
       text-transform: uppercase;
@@ -400,33 +395,34 @@
     }
     .manual-btns {
       display: flex;
-      gap: 8px;
+      gap: 6px;
     }
-    .manual-btns .btn-mobile { flex: 1; padding: 12px; font-size: 11px; }
+    .manual-btns .btn-mobile { flex: 1; padding: 8px; font-size: 9px; min-height: 34px; }
 
-    .metrics-grid-mobile {
+    .metrics-row {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 4px;
+      flex-shrink: 0;
     }
     .metric-item-mobile {
       background: var(--bg-terminal);
-      border-radius: 6px;
-      padding: 10px 12px;
+      border-radius: 4px;
+      padding: 6px 4px;
       text-align: center;
     }
     .metric-item-mobile .lbl {
-      font-size: 8px;
+      font-size: 6px;
       text-transform: uppercase;
       color: var(--text-dim);
       font-weight: 600;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.3px;
     }
     .metric-item-mobile .val {
-      font-size: 16px;
+      font-size: 12px;
       font-weight: 700;
       font-family: 'Consolas', monospace;
-      margin-top: 2px;
+      margin-top: 1px;
     }
     .metric-item-mobile .val.green { color: var(--neon-green); }
     .metric-item-mobile .val.red { color: var(--neon-red); }
@@ -434,55 +430,55 @@
     .metric-item-mobile .val.blue { color: var(--neon-blue); }
 
     /* =========================================================================
-       TAB 3: LOGS
+       TAB 2: LOGS
        ========================================================================= */
     .log-stream-mobile {
       background: #04060b;
       border: 1px solid #0d121c;
       border-radius: 8px;
-      padding: 8px 10px;
-      height: calc(100vh - 200px);
-      min-height: 200px;
+      padding: 6px 8px;
+      height: calc(100vh - 160px);
+      min-height: 150px;
       overflow-y: auto;
-      font-size: 10px;
+      font-size: 9px;
       font-family: 'Consolas', monospace;
       display: flex;
       flex-direction: column;
     }
     .log-entry-mobile {
-      padding: 4px 0;
+      padding: 3px 0;
       border-bottom: 1px solid #131a26;
       display: flex;
-      gap: 8px;
-      line-height: 1.4;
+      gap: 6px;
+      line-height: 1.3;
     }
     .log-entry-mobile .ts {
       color: var(--neon-blue);
       flex-shrink: 0;
-      font-size: 9px;
+      font-size: 8px;
     }
     .log-entry-mobile .msg { word-break: break-word; }
 
     /* =========================================================================
-       TAB 4: ANALYTICS
+       TAB 3: ANALYTICS
        ========================================================================= */
     .analytics-mobile {
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 10px;
     }
     .filter-bar-mobile {
       background: var(--bg-card);
       border: 1px solid var(--border-glow);
       border-radius: 8px;
-      padding: 10px 12px;
+      padding: 8px 10px;
       display: flex;
       flex-wrap: wrap;
-      gap: 6px;
+      gap: 4px;
       align-items: center;
     }
     .filter-bar-mobile label {
-      font-size: 8px;
+      font-size: 7px;
       text-transform: uppercase;
       color: var(--text-dim);
       font-weight: 600;
@@ -491,18 +487,18 @@
       background: var(--bg-terminal);
       border: 1px solid var(--border-glow);
       color: var(--text-bright);
-      padding: 4px 8px;
+      padding: 3px 6px;
       font-family: inherit;
-      font-size: 10px;
-      border-radius: 4px;
+      font-size: 9px;
+      border-radius: 3px;
       outline: none;
       flex: 1;
-      min-width: 80px;
+      min-width: 60px;
     }
     .filter-bar-mobile input:focus { border-color: var(--neon-blue); }
     .preset-strip-mobile {
       display: flex;
-      gap: 4px;
+      gap: 3px;
       flex-wrap: wrap;
       width: 100%;
     }
@@ -510,10 +506,10 @@
       background: var(--bg-terminal);
       border: 1px solid var(--border-glow);
       color: var(--text-bright);
-      padding: 4px 10px;
-      font-size: 9px;
+      padding: 3px 8px;
+      font-size: 8px;
       cursor: pointer;
-      border-radius: 4px;
+      border-radius: 3px;
       font-weight: 600;
       transition: all 0.2s;
     }
@@ -527,24 +523,24 @@
     .metrics-grid-mobile-2 {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 8px;
+      gap: 6px;
     }
     .metric-card-mobile {
       background: var(--bg-card);
       border: 1px solid var(--border-glow);
-      border-radius: 8px;
-      padding: 10px 12px;
+      border-radius: 6px;
+      padding: 8px 10px;
       text-align: center;
     }
     .metric-card-mobile .lbl {
-      font-size: 8px;
+      font-size: 7px;
       text-transform: uppercase;
       color: var(--text-dim);
       font-weight: 600;
       letter-spacing: 0.3px;
     }
     .metric-card-mobile .val {
-      font-size: 16px;
+      font-size: 14px;
       font-weight: 700;
       margin-top: 2px;
     }
@@ -552,62 +548,62 @@
     .charts-mobile {
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 10px;
     }
     .chart-box-mobile {
       background: var(--bg-card);
       border: 1px solid var(--border-glow);
       border-radius: 8px;
-      padding: 10px;
-      min-height: 160px;
+      padding: 8px;
+      min-height: 140px;
       position: relative;
     }
     .chart-box-mobile .ch-label {
-      font-size: 8px;
+      font-size: 7px;
       text-transform: uppercase;
       color: var(--text-dim);
       font-weight: 600;
       letter-spacing: 0.5px;
-      margin-bottom: 6px;
+      margin-bottom: 4px;
     }
     .chart-box-mobile .ch-wrap {
-      height: 130px;
+      height: 110px;
       position: relative;
     }
 
     /* =========================================================================
-       TAB 5: SETTINGS
+       TAB 4: SETTINGS
        ========================================================================= */
     .settings-mobile {
       padding: 4px 0 12px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 10px;
     }
     .settings-section-mobile {
       background: var(--bg-card);
       border: 1px solid var(--border-glow);
-      border-radius: 10px;
-      padding: 12px 14px;
+      border-radius: 8px;
+      padding: 10px 12px;
     }
     .settings-section-mobile h4 {
-      font-size: 11px;
+      font-size: 10px;
       color: var(--neon-blue);
-      margin-bottom: 10px;
+      margin-bottom: 8px;
       letter-spacing: 0.5px;
     }
     .settings-grid-mobile {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 8px;
+      gap: 6px;
     }
     .setting-item-mobile {
       display: flex;
       flex-direction: column;
-      gap: 2px;
+      gap: 1px;
     }
     .setting-item-mobile label {
-      font-size: 8px;
+      font-size: 7px;
       text-transform: uppercase;
       color: var(--text-dim);
       font-weight: 600;
@@ -617,18 +613,18 @@
       background: var(--bg-terminal);
       border: 1px solid var(--border-glow);
       color: var(--text-bright);
-      padding: 6px 8px;
-      border-radius: 4px;
+      padding: 4px 6px;
+      border-radius: 3px;
       font-family: inherit;
-      font-size: 12px;
+      font-size: 10px;
       outline: none;
-      min-height: 36px;
+      min-height: 30px;
     }
     .setting-item-mobile input:focus { border-color: var(--neon-blue); }
 
     .settings-actions-mobile {
       display: flex;
-      gap: 10px;
+      gap: 8px;
       align-items: center;
       margin-top: 4px;
     }
@@ -636,23 +632,23 @@
       background: var(--neon-green);
       color: #05070a;
       border: none;
-      padding: 10px 24px;
+      padding: 8px 20px;
       font-weight: 700;
       border-radius: 6px;
       cursor: pointer;
-      font-size: 11px;
+      font-size: 10px;
       text-transform: uppercase;
-      letter-spacing: 0.8px;
-      min-height: 44px;
+      letter-spacing: 0.5px;
+      min-height: 36px;
     }
     .btn-save-mobile:active { transform: scale(0.98); }
     .settings-status-mobile {
       color: var(--neon-green);
-      font-size: 10px;
+      font-size: 9px;
     }
 
     /* =========================================================================
-       BOTTOM TAB BAR
+       BOTTOM TAB BAR - LARGE ICONS
        ========================================================================= */
     .tab-bar {
       display: flex;
@@ -671,7 +667,7 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 2px;
+      gap: 1px;
       background: none;
       border: none;
       color: var(--text-dim);
@@ -679,15 +675,15 @@
       font-family: inherit;
       font-size: 9px;
       font-weight: 600;
-      padding: 6px 0;
+      padding: 8px 4px;
       transition: all 0.2s;
       touch-action: manipulation;
       -webkit-tap-highlight-color: transparent;
       position: relative;
     }
     .tab-item .icon {
-      font-size: 20px;
-      line-height: 1;
+      font-size: 26px;
+      line-height: 1.2;
     }
     .tab-item .label {
       font-size: 8px;
@@ -701,8 +697,8 @@
       content: '';
       position: absolute;
       top: 0;
-      left: 20%;
-      right: 20%;
+      left: 15%;
+      right: 15%;
       height: 2px;
       background: var(--neon-blue);
       border-radius: 0 0 2px 2px;
@@ -714,17 +710,17 @@
        ========================================================================= */
     #clock-mobile {
       position: fixed;
-      bottom: calc(var(--tab-height) + 8px);
-      right: 12px;
+      bottom: calc(var(--tab-height) + 6px);
+      right: 10px;
       background: var(--bg-panel);
       border: 1px solid var(--border-glow);
-      padding: 3px 10px;
-      border-radius: 4px;
-      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 9px;
       color: var(--text-dim);
       font-family: 'Consolas', monospace;
       z-index: 999;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.3px;
       opacity: 0.8;
     }
     #clock-mobile span { color: var(--neon-blue); }
@@ -774,13 +770,15 @@
       }
       .cluster-list-mobile {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-        gap: 8px;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 6px;
+        max-height: 400px;
       }
-      .controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-      .charts-mobile { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+      .controls-row { grid-template-columns: 1fr 1fr 1fr; }
+      .metrics-row { grid-template-columns: repeat(5, 1fr); }
+      .charts-mobile { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
       .metrics-grid-mobile-2 { grid-template-columns: repeat(4, 1fr); }
-      .settings-grid-mobile { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+      .settings-grid-mobile { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
       .log-stream-mobile { height: 300px; max-height: 400px; }
       #clock-mobile { bottom: 20px; right: 20px; }
       .ma-grid-compact { grid-template-columns: repeat(4, 1fr); }
@@ -790,28 +788,30 @@
       .desktop-nav { display: none !important; }
       .tab-bar { display: flex; }
       .ma-grid-compact { grid-template-columns: repeat(2, 1fr); }
+      .metrics-row { grid-template-columns: repeat(3, 1fr); }
       .metrics-grid-mobile-2 { grid-template-columns: 1fr 1fr; }
       .settings-grid-mobile { grid-template-columns: 1fr; }
       .manual-row-mobile { flex-wrap: wrap; }
-      .manual-row-mobile input { min-width: 60px; flex: 2; }
-      .manual-row-mobile select { flex: 1; min-width: 50px; }
-      #clock-mobile { font-size: 9px; padding: 2px 8px; bottom: calc(var(--tab-height) + 8px); }
+      .manual-row-mobile input { min-width: 50px; flex: 2; }
+      .manual-row-mobile select { flex: 1; min-width: 40px; }
+      .controls-row { grid-template-columns: 1fr 1fr; }
+      #clock-mobile { font-size: 8px; padding: 2px 6px; bottom: calc(var(--tab-height) + 6px); }
       .focus-price { font-size: 18px; }
     }
 
     @media (max-width: 420px) {
-      .app-brand { font-size: 12px; }
+      .app-brand { font-size: 11px; }
       .app-brand small { display: none; }
-      .focus-name { font-size: 13px; }
+      .focus-name { font-size: 12px; }
       .focus-price { font-size: 16px; }
-      .ma-item-compact .val { font-size: 12px; }
-      .cluster-card-mobile { padding: 8px 10px; }
-      .btn-mobile { font-size: 10px; padding: 12px; min-height: 42px; }
-      .control-section { padding: 10px 12px; }
-      .tab-item .icon { font-size: 17px; }
+      .ma-item-compact .val { font-size: 11px; }
+      .cluster-card-mobile { padding: 6px 8px; }
+      .btn-mobile { font-size: 9px; padding: 8px; min-height: 34px; }
+      .tab-item .icon { font-size: 22px; }
       .tab-item .label { font-size: 7px; }
-      .cluster-left .sr-mini { font-size: 7px; }
-      .cluster-right .step-badge { font-size: 7px; padding: 1px 6px; }
+      .cluster-left .sr-mini { font-size: 6px; }
+      .cluster-right .step-badge { font-size: 6px; padding: 1px 4px; }
+      .metrics-row { grid-template-columns: repeat(2, 1fr); }
     }
   </style>
 </head>
@@ -823,7 +823,7 @@
   <header class="app-header">
     <div class="app-brand">
       QUANTCORE<span>//</span>PA
-      <small>v3.0</small>
+      <small>v4.0</small>
     </div>
     <span class="header-status" id="header-status">● IDLE</span>
   </header>
@@ -832,8 +832,7 @@
        DESKTOP NAV
        ====================================================================== -->
   <div class="desktop-nav" id="desktopNav">
-    <button class="nav-btn active" data-tab="market" onclick="switchTab('market')">📊 Market</button>
-    <button class="nav-btn" data-tab="controls" onclick="switchTab('controls')">🎮 Controls</button>
+    <button class="nav-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">📊 Dashboard</button>
     <button class="nav-btn" data-tab="logs" onclick="switchTab('logs')">📋 Logs</button>
     <button class="nav-btn" data-tab="analytics" onclick="switchTab('analytics')">📈 Analytics</button>
     <button class="nav-btn" data-tab="settings" onclick="switchTab('settings')">⚙️ Settings</button>
@@ -845,96 +844,85 @@
   <div class="app-content" id="appContent">
 
     <!-- ====================================================================
-         TAB 1: MARKET
+         TAB 1: DASHBOARD (Merged)
          ==================================================================== -->
-    <div class="tab-page active" id="tab-market">
-      
-      <div id="lock-alert-banner-mobile"></div>
-
-      <!-- Focus Market -->
-      <div class="focus-card" id="focusCard">
-        <div class="focus-top">
-          <span class="focus-name" id="focus-name">Volatility 75 Index</span>
-          <span class="focus-price"><span class="currency">$</span><span id="focus-price">—</span></span>
-        </div>
-        <div class="sr-levels" id="focus-sr">
-          <span class="support">S: —</span>
-          <span class="resistance">R: —</span>
-          <span class="breakout" id="focus-breakout"></span>
-        </div>
-        <div class="ma-grid-compact" id="maGridCompact">
-          <div class="ma-item-compact"><div class="lbl">Fast MA</div><div class="val fast" id="mobile-fast-ma">—</div></div>
-          <div class="ma-item-compact"><div class="lbl">Slow MA</div><div class="val slow" id="mobile-slow-ma">—</div></div>
-          <div class="ma-item-compact"><div class="lbl">Spread</div><div class="val" id="mobile-spread" style="color:var(--neon-blue);">—</div></div>
-          <div class="ma-item-compact"><div class="lbl">Volatility</div><div class="val" id="mobile-volatility" style="color:var(--neon-orange);">—</div></div>
-        </div>
-        <div class="tail-compact" id="mobile-tail">
-          <span class="tick">—</span><span class="tick">—</span><span class="tick">—</span><span class="tick">—</span><span class="tick">—</span>
-        </div>
-      </div>
-
-      <!-- Cluster List -->
-      <div class="cluster-title">📊 Pipeline Cluster Array <span style="font-weight:400;color:var(--text-dim);font-size:8px;">(Step: 3=ENTRY 2=NEAR 1=LEVEL 0=SCAN)</span></div>
-      <div class="cluster-list-mobile" id="mobile-cluster-list"></div>
-    </div>
-
-    <!-- ====================================================================
-         TAB 2: CONTROLS
-         ==================================================================== -->
-    <div class="tab-page" id="tab-controls">
-      <div class="controls-grid">
+    <div class="tab-page active" id="tab-dashboard">
+      <div class="dashboard-grid">
         
-        <div class="control-section">
-          <div class="section-title">🤖 Automation</div>
-          <button class="btn-mobile arm" onclick="sendControl('start')">🔓 Arm Automation</button>
-          <button class="btn-mobile disarm" onclick="sendControl('stop')" style="margin-top:6px;">🔒 Disarm Engine</button>
-          <button class="btn-mobile swap" onclick="swapEnvironment()" style="margin-top:6px;">🔄 Switch Profile</button>
+        <div id="lock-alert-banner-mobile"></div>
+
+        <!-- Focus Market -->
+        <div class="focus-card" id="focusCard">
+          <div class="focus-top">
+            <span class="focus-name" id="focus-name">Volatility 75 Index</span>
+            <span class="focus-price"><span class="currency">$</span><span id="focus-price">—</span></span>
+          </div>
+          <div class="sr-levels" id="focus-sr">
+            <span class="support">S: —</span>
+            <span class="resistance">R: —</span>
+            <span class="breakout" id="focus-breakout"></span>
+          </div>
+          <div class="ma-grid-compact" id="maGridCompact">
+            <div class="ma-item-compact"><div class="lbl">Rise %</div><div class="val green" id="mobile-rise">—</div></div>
+            <div class="ma-item-compact"><div class="lbl">Fall %</div><div class="val red" id="mobile-fall">—</div></div>
+            <div class="ma-item-compact"><div class="lbl">RSI (20)</div><div class="val orange" id="mobile-rsi">—</div></div>
+            <div class="ma-item-compact"><div class="lbl">BB Lower</div><div class="val" id="mobile-bb-low" style="color:var(--neon-blue);">—</div></div>
+          </div>
+          <div class="tail-compact" id="mobile-tail">
+            <span class="tick">—</span><span class="tick">—</span><span class="tick">—</span><span class="tick">—</span><span class="tick">—</span>
+          </div>
         </div>
 
-        <div class="control-section">
-          <div class="section-title">🎯 Direct Tactical Interventions</div>
-          <div class="manual-row-mobile">
-            <label>Duration</label>
-            <input type="number" id="mobile-manual-duration" value="5" min="1" max="600">
-            <select id="mobile-manual-unit">
-              <option value="t">Ticks</option>
-              <option value="s">Sec</option>
-              <option value="m">Min</option>
-            </select>
-          </div>
-          <div class="manual-btns">
+        <!-- Controls Row -->
+        <div class="controls-row">
+          <button class="btn-mobile arm" onclick="sendControl('start')">🔓 Arm</button>
+          <button class="btn-mobile disarm" onclick="sendControl('stop')">🔒 Disarm</button>
+          <button class="btn-mobile swap" onclick="swapEnvironment()">🔄 Swap</button>
+        </div>
+
+        <!-- Manual Trade -->
+        <div class="manual-row-mobile">
+          <label>Dur</label>
+          <input type="number" id="mobile-manual-duration" value="45" min="5" max="600">
+          <select id="mobile-manual-unit">
+            <option value="s" selected>Sec</option>
+            <option value="t">Ticks</option>
+            <option value="m">Min</option>
+          </select>
+          <div class="manual-btns" style="flex:2;">
             <button class="btn-mobile call" onclick="fireManual('CALL')">📈 CALL</button>
             <button class="btn-mobile put" onclick="fireManual('PUT')">📉 PUT</button>
           </div>
         </div>
 
-        <div class="control-section">
-          <div class="section-title">💰 Account Registry</div>
-          <div class="metrics-grid-mobile">
-            <div class="metric-item-mobile"><div class="lbl">Profile</div><div class="val blue" id="mobile-profile">LOADING</div></div>
-            <div class="metric-item-mobile"><div class="lbl">Balance</div><div class="val blue" id="mobile-balance">---</div></div>
-            <div class="metric-item-mobile"><div class="lbl">Session PnL</div><div class="val green" id="mobile-session-pnl">$0.00</div></div>
-            <div class="metric-item-mobile"><div class="lbl">Daily PnL</div><div class="val green" id="mobile-daily-pnl">$0.00</div></div>
-            <div class="metric-item-mobile" style="grid-column: span 2;"><div class="lbl">Risk per Trade (1%)</div><div class="val orange" id="mobile-stake">$0.00</div></div>
-          </div>
+        <!-- Metrics Row -->
+        <div class="metrics-row">
+          <div class="metric-item-mobile"><div class="lbl">Profile</div><div class="val blue" id="mobile-profile">—</div></div>
+          <div class="metric-item-mobile"><div class="lbl">Balance</div><div class="val blue" id="mobile-balance">—</div></div>
+          <div class="metric-item-mobile"><div class="lbl">Session</div><div class="val green" id="mobile-session-pnl">$0.00</div></div>
+          <div class="metric-item-mobile"><div class="lbl">Daily</div><div class="val green" id="mobile-daily-pnl">$0.00</div></div>
+          <div class="metric-item-mobile" style="grid-column:span 1;"><div class="lbl">Risk</div><div class="val orange" id="mobile-stake">$0.00</div></div>
         </div>
 
+        <!-- Cluster List -->
+        <div class="cluster-title">📊 Markets <span style="font-weight:400;color:var(--text-dim);font-size:7px;">(Step: 3=ENTRY 2=NEAR 1=LEVEL 0=SCAN)</span></div>
+        <div class="cluster-list-mobile" id="mobile-cluster-list"></div>
       </div>
     </div>
 
     <!-- ====================================================================
-         TAB 3: LOGS
+         TAB 2: LOGS
          ==================================================================== -->
     <div class="tab-page" id="tab-logs">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-        <span style="font-size:10px; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.8px;">📋 Live System Audit Log</span>
-        <span style="font-size:8px; color:var(--text-dim);">auto-scroll</span>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <span style="font-size:9px; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px;">📋 Live System Audit Log</span>
+        <span style="font-size:7px; color:var(--text-dim);">auto-scroll</span>
       </div>
       <div class="log-stream-mobile" id="mobile-log-stream"></div>
     </div>
 
     <!-- ====================================================================
-         TAB 4: ANALYTICS
+         TAB 3: ANALYTICS
          ==================================================================== -->
     <div class="tab-page" id="tab-analytics">
       <div class="analytics-mobile">
@@ -972,49 +960,47 @@
     </div>
 
     <!-- ====================================================================
-         TAB 5: SETTINGS
+         TAB 4: SETTINGS
          ==================================================================== -->
     <div class="tab-page" id="tab-settings">
       <div class="settings-mobile">
         <div class="settings-section-mobile">
-          <h4>📊 Price Action + MA Parameters</h4>
+          <h4>📊 Price Action + Bollinger</h4>
           <div class="settings-grid-mobile">
-            <div class="setting-item-mobile"><label>Support/Resistance Lookback</label><input type="number" id="m-config-SUPPORT_RESISTANCE_LOOKBACK" step="1" /></div>
-            <div class="setting-item-mobile"><label>Min Bounces</label><input type="number" id="m-config-MIN_BOUNCES" step="1" /></div>
-            <div class="setting-item-mobile"><label>Touch Tolerance %</label><input type="number" id="m-config-TOUCH_TOLERANCE" step="0.01" /></div>
-            <div class="setting-item-mobile"><label>Breakout Threshold %</label><input type="number" id="m-config-BREAKOUT_THRESHOLD" step="0.01" /></div>
-            <div class="setting-item-mobile"><label>Breakdown Threshold %</label><input type="number" id="m-config-BREAKDOWN_THRESHOLD" step="0.01" /></div>
-            <div class="setting-item-mobile"><label>Fast MA Period</label><input type="number" id="m-config-FAST_MA_PERIOD" step="1" /></div>
-            <div class="setting-item-mobile"><label>Slow MA Period</label><input type="number" id="m-config-SLOW_MA_PERIOD" step="1" /></div>
-            <div class="setting-item-mobile"><label>Min Spread %</label><input type="number" id="m-config-MIN_SPREAD_PERCENT" step="0.01" /></div>
-            <div class="setting-item-mobile"><label>Min Volatility %</label><input type="number" id="m-config-MIN_VOLATILITY_PERCENT" step="0.01" /></div>
-            <div class="setting-item-mobile"><label>Auto Duration (ticks)</label><input type="number" id="m-config-DURATION_TICKS" step="1" /></div>
+            <div class="setting-item-mobile"><label>Analysis Window</label><input type="number" id="m-config-ANALYSIS_WINDOW" step="1" value="500" /></div>
+            <div class="setting-item-mobile"><label>Bollinger Period</label><input type="number" id="m-config-BOLLINGER_PERIOD" step="1" value="20" /></div>
+            <div class="setting-item-mobile"><label>Bollinger Std Dev</label><input type="number" id="m-config-BOLLINGER_STD" step="0.1" value="2" /></div>
+            <div class="setting-item-mobile"><label>RSI Period</label><input type="number" id="m-config-RSI_PERIOD" step="1" value="20" /></div>
+            <div class="setting-item-mobile"><label>Oversold Threshold %</label><input type="number" id="m-config-OVERSOLD_THRESHOLD" step="1" value="30" /></div>
+            <div class="setting-item-mobile"><label>Overbought Threshold %</label><input type="number" id="m-config-OVERBOUGHT_THRESHOLD" step="1" value="30" /></div>
+            <div class="setting-item-mobile"><label>Min Volatility %</label><input type="number" id="m-config-MIN_VOLATILITY_PERCENT" step="0.01" value="0.3" /></div>
+            <div class="setting-item-mobile"><label>Duration (seconds)</label><input type="number" id="m-config-DURATION_SECONDS" step="1" value="45" /></div>
           </div>
         </div>
         <div class="settings-section-mobile">
           <h4>⏱ Timing & Cooldowns</h4>
           <div class="settings-grid-mobile">
-            <div class="setting-item-mobile"><label>Trigger Interval (ms)</label><input type="number" id="m-config-MIN_TRIGGER_INTERVAL" step="1000" /></div>
-            <div class="setting-item-mobile"><label>Max Consecutive Losses</label><input type="number" id="m-config-MAX_CONSECUTIVE_LOSSES" step="1" /></div>
-            <div class="setting-item-mobile"><label>Loss Cooldown (ms)</label><input type="number" id="m-config-LOSS_COOLDOWN_MS" step="1000" /></div>
+            <div class="setting-item-mobile"><label>Trigger Interval (ms)</label><input type="number" id="m-config-MIN_TRIGGER_INTERVAL" step="1000" value="30000" /></div>
+            <div class="setting-item-mobile"><label>Max Consecutive Losses</label><input type="number" id="m-config-MAX_CONSECUTIVE_LOSSES" step="1" value="2" /></div>
+            <div class="setting-item-mobile"><label>Loss Cooldown (ms)</label><input type="number" id="m-config-LOSS_COOLDOWN_MS" step="1000" value="120000" /></div>
           </div>
         </div>
         <div class="settings-section-mobile">
           <h4>💰 Risk Management</h4>
           <div class="settings-grid-mobile">
-            <div class="setting-item-mobile"><label>Risk per Trade %</label><input type="number" id="m-config-RISK_PERCENT" step="0.1" /></div>
-            <div class="setting-item-mobile"><label>Daily TP %</label><input type="number" id="m-config-TP_PERCENT" step="0.1" /></div>
-            <div class="setting-item-mobile"><label>Daily SL %</label><input type="number" id="m-config-SL_PERCENT" step="0.1" /></div>
-            <div class="setting-item-mobile"><label>Min Stake $</label><input type="number" id="m-config-MIN_STAKE" step="0.01" /></div>
+            <div class="setting-item-mobile"><label>Risk per Trade %</label><input type="number" id="m-config-RISK_PERCENT" step="0.1" value="1" /></div>
+            <div class="setting-item-mobile"><label>Daily TP %</label><input type="number" id="m-config-TP_PERCENT" step="0.1" value="5" /></div>
+            <div class="setting-item-mobile"><label>Daily SL %</label><input type="number" id="m-config-SL_PERCENT" step="0.1" value="10" /></div>
+            <div class="setting-item-mobile"><label>Min Stake $</label><input type="number" id="m-config-MIN_STAKE" step="0.01" value="0.35" /></div>
           </div>
         </div>
         <div class="settings-section-mobile">
           <h4>⚙️ Trade Execution</h4>
           <div class="settings-grid-mobile">
-            <div class="setting-item-mobile"><label>Cooldown Ticks</label><input type="number" id="m-config-COOLDOWN_TICKS" step="1" /></div>
-            <div class="setting-item-mobile"><label>Settle Ticks</label><input type="number" id="m-config-SETTLE_TICKS" step="1" /></div>
-            <div class="setting-item-mobile"><label>Settlement Timeout (ms)</label><input type="number" id="m-config-SETTLEMENT_TIMEOUT_MS" step="1000" /></div>
-            <div class="setting-item-mobile"><label>P&L Sync (ms)</label><input type="number" id="m-config-PNL_SYNC_INTERVAL_MS" step="1000" /></div>
+            <div class="setting-item-mobile"><label>Cooldown Ticks</label><input type="number" id="m-config-COOLDOWN_TICKS" step="1" value="1" /></div>
+            <div class="setting-item-mobile"><label>Settle Ticks</label><input type="number" id="m-config-SETTLE_TICKS" step="1" value="5" /></div>
+            <div class="setting-item-mobile"><label>Settlement Timeout (ms)</label><input type="number" id="m-config-SETTLEMENT_TIMEOUT_MS" step="1000" value="15000" /></div>
+            <div class="setting-item-mobile"><label>P&L Sync (ms)</label><input type="number" id="m-config-PNL_SYNC_INTERVAL_MS" step="1000" value="300000" /></div>
           </div>
         </div>
         <div class="settings-actions-mobile">
@@ -1027,16 +1013,12 @@
   </div>
 
   <!-- ======================================================================
-       BOTTOM TAB BAR
+       BOTTOM TAB BAR - LARGE ICONS
        ====================================================================== -->
   <div class="tab-bar" id="tabBar">
-    <button class="tab-item active" data-tab="market" onclick="switchTab('market')">
+    <button class="tab-item active" data-tab="dashboard" onclick="switchTab('dashboard')">
       <span class="icon">📊</span>
-      <span class="label">Market</span>
-    </button>
-    <button class="tab-item" data-tab="controls" onclick="switchTab('controls')">
-      <span class="icon">🎮</span>
-      <span class="label">Controls</span>
+      <span class="label">Dashboard</span>
     </button>
     <button class="tab-item" data-tab="logs" onclick="switchTab('logs')">
       <span class="icon">📋</span>
@@ -1120,7 +1102,7 @@
     }
 
     function fireManual(type) {
-      const duration = parseInt(document.getElementById('mobile-manual-duration').value) || 5;
+      const duration = parseInt(document.getElementById('mobile-manual-duration').value) || 45;
       const unit = document.getElementById('mobile-manual-unit').value;
       fetch('/api/manual-trade', {
         method: 'POST',
@@ -1217,7 +1199,6 @@
       document.getElementById('focus-name').textContent = MARKETS_CFG[currentFocus] || 'Volatility 75 Index';
       document.getElementById('focus-price').textContent = focusMetric ? focusMetric.price.toFixed(2) : '—';
       
-      // Support/Resistance
       const srEl = document.getElementById('focus-sr');
       if (focusMetric) {
         const s = focusMetric.support ? focusMetric.support.toFixed(2) : '—';
@@ -1231,17 +1212,10 @@
       }
 
       if (focusMetric) {
-        document.getElementById('mobile-fast-ma').textContent = focusMetric.fastMA !== undefined && focusMetric.fastMA !== null ? focusMetric.fastMA.toFixed(2) : '—';
-        document.getElementById('mobile-slow-ma').textContent = focusMetric.slowMA !== undefined && focusMetric.slowMA !== null ? focusMetric.slowMA.toFixed(2) : '—';
-        if (focusMetric.fastMA !== null && focusMetric.fastMA !== undefined && focusMetric.slowMA !== null && focusMetric.slowMA !== undefined) {
-          const sp = ((focusMetric.fastMA - focusMetric.slowMA) / focusMetric.price * 100);
-          const spEl = document.getElementById('mobile-spread');
-          spEl.textContent = sp.toFixed(2) + '%';
-          spEl.style.color = sp > 0 ? 'var(--neon-green)' : 'var(--neon-red)';
-        } else {
-          document.getElementById('mobile-spread').textContent = '—';
-        }
-        document.getElementById('mobile-volatility').textContent = focusMetric.volatility !== undefined && focusMetric.volatility !== null ? focusMetric.volatility.toFixed(2) + '%' : '—';
+        document.getElementById('mobile-rise').textContent = focusMetric.risePct !== undefined ? focusMetric.risePct.toFixed(1) + '%' : '—';
+        document.getElementById('mobile-fall').textContent = focusMetric.fallPct !== undefined ? focusMetric.fallPct.toFixed(1) + '%' : '—';
+        document.getElementById('mobile-rsi').textContent = focusMetric.rsi !== undefined ? focusMetric.rsi.toFixed(1) : '—';
+        document.getElementById('mobile-bb-low').textContent = focusMetric.bbLower !== undefined ? focusMetric.bbLower.toFixed(2) : '—';
 
         const tail = document.getElementById('mobile-tail');
         tail.innerHTML = '';
@@ -1263,14 +1237,14 @@
           tail.appendChild(span);
         });
       } else {
-        document.getElementById('mobile-fast-ma').textContent = '—';
-        document.getElementById('mobile-slow-ma').textContent = '—';
-        document.getElementById('mobile-spread').textContent = '—';
-        document.getElementById('mobile-volatility').textContent = '—';
+        document.getElementById('mobile-rise').textContent = '—';
+        document.getElementById('mobile-fall').textContent = '—';
+        document.getElementById('mobile-rsi').textContent = '—';
+        document.getElementById('mobile-bb-low').textContent = '—';
         document.getElementById('mobile-tail').innerHTML = '<span class="tick">—</span><span class="tick">—</span><span class="tick">—</span><span class="tick">—</span><span class="tick">—</span>';
       }
 
-      // Cluster list with step badges
+      // Cluster list
       const clusterBox = document.getElementById('mobile-cluster-list');
       clusterBox.innerHTML = '';
       for (const sym in MARKETS_CFG) {
@@ -1287,9 +1261,8 @@
           else { stepLabel = 'SCAN'; stepClass = 'step-0'; }
           support = metric.support ? metric.support.toFixed(2) : '—';
           resistance = metric.resistance ? metric.resistance.toFixed(2) : '—';
-          if (metric.fastMA !== null && metric.fastMA !== undefined && metric.slowMA !== null && metric.slowMA !== undefined) {
-            const sp = ((metric.fastMA - metric.slowMA) / metric.price * 100);
-            spread = sp.toFixed(2) + '%';
+          if (metric.risePct !== undefined && metric.fallPct !== undefined) {
+            spread = (metric.risePct - metric.fallPct).toFixed(1) + '%';
           }
         }
         
@@ -1509,11 +1482,11 @@
     // 7. INIT
     // =========================================================================
     document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
-    document.getElementById('tab-market').classList.add('active');
+    document.getElementById('tab-dashboard').classList.add('active');
     document.querySelectorAll('.tab-bar .tab-item').forEach(b => b.classList.remove('active'));
-    document.querySelector('.tab-bar .tab-item[data-tab="market"]')?.classList.add('active');
+    document.querySelector('.tab-bar .tab-item[data-tab="dashboard"]')?.classList.add('active');
 
-    console.log('🚀 QUANTCORE Price Action v3.0 loaded');
+    console.log('🚀 QUANTCORE Price Action v4.0 loaded');
   </script>
 </body>
 </html>
