@@ -6,14 +6,23 @@
   <title>QUANTCORE // BREAKOUT ENGINE</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    /* =========================================================================
-       CORE VARIABLES
-       ========================================================================= */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #05070a;
+      color: #e2e8f0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      padding: 0;
+      margin: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
     :root {
       --bg-terminal: #05070a;
       --bg-panel: #0a0d14;
       --bg-card: #101524;
-      --bg-card-hover: #161d30;
       --border-glow: #1e293b;
       --neon-blue: #00d2ff;
       --neon-green: #00ff88;
@@ -25,21 +34,7 @@
       --header-height: 52px;
     }
 
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    
-    body {
-      background-color: var(--bg-terminal);
-      color: var(--text-bright);
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      padding: 0;
-      margin: 0;
-      -webkit-tap-highlight-color: transparent;
-    }
-
+    /* Header */
     .app-header {
       background: var(--bg-panel);
       border-bottom: 1px solid var(--border-glow);
@@ -82,11 +77,8 @@
     .header-status .cooldown { color: var(--neon-orange); font-weight: 700; }
     .header-status .lock { color: var(--neon-red); }
 
-    .app-content {
-      flex: 1;
-      overflow: hidden;
-      position: relative;
-    }
+    /* Content */
+    .app-content { flex: 1; overflow: hidden; position: relative; }
     .tab-page {
       display: none;
       height: 100%;
@@ -97,15 +89,8 @@
     }
     .tab-page.active { display: block; }
 
-    /* =========================================================================
-       TAB 1: DASHBOARD
-       ========================================================================= */
-    .dashboard-grid {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      height: 100%;
-    }
+    /* Dashboard */
+    .dashboard-grid { display: flex; flex-direction: column; gap: 6px; height: 100%; }
 
     /* Metrics Bar */
     .metrics-bar {
@@ -118,10 +103,7 @@
       padding: 4px 6px;
       flex-shrink: 0;
     }
-    .metrics-bar .metric {
-      text-align: center;
-      padding: 2px 0;
-    }
+    .metrics-bar .metric { text-align: center; padding: 2px 0; }
     .metrics-bar .metric .lbl {
       font-size: 6px;
       text-transform: uppercase;
@@ -319,9 +301,7 @@
     .manual-buttons .btn.put { background: var(--neon-red); color: #fff; }
     .manual-buttons .btn:active { transform: scale(0.96); }
 
-    /* =========================================================================
-       CLUSTER CARDS - Large, Clean, with Conditions on Left
-       ========================================================================= */
+    /* Cluster Cards */
     .cluster-title {
       font-size: 8px;
       text-transform: uppercase;
@@ -355,28 +335,15 @@
     .cluster-card.step-1 { border-color: var(--neon-blue); background: rgba(0,210,255,0.03); }
     .cluster-card.step-0 { opacity: 0.5; }
 
-    /* Top row: name + price + badge */
     .cluster-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
       margin-bottom: 4px;
     }
-    .cluster-header .name {
-      font-size: 12px;
-      font-weight: 700;
-      color: var(--text-bright);
-    }
-    .cluster-header .right-group {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .cluster-header .score {
-      font-size: 10px;
-      color: var(--text-dim);
-      font-weight: 600;
-    }
+    .cluster-header .name { font-size: 12px; font-weight: 700; color: var(--text-bright); }
+    .cluster-header .right-group { display: flex; align-items: center; gap: 8px; }
+    .cluster-header .score { font-size: 10px; color: var(--text-dim); font-weight: 600; }
     .cluster-header .score .best { color: #ffd700; }
     .cluster-header .step-badge {
       font-size: 8px;
@@ -391,7 +358,6 @@
     .step-badge.step-1 { background: rgba(0,210,255,0.12); color: var(--neon-blue); border: 1px solid var(--neon-blue); }
     .step-badge.step-0 { background: rgba(100,116,139,0.1); color: var(--text-dim); border: 1px solid var(--text-dim); }
 
-    /* Price + S/R row */
     .cluster-price-row {
       display: flex;
       gap: 16px;
@@ -399,20 +365,11 @@
       margin-bottom: 6px;
       flex-wrap: wrap;
     }
-    .cluster-price-row .price {
-      font-size: 16px;
-      font-weight: 700;
-      font-family: 'Consolas', monospace;
-      color: var(--neon-blue);
-    }
-    .cluster-price-row .sr {
-      font-size: 11px;
-      color: var(--text-dim);
-    }
+    .cluster-price-row .price { font-size: 16px; font-weight: 700; font-family: 'Consolas', monospace; color: var(--neon-blue); }
+    .cluster-price-row .sr { font-size: 11px; color: var(--text-dim); }
     .cluster-price-row .sr .s { color: var(--neon-green); }
     .cluster-price-row .sr .r { color: var(--neon-red); }
 
-    /* Conditions row - 5 items with values, left-aligned */
     .cluster-conditions {
       display: flex;
       gap: 10px;
@@ -438,7 +395,6 @@
     .cluster-conditions .cond .label { font-size: 9px; opacity: 0.8; }
     .cluster-conditions .cond .val { font-size: 9px; font-weight: 700; }
 
-    /* Ticks on cluster card */
     .cluster-ticks {
       display: flex;
       gap: 4px;
@@ -477,9 +433,7 @@
       color: var(--neon-green);
     }
 
-    /* =========================================================================
-       TAB 2: LOGS
-       ========================================================================= */
+    /* Logs */
     .log-header {
       display: flex;
       justify-content: space-between;
@@ -500,7 +454,6 @@
       transition: all 0.2s;
     }
     .log-header .clear-btn:active { transform: scale(0.95); }
-
     .log-stream {
       background: #04060b;
       border: 1px solid #0d121c;
@@ -524,9 +477,7 @@
     .log-entry .ts { color: var(--neon-blue); flex-shrink: 0; font-size: 7px; }
     .log-entry .msg { word-break: break-word; }
 
-    /* =========================================================================
-       TAB 3: ANALYTICS
-       ========================================================================= */
+    /* Analytics */
     .analytics-grid { display: flex; flex-direction: column; gap: 8px; }
     .filter-bar {
       background: var(--bg-card);
@@ -566,7 +517,6 @@
     }
     .btn-preset:active { transform: scale(0.95); }
     .btn-preset.active { background: var(--neon-blue); color: #000; border-color: var(--neon-blue); }
-
     .metrics-grid-2 {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -581,7 +531,6 @@
     }
     .metric-card .lbl { font-size: 6px; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
     .metric-card .val { font-size: 12px; font-weight: 700; margin-top: 1px; }
-
     .charts-grid {
       display: flex;
       flex-direction: column;
@@ -598,9 +547,7 @@
     .chart-box .ch-label { font-size: 6px; text-transform: uppercase; color: var(--text-dim); font-weight: 600; letter-spacing: 0.3px; margin-bottom: 3px; }
     .chart-box .ch-wrap { height: 100px; position: relative; }
 
-    /* =========================================================================
-       SETTINGS
-       ========================================================================= */
+    /* Settings */
     .settings-grid {
       padding: 4px 0 12px;
       display: flex;
@@ -637,7 +584,6 @@
       min-height: 26px;
     }
     .setting-item input:focus { border-color: var(--neon-blue); }
-
     .settings-actions {
       display: flex;
       gap: 6px;
@@ -660,9 +606,7 @@
     .btn-save:active { transform: scale(0.98); }
     .settings-status { color: var(--neon-green); font-size: 8px; }
 
-    /* =========================================================================
-       BOTTOM TAB BAR
-       ========================================================================= */
+    /* Bottom Tab Bar */
     .tab-bar {
       display: flex;
       background: var(--bg-panel);
@@ -709,9 +653,7 @@
     }
     .tab-item:active { transform: scale(0.95); }
 
-    /* =========================================================================
-       CLOCK
-       ========================================================================= */
+    /* Clock */
     #clock {
       position: fixed;
       bottom: calc(var(--tab-height) + 4px);
@@ -729,9 +671,7 @@
     }
     #clock span { color: var(--neon-blue); }
 
-    /* =========================================================================
-       RESPONSIVE
-       ========================================================================= */
+    /* Desktop overrides */
     @media (min-width: 769px) {
       body { padding: 12px; }
       .app-header {
@@ -828,17 +768,13 @@
 </head>
 <body>
 
-  <!-- ======================================================================
-       HEADER
-       ====================================================================== -->
+  <!-- Header -->
   <header class="app-header">
     <div class="app-brand">QUANTCORE<span>//</span>BO <small>v5.0</small></div>
     <span class="header-status" id="header-status">● IDLE</span>
   </header>
 
-  <!-- ======================================================================
-       DESKTOP NAV
-       ====================================================================== -->
+  <!-- Desktop Nav -->
   <div class="desktop-nav" id="desktopNav">
     <button class="nav-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">📊 Dashboard</button>
     <button class="nav-btn" data-tab="logs" onclick="switchTab('logs')">📋 Logs</button>
@@ -846,20 +782,15 @@
     <button class="nav-btn" data-tab="settings" onclick="switchTab('settings')">⚙️ Settings</button>
   </div>
 
-  <!-- ======================================================================
-       MAIN CONTENT
-       ====================================================================== -->
+  <!-- Content -->
   <div class="app-content">
 
-    <!-- ====================================================================
-         TAB 1: DASHBOARD
-         ==================================================================== -->
+    <!-- Dashboard -->
     <div class="tab-page active" id="tab-dashboard">
       <div class="dashboard-grid">
-        
         <div id="lock-alert"></div>
 
-        <!-- Metrics Bar -->
+        <!-- Metrics -->
         <div class="metrics-bar">
           <div class="metric"><div class="lbl">Profile</div><div class="val blue" id="m-profile">—</div></div>
           <div class="metric"><div class="lbl">Balance</div><div class="val blue" id="m-balance">—</div></div>
@@ -875,7 +806,7 @@
           <button class="btn swap" onclick="swapEnvironment()">🔄</button>
         </div>
 
-        <!-- Focus Card -->
+        <!-- Focus -->
         <div class="focus-card" id="focusCard">
           <div class="focus-top">
             <span class="focus-name" id="f-name">Volatility 75 Index</span>
@@ -922,9 +853,7 @@
       </div>
     </div>
 
-    <!-- ====================================================================
-         TAB 2: LOGS
-         ==================================================================== -->
+    <!-- Logs -->
     <div class="tab-page" id="tab-logs">
       <div class="log-header">
         <span class="title">📋 Live System Audit Log</span>
@@ -933,50 +862,39 @@
       <div class="log-stream" id="log-stream"></div>
     </div>
 
-    <!-- ====================================================================
-         TAB 3: ANALYTICS
-         ==================================================================== -->
+    <!-- Analytics -->
     <div class="tab-page" id="tab-analytics">
       <div class="analytics-grid">
-        
         <div class="filter-bar">
-          <label>From</label>
-          <input type="date" id="date-start" value="2026-06-01" onchange="applyDateFilter()">
-          <label>To</label>
-          <input type="date" id="date-end" value="2026-06-21" onchange="applyDateFilter()">
+          <label>From</label><input type="date" id="date-start" value="2026-06-01" onchange="applyDateFilter()">
+          <label>To</label><input type="date" id="date-end" value="2026-06-21" onchange="applyDateFilter()">
           <div class="preset-strip">
-            <button class="btn-preset" id="p-hour" onclick="timeframePreset(this, 'hour')">1H</button>
-            <button class="btn-preset active" id="p-session" onclick="timeframePreset(this, 'session')">Session</button>
-            <button class="btn-preset" id="p-24h" onclick="timeframePreset(this, '24h')">24H</button>
-            <button class="btn-preset" id="p-month" onclick="timeframePreset(this, 'month')">1M</button>
-            <button class="btn-preset" id="p-6m" onclick="timeframePreset(this, '6months')">6M</button>
-            <button class="btn-preset" id="p-1y" onclick="timeframePreset(this, '1year')">1Y</button>
-            <button class="btn-preset" id="p-clear" onclick="timeframePreset(this, 'clear')">✕</button>
+            <button class="btn-preset" id="p-hour" onclick="timeframePreset(this,'hour')">1H</button>
+            <button class="btn-preset active" id="p-session" onclick="timeframePreset(this,'session')">Session</button>
+            <button class="btn-preset" id="p-24h" onclick="timeframePreset(this,'24h')">24H</button>
+            <button class="btn-preset" id="p-month" onclick="timeframePreset(this,'month')">1M</button>
+            <button class="btn-preset" id="p-6m" onclick="timeframePreset(this,'6months')">6M</button>
+            <button class="btn-preset" id="p-1y" onclick="timeframePreset(this,'1year')">1Y</button>
+            <button class="btn-preset" id="p-clear" onclick="timeframePreset(this,'clear')">✕</button>
           </div>
         </div>
-
         <div class="metrics-grid-2">
           <div class="metric-card"><div class="lbl">Net Profit</div><div class="val" id="meta-profit" style="color:var(--neon-green);">$0.00</div></div>
           <div class="metric-card"><div class="lbl">Profit Factor</div><div class="val" id="meta-pf" style="color:var(--neon-blue);">N/A</div></div>
           <div class="metric-card"><div class="lbl">Strike Rate</div><div class="val" id="meta-strike">0.0%</div></div>
           <div class="metric-card"><div class="lbl">Max Drawdown</div><div class="val" id="meta-dd" style="color:var(--neon-red);">0.0%</div></div>
         </div>
-
         <div class="charts-grid">
           <div class="chart-box"><div class="ch-label">Asset Contribution</div><div class="ch-wrap"><canvas id="chart-donut"></canvas></div></div>
           <div class="chart-box"><div class="ch-label">Equity Curve</div><div class="ch-wrap"><canvas id="chart-line"></canvas></div></div>
         </div>
-
       </div>
     </div>
 
-    <!-- ====================================================================
-         TAB 4: SETTINGS
-         ==================================================================== -->
+    <!-- Settings -->
     <div class="tab-page" id="tab-settings">
       <div class="settings-grid">
-        <div class="settings-section">
-          <h4>📊 Breakout Parameters</h4>
+        <div class="settings-section"><h4>📊 Breakout Parameters</h4>
           <div class="settings-subgrid">
             <div class="setting-item"><label>Analysis Window</label><input type="number" id="config-ANALYSIS_WINDOW" step="1" value="500" /></div>
             <div class="setting-item"><label>Bollinger Period</label><input type="number" id="config-BOLLINGER_PERIOD" step="1" value="20" /></div>
@@ -988,16 +906,14 @@
             <div class="setting-item"><label>Duration (ticks)</label><input type="number" id="config-DURATION_TICKS" step="1" value="7" /></div>
           </div>
         </div>
-        <div class="settings-section">
-          <h4>⏱ Timing & Cooldowns</h4>
+        <div class="settings-section"><h4>⏱ Timing & Cooldowns</h4>
           <div class="settings-subgrid">
             <div class="setting-item"><label>Trigger Interval (ms)</label><input type="number" id="config-MIN_TRIGGER_INTERVAL" step="1000" value="30000" /></div>
             <div class="setting-item"><label>Max Consecutive Losses</label><input type="number" id="config-MAX_CONSECUTIVE_LOSSES" step="1" value="2" /></div>
             <div class="setting-item"><label>Loss Cooldown (ms)</label><input type="number" id="config-LOSS_COOLDOWN_MS" step="1000" value="120000" /></div>
           </div>
         </div>
-        <div class="settings-section">
-          <h4>💰 Risk Management</h4>
+        <div class="settings-section"><h4>💰 Risk Management</h4>
           <div class="settings-subgrid">
             <div class="setting-item"><label>Risk per Trade %</label><input type="number" id="config-RISK_PERCENT" step="0.1" value="1" /></div>
             <div class="setting-item"><label>Daily TP %</label><input type="number" id="config-TP_PERCENT" step="0.1" value="5" /></div>
@@ -1005,8 +921,7 @@
             <div class="setting-item"><label>Min Stake $</label><input type="number" id="config-MIN_STAKE" step="0.01" value="0.35" /></div>
           </div>
         </div>
-        <div class="settings-section">
-          <h4>⚙️ Trade Execution</h4>
+        <div class="settings-section"><h4>⚙️ Trade Execution</h4>
           <div class="settings-subgrid">
             <div class="setting-item"><label>Cooldown Ticks</label><input type="number" id="config-COOLDOWN_TICKS" step="1" value="1" /></div>
             <div class="setting-item"><label>Settle Ticks</label><input type="number" id="config-SETTLE_TICKS" step="1" value="5" /></div>
@@ -1023,36 +938,20 @@
 
   </div>
 
-  <!-- ======================================================================
-       BOTTOM TAB BAR
-       ====================================================================== -->
+  <!-- Bottom Tab Bar -->
   <div class="tab-bar" id="tabBar">
-    <button class="tab-item active" data-tab="dashboard" onclick="switchTab('dashboard')">
-      <span class="icon">📊</span>
-      <span class="label">Markets</span>
-    </button>
-    <button class="tab-item" data-tab="logs" onclick="switchTab('logs')">
-      <span class="icon">📋</span>
-      <span class="label">Logs</span>
-    </button>
-    <button class="tab-item" data-tab="analytics" onclick="switchTab('analytics')">
-      <span class="icon">📈</span>
-      <span class="label">Analytics</span>
-    </button>
-    <button class="tab-item" data-tab="settings" onclick="switchTab('settings')">
-      <span class="icon">⚙️</span>
-      <span class="label">Settings</span>
-    </button>
+    <button class="tab-item active" data-tab="dashboard" onclick="switchTab('dashboard')"><span class="icon">📊</span><span class="label">Markets</span></button>
+    <button class="tab-item" data-tab="logs" onclick="switchTab('logs')"><span class="icon">📋</span><span class="label">Logs</span></button>
+    <button class="tab-item" data-tab="analytics" onclick="switchTab('analytics')"><span class="icon">📈</span><span class="label">Analytics</span></button>
+    <button class="tab-item" data-tab="settings" onclick="switchTab('settings')"><span class="icon">⚙️</span><span class="label">Settings</span></button>
   </div>
 
-  <!-- ======================================================================
-       CLOCK
-       ====================================================================== -->
+  <!-- Clock -->
   <div id="clock"><span id="clock-display">00:00:00</span> EAT</div>
 
   <script>
     // =========================================================================
-    // 1. TAB SWITCHING
+    // Tab Switching
     // =========================================================================
     function switchTab(tabId) {
       document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
@@ -1061,19 +960,13 @@
       document.querySelector(`.desktop-nav .nav-btn[data-tab="${tabId}"]`)?.classList.add('active');
       document.querySelectorAll('.tab-bar .tab-item').forEach(b => b.classList.remove('active'));
       document.querySelector(`.tab-bar .tab-item[data-tab="${tabId}"]`)?.classList.add('active');
-
-      if (tabId === 'analytics') {
-        setTimeout(() => {
-          renderCharts();
-          timeframePreset(document.getElementById('p-session'), 'session');
-        }, 100);
-      }
+      if (tabId === 'analytics') { setTimeout(() => { renderCharts(); timeframePreset(document.getElementById('p-session'), 'session'); }, 100); }
       if (tabId === 'settings') { loadConfig(); }
       if (tabId === 'logs') { scrollLogsToBottom(); }
     }
 
     // =========================================================================
-    // 2. SSE CONNECTION
+    // SSE Connection
     // =========================================================================
     const MARKETS_CFG = {
       'R_10': 'Volatility 10 Index',
@@ -1125,14 +1018,8 @@
         .catch(err => alert('Network error: ' + err.message));
     }
 
-    function clearLogs() {
-      document.getElementById('log-stream').innerHTML = '';
-    }
-
-    function scrollLogsToBottom() {
-      const el = document.getElementById('log-stream');
-      if (el) el.scrollTop = el.scrollHeight;
-    }
+    function clearLogs() { document.getElementById('log-stream').innerHTML = ''; }
+    function scrollLogsToBottom() { const el = document.getElementById('log-stream'); if (el) el.scrollTop = el.scrollHeight; }
 
     const sse = new EventSource('/api/logs');
     sse.onopen = function() { console.log('✅ SSE connected'); };
@@ -1159,67 +1046,46 @@
     };
 
     // =========================================================================
-    // 3. RENDER UI
+    // Render UI
     // =========================================================================
     function renderUI(state) {
       serverMode = state.tradingMode;
-
-      // Header
       const header = document.getElementById('header-status');
       const now = Date.now();
-      let cooldownText = '';
-      let lockText = '';
-
+      let cooldownText = '', lockText = '';
       if (state.locked) {
-        if (state.active) {
-          header.textContent = '● PAUSED';
-          header.className = 'header-status paused';
-        } else {
-          header.textContent = '● LOCKED';
-          header.className = 'header-status off';
-        }
+        if (state.active) { header.textContent = '● PAUSED'; header.className = 'header-status paused'; }
+        else { header.textContent = '● LOCKED'; header.className = 'header-status off'; }
       } else if (state.active) {
         const remaining = Math.max(0, Math.ceil((state.lastTriggerTime + 30000 - now) / 1000));
         if (remaining > 0) cooldownText = `⏳${remaining}s`;
         if (state.tradeInProgress) lockText = '🔒';
         header.innerHTML = `● ARMED ${cooldownText ? `<span class="cooldown">${cooldownText}</span>` : ''} ${lockText ? `<span class="lock">${lockText}</span>` : ''}`;
         header.className = 'header-status on';
-      } else {
-        header.textContent = '● IDLE';
-        header.className = 'header-status';
-      }
+      } else { header.textContent = '● IDLE'; header.className = 'header-status'; }
 
-      // Metrics
       document.getElementById('m-profile').textContent = state.tradingMode.toUpperCase();
       document.getElementById('m-balance').textContent = state.balance ? `$${parseFloat(state.balance).toFixed(2)}` : '---';
-      
       const sess = parseFloat(state.sessionPnl) || 0;
       const sel = document.getElementById('m-session');
       sel.textContent = `$${sess.toFixed(2)}`;
       sel.className = 'val ' + (sess >= 0 ? 'green' : 'red');
-      
       const daily = parseFloat(state.dailyPnl) || 0;
       const del = document.getElementById('m-daily');
       del.textContent = `$${daily.toFixed(2)}`;
       del.className = 'val ' + (daily >= 0 ? 'green' : 'red');
-      
       document.getElementById('m-stake').textContent = `$${parseFloat(state.currentStake).toFixed(2)}`;
 
-      // Lock alert
       const banner = document.getElementById('lock-alert');
       if (state.locked) {
         banner.style.display = 'block';
         banner.textContent = state.lockReason || 'Trading paused due to daily limit.';
         banner.className = state.active ? 'green' : '';
-      } else {
-        banner.style.display = 'none';
-      }
+      } else { banner.style.display = 'none'; }
 
-      // Focus market
       const focusMetric = state.marketMetrics && state.marketMetrics[currentFocus] ? state.marketMetrics[currentFocus] : null;
       document.getElementById('f-name').textContent = MARKETS_CFG[currentFocus] || 'Volatility 75 Index';
       document.getElementById('f-price').textContent = focusMetric ? focusMetric.price.toFixed(2) : '—';
-      
       const srEl = document.getElementById('f-sr');
       if (focusMetric) {
         const s = focusMetric.support ? focusMetric.support.toFixed(2) : '—';
@@ -1228,9 +1094,7 @@
         if (focusMetric.isBreakout) bo = '🚀 BREAKOUT';
         else if (focusMetric.isBreakdown) bo = '📉 BREAKDOWN';
         srEl.innerHTML = `<span class="s">S: ${s}</span><span class="r">R: ${r}</span><span class="${focusMetric.isBreakout ? 'breakout' : (focusMetric.isBreakdown ? 'breakdown' : '')}">${bo}</span>`;
-      } else {
-        srEl.innerHTML = `<span class="s">S: —</span><span class="r">R: —</span><span class=""></span>`;
-      }
+      } else { srEl.innerHTML = `<span class="s">S: —</span><span class="r">R: —</span><span class=""></span>`; }
 
       if (focusMetric) {
         document.getElementById('f-rise').textContent = focusMetric.risePct !== undefined ? focusMetric.risePct.toFixed(1) + '%' : '—';
@@ -1242,10 +1106,7 @@
           const sp = ((focusMetric.fastMA - focusMetric.slowMA) / focusMetric.price * 100);
           document.getElementById('f-spread').textContent = sp.toFixed(2) + '%';
           document.getElementById('f-spread').style.color = sp > 0 ? 'var(--neon-green)' : 'var(--neon-red)';
-        } else {
-          document.getElementById('f-spread').textContent = '—';
-        }
-
+        } else { document.getElementById('f-spread').textContent = '—'; }
         const tail = document.getElementById('f-tail');
         tail.innerHTML = '';
         const lastPrices = focusMetric.lastPrices || [];
@@ -1275,20 +1136,13 @@
         document.getElementById('f-tail').innerHTML = '<span class="tick">—</span><span class="tick">—</span><span class="tick">—</span><span class="tick">—</span><span class="tick">—</span>';
       }
 
-      // Cluster list with conditions on left
       const clusterBox = document.getElementById('cluster-list');
       clusterBox.innerHTML = '';
-      
-      let bestScore = -Infinity;
-      let bestSym = null;
+      let bestScore = -Infinity, bestSym = null;
       for (const sym in MARKETS_CFG) {
         const m = state.marketMetrics && state.marketMetrics[sym] ? state.marketMetrics[sym] : null;
-        if (m && m.score > bestScore) {
-          bestScore = m.score;
-          bestSym = sym;
-        }
+        if (m && m.score > bestScore) { bestScore = m.score; bestSym = sym; }
       }
-
       for (const sym in MARKETS_CFG) {
         const metric = state.marketMetrics && state.marketMetrics[sym] ? state.marketMetrics[sym] : null;
         const isActive = sym === currentFocus;
@@ -1297,7 +1151,6 @@
         let ticks = ['—', '—', '—', '—', '—'];
         let condBreakout = false, condRSI = false, condBollinger = false, condVol = false, condMA = false;
         let rsiVal = '—', volVal = '—', maVal = '—';
-        
         if (metric) {
           price = metric.price ? metric.price.toFixed(2) : '—';
           step = metric.step || 0;
@@ -1309,8 +1162,6 @@
           else { stepLabel = 'SCAN'; stepClass = 'step-0'; }
           support = metric.support ? metric.support.toFixed(2) : '—';
           resistance = metric.resistance ? metric.resistance.toFixed(2) : '—';
-          
-          // Conditions
           const cond = metric.conditions || {};
           const vals = metric.condValues || {};
           condBreakout = cond.breakout || false;
@@ -1321,8 +1172,6 @@
           rsiVal = vals.rsiValue !== undefined ? vals.rsiValue.toFixed(0) : '—';
           volVal = vals.volValue !== undefined ? vals.volValue.toFixed(2) + '%' : '—';
           maVal = vals.maValue !== undefined ? vals.maValue.toFixed(2) + '%' : '—';
-          
-          // Ticks
           const lastPrices = metric.lastPrices || [];
           const padded = lastPrices.slice(-5);
           while (padded.length < 5) padded.unshift(null);
@@ -1336,16 +1185,10 @@
             return { val: p.toFixed(2), cls: cls };
           });
         }
-
         const div = document.createElement('div');
         div.className = `cluster-card ${isActive ? 'active' : ''} ${stepClass}`;
         div.onclick = () => setFocusMarket(sym);
-        
-        let ticksHtml = ticks.map(t => 
-          `<span class="ctick ${t.cls}">${t.val}</span>`
-        ).join('');
-
-        // Determine direction label for ENTRY
+        let ticksHtml = ticks.map(t => `<span class="ctick ${t.cls}">${t.val}</span>`).join('');
         let directionLabel = '';
         if (step === 3 && metric) {
           const isCall = metric.fastMA !== null && metric.slowMA !== null && metric.fastMA > metric.slowMA;
@@ -1353,7 +1196,6 @@
           if (metric.isBreakout || isCall) directionLabel = '(CALL)';
           else if (metric.isBreakdown || isPut) directionLabel = '(PUT)';
         }
-        
         div.innerHTML = `
           <div class="cluster-header">
             <span class="name">${MARKETS_CFG[sym]}</span>
@@ -1380,7 +1222,7 @@
     }
 
     // =========================================================================
-    // 4. SETTINGS
+    // Settings
     // =========================================================================
     async function loadConfig() {
       try {
@@ -1424,22 +1266,18 @@
     }
 
     // =========================================================================
-    // 5. ANALYTICS
+    // Analytics
     // =========================================================================
     let charts = {};
-
     function renderCharts() {
       if (charts.donut) return;
-      const dark = '#64748b';
-      const grid = '#232f48';
-
+      const dark = '#64748b', grid = '#232f48';
       const ctxDonut = document.getElementById('chart-donut').getContext('2d');
       charts.donut = new Chart(ctxDonut, {
         type: 'doughnut',
-        data: { labels: ['R_10', 'R_25', 'R_50', 'R_75', 'R_100'], datasets: [{ data: [0, 0, 0, 0, 0], backgroundColor: ['#00d2ff', '#ff9500', '#94a3b8', '#00ff88', '#a855f7'], borderColor: '#101524', borderWidth: 2 }] },
+        data: { labels: ['R_10', 'R_25', 'R_50', 'R_75', 'R_100'], datasets: [{ data: [0,0,0,0,0], backgroundColor: ['#00d2ff','#ff9500','#94a3b8','#00ff88','#a855f7'], borderColor: '#101524', borderWidth: 2 }] },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: dark, font: { size: 8 } } } } }
       });
-
       const ctxLine = document.getElementById('chart-line').getContext('2d');
       charts.line = new Chart(ctxLine, {
         type: 'line',
@@ -1453,20 +1291,18 @@
     }
 
     function computeRawData(rawData) {
-      let wins = 0, losses = 0, grossProfit = 0, grossLoss = 0;
-      const assetMap = {};
-      const sorted = rawData.slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-      const equity = [];
-      let cum = 0;
+      let wins=0, losses=0, grossProfit=0, grossLoss=0;
+      const assetMap={};
+      const sorted = rawData.slice().sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+      const equity=[]; let cum=0;
       sorted.forEach(t => {
         const pnl = t.profit_loss || 0;
-        cum += pnl;
-        equity.push(cum);
+        cum += pnl; equity.push(cum);
         if (pnl > 0) { wins++; grossProfit += pnl; } else if (pnl < 0) { losses++; grossLoss += Math.abs(pnl); }
         const asset = t.asset || 'Unknown';
         assetMap[asset] = (assetMap[asset] || 0) + pnl;
       });
-      const assetLabels = ['Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index', 'Volatility 75 Index', 'Volatility 100 Index'];
+      const assetLabels = ['Volatility 10 Index','Volatility 25 Index','Volatility 50 Index','Volatility 75 Index','Volatility 100 Index'];
       const assetData = assetLabels.map(name => assetMap[name] || 0);
       if (equity.length === 0) equity.push(0);
       const pf = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? Infinity : 0);
@@ -1480,50 +1316,28 @@
       document.getElementById('meta-pf').textContent = metrics.pf;
       document.getElementById('meta-strike').textContent = metrics.strike;
       document.getElementById('meta-dd').textContent = metrics.drawdown;
-
-      if (charts.donut) {
-        charts.donut.data.datasets[0].data = chartData.assets;
-        charts.donut.update('none');
-      }
-      if (charts.line) {
-        const eq = chartData.equity;
-        charts.line.data.labels = eq.map((_, i) => `T${i+1}`);
-        charts.line.data.datasets[0].data = eq;
-        charts.line.update('none');
-      }
+      if (charts.donut) { charts.donut.data.datasets[0].data = chartData.assets; charts.donut.update('none'); }
+      if (charts.line) { const eq = chartData.equity; charts.line.data.labels = eq.map((_,i) => `T${i+1}`); charts.line.data.datasets[0].data = eq; charts.line.update('none'); }
     }
 
     async function timeframePreset(btn, mode) {
-      if (btn) {
-        document.querySelectorAll('.preset-strip .btn-preset').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-      }
-      if (mode === 'clear') {
-        updateUI({ profit: '$0.00', pf: 'N/A', strike: '0.0%', drawdown: '0.00%' }, { assets: [0,0,0,0,0], equity: [0] });
-        return;
-      }
+      if (btn) { document.querySelectorAll('.preset-strip .btn-preset').forEach(b => b.classList.remove('active')); btn.classList.add('active'); }
+      if (mode === 'clear') { updateUI({ profit: '$0.00', pf: 'N/A', strike: '0.0%', drawdown: '0.00%' }, { assets: [0,0,0,0,0], equity: [0] }); return; }
       try {
         const resp = await fetch(`/api/ledger/analytics?mode=${mode}`);
         const data = await resp.json();
         let assets, equity, pf, strike, dd;
         if (mode === 'session') {
-          assets = [0,0,0,0,0];
-          equity = [data.totalProfit || 0];
-          pf = 'N/A';
-          strike = data.strikeRate || '0.0%';
-          dd = '0.0%';
+          assets = [0,0,0,0,0]; equity = [data.totalProfit || 0]; pf = 'N/A'; strike = data.strikeRate || '0.0%'; dd = '0.0%';
         } else {
           const raw = data.rawData || [];
           const comp = computeRawData(raw);
-          assets = comp.assetData;
-          equity = comp.equity;
-          pf = data.profitFactor || '0.00';
-          strike = data.strikeRate + '%';
-          dd = data.drawdown + '%';
+          assets = comp.assetData; equity = comp.equity;
+          pf = data.profitFactor || '0.00'; strike = data.strikeRate + '%'; dd = data.drawdown + '%';
         }
         updateUI({
           profit: `$${parseFloat(data.totalProfit).toFixed(2)}`,
-          pf: pf, strike: strike, drawdown: dd
+          pf, strike, drawdown: dd
         }, { assets, equity });
       } catch(err) { console.error('Analytics error:', err); }
     }
@@ -1541,13 +1355,13 @@
         const dd = data.drawdown + '%';
         updateUI({
           profit: `$${parseFloat(data.totalProfit).toFixed(2)}`,
-          pf: pf, strike: strike, drawdown: dd
+          pf, strike, drawdown: dd
         }, { assets: comp.assetData, equity: comp.equity });
       } catch(err) { console.error('Filter error:', err); }
     }
 
     // =========================================================================
-    // 6. CLOCK
+    // Clock
     // =========================================================================
     function updateClock() {
       document.getElementById('clock-display').textContent = new Date().toLocaleTimeString('en-US', { timeZone: 'Africa/Nairobi', hour12: false });
@@ -1556,13 +1370,12 @@
     updateClock();
 
     // =========================================================================
-    // 7. INIT
+    // Init
     // =========================================================================
     document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
     document.getElementById('tab-dashboard').classList.add('active');
     document.querySelectorAll('.tab-bar .tab-item').forEach(b => b.classList.remove('active'));
     document.querySelector('.tab-bar .tab-item[data-tab="dashboard"]')?.classList.add('active');
-
     console.log('🚀 QUANTCORE Breakout Engine v5.0 loaded');
   </script>
 </body>
