@@ -416,35 +416,28 @@ class MultiMarketPipeline {
     const rsi = this._rsi(buf, CONFIG.RSI_PERIOD);
     const sr = this._findSupportResistance(window);
 
-    // FIXED: Use near-band logic (0.1% tolerance)
+    // Breakout/Breakdown with tolerance
     const isBreakout = sr.resistance ? price > sr.resistance * 1.001 : false;
     const isBreakdown = sr.support ? price < sr.support * 0.999 : false;
 
-    // ---- CALL Conditions ----
+    // Conditions
     const condBreakout = isBreakout;
     const condRSI = rsi < 70;
     const condBollinger = bb.upper !== null && price >= bb.upper * 0.999;
     const condVolatility = vol >= CONFIG.MIN_VOLATILITY_PERCENT;
     const condMA = fastMA !== null && slowMA !== null && fastMA > slowMA;
 
-    // ---- PUT Conditions ----
     const condBreakdown = isBreakdown;
     const condRSIPut = rsi > 30;
     const condBollingerPut = bb.lower !== null && price <= bb.lower * 1.001;
     const condVolatilityPut = vol >= CONFIG.MIN_VOLATILITY_PERCENT;
     const condMAPut = fastMA !== null && slowMA !== null && fastMA < slowMA;
 
-    // ---- Step & Score ----
     const callReady = condBreakout && condRSI && condBollinger && condVolatility && condMA;
     const putReady = condBreakdown && condRSIPut && condBollingerPut && condVolatilityPut && condMAPut;
     
-    let step = 0;
-    let score = 0;
-    
-    if (callReady) {
-      step = 3;
-      score = vol; // use volatility as score
-    } else if (putReady) {
+    let step = 0, score = 0;
+    if (callReady || putReady) {
       step = 3;
       score = vol;
     } else if ((condBreakout || condBreakdown) && (condRSI || condRSIPut) && (condBollinger || condBollingerPut)) {
@@ -478,9 +471,7 @@ class MultiMarketPipeline {
         volValue: vol,
         maValue: fastMA !== null && slowMA !== null ? ((fastMA - slowMA) / price * 100) : 0
       },
-      // For score display on cards
-      callReady,
-      putReady
+      callReady, putReady
     };
 
     state.marketMetrics[symbol] = result;
@@ -501,21 +492,18 @@ const state = {
   lossCooldownUntil: 0, pendingSettlement: false
 };
 
-// ============ STRATEGY CHECK ============
 function checkStrategy(symbol, metric) {
   if (!metric) return null;
   const { price, support, resistance, isBreakout, isBreakdown, rsi, bbUpper, bbLower, volatility, fastMA, slowMA } = metric;
 
   if (volatility < CONFIG.MIN_VOLATILITY_PERCENT) return null;
 
-  // ---- CALL ----
-  // FIXED: Use near-band logic (0.1% tolerance)
+  // CALL
   if (isBreakout && bbUpper !== null && price >= bbUpper * 0.999 && rsi < 70 && fastMA !== null && slowMA !== null && fastMA > slowMA) {
     return { direction: 'CALL', score: volatility };
   }
 
-  // ---- PUT ----
-  // FIXED: Use near-band logic (0.1% tolerance)
+  // PUT
   if (isBreakdown && bbLower !== null && price <= bbLower * 1.001 && rsi > 30 && fastMA !== null && slowMA !== null && fastMA < slowMA) {
     return { direction: 'PUT', score: volatility };
   }
@@ -523,7 +511,6 @@ function checkStrategy(symbol, metric) {
   return null;
 }
 
-// ============ P&L SYNC & LIMITS ============
 async function syncDailyPnlFromDB() {
   try {
     const now = new Date();
