@@ -14,11 +14,26 @@ const PORT = process.env.PORT || 3000;
 const STATE_FILE = '/var/data/deriv_multimarket_state.json';
 const CONFIG_FILE = '/var/data/deriv_config.json';
 
+// =====================================================================
+//  DEFAULT CONFIG (Price Action + MA Confirmation)
+// =====================================================================
 const DEFAULT_CONFIG = {
+    // ---------- Price Action ----------
+    SUPPORT_RESISTANCE_LOOKBACK: 50,    // ticks to scan for levels
+    MIN_BOUNCES: 2,                     // minimum touches to confirm a level
+    TOUCH_TOLERANCE: 0.2,               // % tolerance for level touches
+    BREAKOUT_THRESHOLD: 0.1,            // % above resistance to confirm breakout
+    BREAKDOWN_THRESHOLD: 0.1,           // % below support to confirm breakdown
+
+    // ---------- MA Confirmation ----------
     FAST_MA_PERIOD: 8,
     SLOW_MA_PERIOD: 21,
     MIN_SPREAD_PERCENT: 0.15,
+
+    // ---------- Volatility ----------
     MIN_VOLATILITY_PERCENT: 0.4,
+
+    // ---------- Trade Execution ----------
     DURATION_TICKS: 10,
     MIN_TRIGGER_INTERVAL: 20000,
     MAX_CONSECUTIVE_LOSSES: 2,
@@ -53,6 +68,9 @@ function saveConfig(config) {
 
 let CONFIG = loadConfig();
 
+// =====================================================================
+//  SCHEDULED RESTART
+// =====================================================================
 function scheduleRestart() {
   const now = Date.now();
   const nextMidnightUTC = new Date(now);
@@ -72,6 +90,7 @@ function scheduleRestart() {
 }
 scheduleRestart();
 
+// --- DATABASE HEALTH CHECK ---
 async function checkDatabaseConnection() {
   try {
     const { count, error } = await supabase
@@ -89,6 +108,9 @@ async function checkDatabaseConnection() {
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
+// =====================================================================
+//  CONFIG API
+// =====================================================================
 app.get('/api/config', (req, res) => { res.json(CONFIG); });
 
 app.post('/api/config', (req, res) => {
@@ -103,6 +125,9 @@ app.post('/api/config', (req, res) => {
     }
 });
 
+// =====================================================================
+//  ANALYTICS API
+// =====================================================================
 app.get('/api/ledger/analytics', async (req, res) => {
   const { start, end, mode } = req.query;
 
@@ -192,6 +217,7 @@ app.get('/api/ledger/analytics', async (req, res) => {
   }
 });
 
+// --- REQUIRED: Live Logging System ---
 const sseClients = new Set();
 let logId = 1;
 
@@ -215,6 +241,7 @@ function broadcastSSE(payload) {
   sseClients.forEach(c => c.write(`data: ${JSON.stringify(payload)}\n\n`));
 }
 
+// ---------- SSE ENDPOINT ----------
 app.get('/api/logs', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -223,9 +250,13 @@ app.get('/api/logs', (req, res) => {
   const client = res;
   sseClients.add(client);
   client.write(`data: ${JSON.stringify({ state: getFullState(), logs: state.logs.slice(0, 50) })}\n\n`);
-  req.on('close', () => { sseClients.delete(client); client.end(); });
+  req.on('close', () => {
+    sseClients.delete(client);
+    client.end();
+  });
 });
 
+// ---------- CONTROL ENDPOINT ----------
 app.post('/api/control', (req, res) => {
   const { action, mode } = req.body;
   if (action === 'start') {
@@ -258,6 +289,7 @@ app.post('/api/control', (req, res) => {
   res.status(400).json({ error: 'Unknown action.' });
 });
 
+// ---------- Markets Configuration ----------
 const MARKETS = {
   'R_10':  { id: 'R_10',  name: 'Volatility 10 Index' },
   'R_25':  { id: 'R_25',  name: 'Volatility 25 Index' },
@@ -267,6 +299,7 @@ const MARKETS = {
 };
 const BUFFER_CAPACITY = 1000;
 
+// ---------- Pipeline Class ----------
 class MultiMarketPipeline {
   constructor() {
     this.buffers = {};
@@ -302,14 +335,148 @@ class MultiMarketPipeline {
     const slowMA = this._ma(buf, CONFIG.SLOW_MA_PERIOD);
     const vol = this._volatility(buf, 20);
 
-    const result = { symbol, price, fastMA, slowMA, volatility: vol, lastPrices: buf.slice(-5) };
+    // --- Support/Resistance Detection ---
+    const sr = this._findSupportResistance(buf);
+    const isBreakout = this._detectBreakout(price, sr);
+    const isBreakdown = this._detectBreakdown(price, sr);
+    const step = this._getEntryStep(price, sr, fastMA, slowMA, vol);
+
+    const result = {
+      symbol,
+      price,
+      fastMA,
+      slowMA,
+      volatility: vol,
+      support: sr.support,
+      resistance: sr.resistance,
+      isBreakout,
+      isBreakdown,
+      step, // 0,1,2,3
+      lastPrices: buf.slice(-5)
+    };
+
     state.marketMetrics[symbol] = result;
     return result;
+  }
+
+  _findSupportResistance(buf) {
+    const lookback = Math.min(CONFIG.SUPPORT_RESISTANCE_LOOKBACK, buf.length);
+    if (lookback < 10) return { support: null, resistance: null };
+
+    const recent = buf.slice(-lookback);
+    const tolerance = CONFIG.TOUCH_TOLERANCE / 100;
+
+    // Find local lows (support) and local highs (resistance)
+    const lows = [];
+    const highs = [];
+
+    for (let i = 2; i < recent.length - 2; i++) {
+      if (recent[i] < recent[i-1] && recent[i] < recent[i-2] && recent[i] < recent[i+1] && recent[i] < recent[i+2]) {
+        lows.push(recent[i]);
+      }
+      if (recent[i] > recent[i-1] && recent[i] > recent[i-2] && recent[i] > recent[i+1] && recent[i] > recent[i+2]) {
+        highs.push(recent[i]);
+      }
+    }
+
+    // Find most significant support (clustered lows)
+    let support = null;
+    let supportBounces = 0;
+    const sortedLows = lows.sort((a,b) => a - b);
+    for (let i = 0; i < sortedLows.length; i++) {
+      let count = 1;
+      for (let j = i + 1; j < sortedLows.length; j++) {
+        if (Math.abs(sortedLows[j] - sortedLows[i]) / sortedLows[i] < tolerance) {
+          count++;
+        }
+      }
+      if (count > supportBounces) {
+        supportBounces = count;
+        support = sortedLows[i];
+      }
+    }
+
+    // Find most significant resistance
+    let resistance = null;
+    let resistanceBounces = 0;
+    const sortedHighs = highs.sort((a,b) => a - b);
+    for (let i = sortedHighs.length - 1; i >= 0; i--) {
+      let count = 1;
+      for (let j = i - 1; j >= 0; j--) {
+        if (Math.abs(sortedHighs[j] - sortedHighs[i]) / sortedHighs[i] < tolerance) {
+          count++;
+        }
+      }
+      if (count > resistanceBounces) {
+        resistanceBounces = count;
+        resistance = sortedHighs[i];
+      }
+    }
+
+    // Only return if enough bounces
+    if (supportBounces < CONFIG.MIN_BOUNCES) support = null;
+    if (resistanceBounces < CONFIG.MIN_BOUNCES) resistance = null;
+
+    return { support, resistance };
+  }
+
+  _detectBreakout(price, sr) {
+    if (!sr.resistance) return false;
+    const threshold = CONFIG.BREAKOUT_THRESHOLD / 100;
+    return price > sr.resistance * (1 + threshold);
+  }
+
+  _detectBreakdown(price, sr) {
+    if (!sr.support) return false;
+    const threshold = CONFIG.BREAKDOWN_THRESHOLD / 100;
+    return price < sr.support * (1 - threshold);
+  }
+
+  _getEntryStep(price, sr, fastMA, slowMA, vol) {
+    // Step 3: Ready for entry (all conditions met)
+    // Step 2: Near entry (price near level + MA aligned)
+    // Step 1: Level detected (support/resistance exists)
+    // Step 0: No setup
+
+    if (!sr.support && !sr.resistance) return 0;
+
+    let step = 0;
+
+    // Step 1: Level exists
+    if (sr.support || sr.resistance) step = 1;
+
+    // Step 2: Price near level OR MA aligned
+    let nearLevel = false;
+    if (sr.resistance) {
+      const dist = (sr.resistance - price) / price * 100;
+      if (dist < 0.3 && dist > 0) nearLevel = true;
+    }
+    if (sr.support) {
+      const dist = (price - sr.support) / price * 100;
+      if (dist < 0.3 && dist > 0) nearLevel = true;
+    }
+
+    const maAligned = fastMA !== null && slowMA !== null && Math.abs(fastMA - slowMA) / price * 100 > CONFIG.MIN_SPREAD_PERCENT;
+    const volOk = vol > CONFIG.MIN_VOLATILITY_PERCENT;
+
+    if ((nearLevel || maAligned) && step === 1) step = 2;
+
+    // Step 3: Breakout/breakdown confirmed + MA aligned + vol ok
+    const isBreakout = this._detectBreakout(price, sr);
+    const isBreakdown = this._detectBreakdown(price, sr);
+    const directionAligned = (isBreakout && fastMA > slowMA) || (isBreakdown && fastMA < slowMA);
+
+    if ((isBreakout || isBreakdown) && directionAligned && volOk && step >= 2) {
+      step = 3;
+    }
+
+    return step;
   }
 }
 
 const engine = new MultiMarketPipeline();
 
+// ============ STATE ============
 const state = {
   active: false, tradingMode: 'demo', balance: null, currency: 'USD',
   sessionPnl: 0, dailyPnl: 0, dailyStartBalance: null,
@@ -321,17 +488,36 @@ const state = {
   lossCooldownUntil: 0, pendingSettlement: false
 };
 
+// ============ STRATEGY CHECK (Price Action + MA) ============
 function checkStrategy(symbol, metric) {
   if (!metric) return null;
-  const { fastMA, slowMA, price, volatility } = metric;
-  if (fastMA === null || slowMA === null || price === 0) return null;
+
+  const { price, support, resistance, isBreakout, isBreakdown, fastMA, slowMA, volatility, step } = metric;
+
+  // Must be step 3 (ready for entry)
+  if (step < 3) return null;
+
+  // Volatility filter
   if (volatility < CONFIG.MIN_VOLATILITY_PERCENT) return null;
-  const spread = Math.abs(fastMA - slowMA) / price * 100;
+
+  // MA confirmation
+  const spread = fastMA !== null && slowMA !== null ? Math.abs(fastMA - slowMA) / price * 100 : 0;
   if (spread < CONFIG.MIN_SPREAD_PERCENT) return null;
-  if (fastMA > slowMA) return { direction: 'CALL', score: spread };
-  else return { direction: 'PUT', score: spread };
+
+  // Direction: breakout + MA bullish = CALL
+  if (isBreakout && fastMA > slowMA) {
+    return { direction: 'CALL', score: spread };
+  }
+
+  // Direction: breakdown + MA bearish = PUT
+  if (isBreakdown && fastMA < slowMA) {
+    return { direction: 'PUT', score: spread };
+  }
+
+  return null;
 }
 
+// ============ P&L SYNC & LIMITS ============
 async function syncDailyPnlFromDB() {
   try {
     const now = new Date();
@@ -375,6 +561,7 @@ function checkDailyLimits() {
   return false;
 }
 
+// ============ STATE PERSISTENCE ============
 function saveState() {
   try {
     const dir = path.dirname(STATE_FILE);
@@ -410,6 +597,7 @@ function loadState() {
   } catch(e) {}
 }
 
+// ============ SETTLEMENT ============
 function settleRealTrade() {
   if (!state.activeRealTrade || !state.activeRealTrade.contractId || state.balance == null) {
     if (state.activeRealTrade) {
@@ -467,13 +655,16 @@ function settleRealTrade() {
 
 let consecutiveLosses = 0;
 
+// =====================================================================
+// ENTRY LOGIC
+// =====================================================================
 function processLiveFeed(symbol, price) {
   if (state.pendingSettlement) { broadcastSSE({ state: getFullState() }); return; }
   if (state.settleTicksRemaining > 0) {
     state.settleTicksRemaining--;
     if (state.settleTicksRemaining === 0) {
       state.pendingSettlement = true;
-      addLog(`⏳ ${CONFIG.SETTLE_TICKS} ticks elapsed. Waiting for balance update to settle ${state.activeRealTrade?.symbol}...`);
+      addLog(`⏳ ${CONFIG.SETTLE_TICKS} ticks elapsed. Waiting for balance update...`);
       setTimeout(() => {
         if (state.pendingSettlement) {
           addLog(`⚠️ Balance update timeout. Forcing settlement now.`);
@@ -520,8 +711,7 @@ function processLiveFeed(symbol, price) {
     state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
     const metric = state.marketMetrics[symbol];
-    const spread = ((metric.fastMA - metric.slowMA) / metric.price * 100).toFixed(2);
-    addLog(`🔥 Signal: ${symbol} | ${direction} | Spread: ${spread}%`);
+    addLog(`🔥 Signal: ${symbol} | ${direction} | Support: ${metric.support?.toFixed(2) || 'N/A'} | Resistance: ${metric.resistance?.toFixed(2) || 'N/A'}`);
 
     state.activeRealTrade = {
       symbol, stake: state.currentStake, balanceBefore: state.balance,
@@ -541,6 +731,7 @@ function processLiveFeed(symbol, price) {
   broadcastSSE({ state: getFullState() });
 }
 
+// ------------------ WEBSOCKET CONNECTION ------------------
 let derivWs = null;
 let reqId = 0;
 let keepAliveLoop = null;
@@ -670,6 +861,7 @@ function handleMessage(msg) {
   }
 }
 
+// ------------------ MANUAL TRADING ------------------ //
 app.post('/api/manual-trade', (req, res) => {
   const { symbol, contractType, duration, durationUnit } = req.body;
   
@@ -709,12 +901,14 @@ app.post('/api/manual-trade', (req, res) => {
   res.json({ success: true, message: 'Proposal requested' });
 });
 
+// ------------------ PERIODIC P&L SYNC ------------------
 setInterval(() => {
   if (state.balance !== null) {
     syncDailyPnlFromDB().catch(err => console.error('Periodic sync error:', err));
   }
 }, CONFIG.PNL_SYNC_INTERVAL_MS);
 
+// ------------------ STARTUP ------------------
 loadState();
 checkDatabaseConnection().then(() => {
   connectDeriv();
