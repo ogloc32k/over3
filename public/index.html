@@ -7,7 +7,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     /* ============================================================
-       ROOT & RESET
+       ROOT & RESET – INSTITUTIONAL PALETTE
        ============================================================ */
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -32,8 +32,8 @@
       --text-primary: #d1d4dc;
       --text-secondary: #787b86;
       --text-muted: #5a5d68;
-      --green-profit: #4ade80;
-      --red-loss: #f87171;
+      --green-profit: #089981;      /* muted institutional green */
+      --red-loss: #f23645;          /* muted institutional red */
       --orange-warn: #fbbf24;
       --neon-blue: #2962ff;
       --header-height: 44px;
@@ -51,7 +51,7 @@
     ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
 
     /* ============================================================
-       GLOBAL HEADER (with tabs)
+       GLOBAL HEADER (with tabs + clock)
        ============================================================ */
     .app-header {
       background: var(--bg-panel);
@@ -82,7 +82,6 @@
     .app-brand span { color: var(--neon-blue); }
     .app-brand small { font-size: 7px; font-weight: 400; color: var(--text-secondary); letter-spacing: 0.3px; }
 
-    /* Header tabs */
     .header-tabs {
       display: flex;
       gap: 4px;
@@ -112,6 +111,11 @@
       background: rgba(41,98,255,0.04);
     }
 
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
     .header-status {
       font-size: 7px;
       font-weight: 600;
@@ -124,13 +128,28 @@
       display: flex;
       align-items: center;
       gap: 6px;
-      margin-left: 8px;
     }
-    .header-status.on { border-color: var(--green-profit); color: var(--green-profit); background: rgba(74,222,128,0.06); }
-    .header-status.off { border-color: var(--red-loss); color: var(--red-loss); background: rgba(248,113,113,0.06); }
+    .header-status.on { border-color: var(--green-profit); color: var(--green-profit); background: rgba(8,153,129,0.06); }
+    .header-status.off { border-color: var(--red-loss); color: var(--red-loss); background: rgba(242,54,69,0.06); }
     .header-status.paused { border-color: var(--orange-warn); color: var(--orange-warn); background: rgba(251,191,36,0.06); }
     .header-status .cooldown { color: var(--orange-warn); font-weight: 700; }
     .header-status .lock { color: var(--red-loss); }
+
+    /* Clock in header */
+    .header-clock {
+      font-family: 'Consolas', monospace;
+      font-size: 8px;
+      color: var(--text-secondary);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.2px;
+      background: var(--bg-card);
+      padding: 2px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border-subtle);
+      min-width: 60px;
+      text-align: center;
+    }
+    .header-clock span { color: var(--neon-blue); }
 
     /* ============================================================
        LAYOUT: SIDEBAR + MAIN
@@ -156,6 +175,7 @@
       gap: 6px;
       transition: width 0.25s ease, padding 0.25s ease, border 0.25s ease;
       position: relative;
+      z-index: 5;
     }
     .app-sidebar.collapsed {
       width: 0;
@@ -164,7 +184,6 @@
       overflow: hidden;
     }
 
-    /* Sidebar toggle button */
     .sidebar-toggle {
       position: absolute;
       top: 6px;
@@ -178,18 +197,14 @@
       font-size: 12px;
       line-height: 1;
       transition: all 0.15s;
-      z-index: 5;
+      z-index: 6;
     }
     .sidebar-toggle:hover {
       background: var(--bg-surface);
       color: var(--text-primary);
     }
-    .app-sidebar.collapsed .sidebar-toggle {
-      /* when collapsed, the sidebar is hidden, so the toggle is not visible */
-      display: none;
-    }
+    .app-sidebar.collapsed .sidebar-toggle { display: none; }
 
-    /* Internal sidebar content (hidden when collapsed) */
     .sidebar-content {
       opacity: 1;
       transition: opacity 0.2s;
@@ -304,14 +319,14 @@
       color: var(--green-profit);
     }
     .sidebar-trade-btns .btn.call:hover {
-      background: rgba(74,222,128,0.06);
+      background: rgba(8,153,129,0.06);
     }
     .sidebar-trade-btns .btn.put {
       border-color: var(--red-loss);
       color: var(--red-loss);
     }
     .sidebar-trade-btns .btn.put:hover {
-      background: rgba(248,113,113,0.06);
+      background: rgba(242,54,69,0.06);
     }
 
     .sidebar-duration {
@@ -355,14 +370,15 @@
       background: var(--bg-terminal);
       padding: 4px 8px 4px 8px;
       transition: padding 0.25s;
+      z-index: 1;
     }
 
-    /* ---- STICKY ASSET STATUS BAR (above data table) ---- */
+    /* ---- STICKY ASSET STATUS BAR ---- */
     .focus-bar {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      background: var(--bg-card);
+      background: var(--bg-panel);
       border: 1px solid var(--border-subtle);
       border-radius: 4px;
       padding: 4px 10px;
@@ -372,9 +388,7 @@
       gap: 4px;
       position: sticky;
       top: 0;
-      z-index: 5;
-      background: var(--bg-panel); /* slightly different to stand out */
-      border-bottom: 1px solid var(--border-subtle);
+      z-index: 2;
       box-shadow: 0 1px 4px rgba(0,0,0,0.3);
     }
     .focus-bar .left {
@@ -413,8 +427,8 @@
       text-transform: uppercase;
       font-size: 7px;
     }
-    .focus-bar .right .badge.breakout { background: rgba(74,222,128,0.12); color: var(--green-profit); border: 1px solid var(--green-profit); }
-    .focus-bar .right .badge.breakdown { background: rgba(248,113,113,0.12); color: var(--red-loss); border: 1px solid var(--red-loss); }
+    .focus-bar .right .badge.breakout { background: rgba(8,153,129,0.12); color: var(--green-profit); border: 1px solid var(--green-profit); }
+    .focus-bar .right .badge.breakdown { background: rgba(242,54,69,0.12); color: var(--red-loss); border: 1px solid var(--red-loss); }
     .focus-bar .right .badge.idle { background: rgba(120,123,134,0.08); color: var(--text-secondary); border: 1px solid var(--border-subtle); }
 
     /* ---- TAB PAGES ---- */
@@ -469,7 +483,7 @@
     }
     .data-table tr:hover { background: var(--bg-surface); }
     .data-table tr.active { background: var(--bg-surface); border-left: 2px solid var(--neon-blue); }
-    .data-table tr.step-3 { background: rgba(74,222,128,0.04); }
+    .data-table tr.step-3 { background: rgba(8,153,129,0.04); }
     .data-table tr.step-2 { background: rgba(251,191,36,0.03); }
     .data-table tr.step-1 { background: rgba(41,98,255,0.02); }
     .data-table tr.step-0 { opacity: 0.6; }
@@ -512,12 +526,12 @@
       letter-spacing: 0.2px;
       border: 1px solid transparent;
     }
-    .step-badge.step-3 { background: rgba(74,222,128,0.12); color: var(--green-profit); border-color: var(--green-profit); }
+    .step-badge.step-3 { background: rgba(8,153,129,0.12); color: var(--green-profit); border-color: var(--green-profit); }
     .step-badge.step-2 { background: rgba(251,191,36,0.12); color: var(--orange-warn); border-color: var(--orange-warn); }
     .step-badge.step-1 { background: rgba(41,98,255,0.10); color: var(--neon-blue); border-color: var(--neon-blue); }
     .step-badge.step-0 { background: rgba(120,123,134,0.08); color: var(--text-secondary); border-color: var(--border-subtle); }
 
-    /* ---- ANALYTICS ---- */
+    /* ---- ANALYTICS (fixed) ---- */
     .analytics-grid {
       display: flex;
       flex-direction: column;
@@ -578,22 +592,31 @@
       text-align: center;
     }
     .metric-card .lbl { font-size: 6px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600; }
-    .metric-card .val { font-size: 14px; font-weight: 700; margin-top: 1px; color: var(--text-primary); }
+    .metric-card .val {
+      font-size: 14px;
+      font-weight: 700;
+      margin-top: 1px;
+      color: var(--text-primary);
+    }
+    .metric-card .val.positive { color: var(--green-profit); }
+    .metric-card .val.negative { color: var(--red-loss); }
 
+    /* ---- Charts with proper layout ---- */
     .charts-grid-2 {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 6px;
+      grid-template-columns: 1fr 1.4fr;
+      gap: 8px;
       flex: 1;
-      min-height: 160px;
+      min-height: 180px;
     }
     .chart-box {
       background: var(--bg-card);
       border: 1px solid var(--border-subtle);
       border-radius: 4px;
-      padding: 4px;
+      padding: 4px 8px;
       display: flex;
       flex-direction: column;
+      min-height: 0;
     }
     .chart-box .ch-label {
       font-size: 6px;
@@ -607,7 +630,7 @@
     .chart-box .ch-wrap {
       flex: 1;
       position: relative;
-      min-height: 80px;
+      min-height: 100px;
     }
 
     /* ---- LOGS ---- */
@@ -760,25 +783,7 @@
     }
     .tab-item:active { transform: scale(0.95); }
 
-    /* ---- CLOCK ---- */
-    #clock {
-      position: fixed;
-      bottom: calc(var(--tab-height) + 4px);
-      right: 8px;
-      background: var(--bg-panel);
-      border: 1px solid var(--border-subtle);
-      padding: 1px 6px;
-      border-radius: 2px;
-      font-size: 7px;
-      color: var(--text-secondary);
-      font-family: 'Consolas', monospace;
-      z-index: 999;
-      letter-spacing: 0.2px;
-      opacity: 0.6;
-    }
-    #clock span { color: var(--neon-blue); }
-
-    /* ---- SIDEBAR TOGGLE BUTTON (outside sidebar, when collapsed) ---- */
+    /* ---- GLOBAL TOGGLE (when sidebar collapsed) ---- */
     .sidebar-toggle-global {
       display: none;
       position: fixed;
@@ -824,9 +829,7 @@
         border: none;
         max-height: 0;
       }
-      .sidebar-toggle-global {
-        display: none !important;
-      }
+      .sidebar-toggle-global { display: none !important; }
       .sidebar-content {
         display: flex;
         flex-wrap: wrap;
@@ -846,7 +849,6 @@
       .data-table th, .data-table td { padding: 2px 4px; }
       .col-sr, .col-ma, .col-vol { display: none; }
       .col-diff { display: none; }
-      /* On mobile, header tabs hide; we show bottom nav */
       .header-tabs { display: none; }
     }
 
@@ -862,7 +864,7 @@
 <body>
 
   <!-- ============================================================
-       GLOBAL HEADER (with tabs)
+       GLOBAL HEADER (with tabs + clock)
        ============================================================ -->
   <header class="app-header">
     <div class="left">
@@ -874,8 +876,9 @@
         <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">Settings</button>
       </div>
     </div>
-    <div style="display: flex; align-items: center; gap: 8px;">
+    <div class="header-right">
       <span class="header-status" id="header-status">● IDLE</span>
+      <div class="header-clock" id="header-clock"><span id="clock-display">00:00:00</span> EAT</div>
     </div>
   </header>
 
@@ -921,7 +924,7 @@
       </div>
     </aside>
 
-    <!-- Global toggle when sidebar is collapsed (desktop) -->
+    <!-- Global toggle when sidebar is collapsed -->
     <button class="sidebar-toggle-global" id="sidebarToggleGlobal" title="Expand sidebar">▶</button>
 
     <!-- MAIN CONTENT -->
@@ -974,6 +977,7 @@
         <div class="log-stream" id="log-stream"></div>
       </div>
 
+      <!-- ANALYTICS (fixed) -->
       <div class="tab-pages" id="tab-analytics">
         <div class="analytics-grid">
           <div class="filter-bar">
@@ -991,17 +995,31 @@
           </div>
 
           <div class="metrics-grid-4">
-            <div class="metric-card"><div class="lbl">Net Profit</div><div class="val" id="meta-profit" style="color:var(--green-profit);">$0.00</div></div>
+            <div class="metric-card"><div class="lbl">Net Profit</div><div class="val" id="meta-profit">$0.00</div></div>
             <div class="metric-card"><div class="lbl">Profit Factor</div><div class="val" id="meta-pf" style="color:var(--neon-blue);">N/A</div></div>
             <div class="metric-card"><div class="lbl">Strike Rate</div><div class="val" id="meta-strike">0.0%</div></div>
-            <div class="metric-card"><div class="lbl">Max Drawdown</div><div class="val" id="meta-dd" style="color:var(--red-loss);">0.0%</div></div>
+            <div class="metric-card"><div class="lbl">Max Drawdown</div><div class="val" id="meta-dd">0.0%</div></div>
           </div>
 
           <div class="charts-grid-2">
+            <!-- Donut chart (smaller, with legend) -->
             <div class="chart-box">
               <div class="ch-label">Asset Contribution</div>
-              <div class="ch-wrap"><canvas id="chart-donut"></canvas></div>
+              <div class="ch-wrap" style="display:flex; flex-direction:row; align-items:center; gap:8px;">
+                <div style="flex:1; min-width:0; height:100%; position:relative;">
+                  <canvas id="chart-donut"></canvas>
+                </div>
+                <!-- Legend beside the donut -->
+                <div style="flex:0 0 auto; display:flex; flex-direction:column; gap:3px; font-size:7px; color:var(--text-secondary);">
+                  <span><span style="display:inline-block; width:10px; height:10px; background:#2962ff; border-radius:2px; margin-right:4px;"></span>R_10</span>
+                  <span><span style="display:inline-block; width:10px; height:10px; background:#fbbf24; border-radius:2px; margin-right:4px;"></span>R_25</span>
+                  <span><span style="display:inline-block; width:10px; height:10px; background:#787b86; border-radius:2px; margin-right:4px;"></span>R_50</span>
+                  <span><span style="display:inline-block; width:10px; height:10px; background:#089981; border-radius:2px; margin-right:4px;"></span>R_75</span>
+                  <span><span style="display:inline-block; width:10px; height:10px; background:#f23645; border-radius:2px; margin-right:4px;"></span>R_100</span>
+                </div>
+              </div>
             </div>
+            <!-- Equity Curve (dynamic color) -->
             <div class="chart-box">
               <div class="ch-label">Equity Curve</div>
               <div class="ch-wrap"><canvas id="chart-line"></canvas></div>
@@ -1067,24 +1085,17 @@
     <button class="tab-item" data-tab="settings" onclick="switchTab('settings')"><span class="icon">⚙️</span><span class="label">Settings</span></button>
   </div>
 
-  <!-- CLOCK -->
-  <div id="clock"><span id="clock-display">00:00:00</span> EAT</div>
-
   <script>
     // =========================================================================
-    // TAB SWITCHING (Desktop + Mobile)
+    // TAB SWITCHING
     // =========================================================================
     function switchTab(tabId) {
-      // Hide all tab pages
       document.querySelectorAll('.tab-pages').forEach(p => p.classList.remove('active'));
       document.getElementById('tab-' + tabId).classList.add('active');
-      // Header tabs
       document.querySelectorAll('.header-tabs .tab-btn').forEach(b => b.classList.remove('active'));
       document.querySelector(`.header-tabs .tab-btn[data-tab="${tabId}"]`)?.classList.add('active');
-      // Mobile bottom tabs
       document.querySelectorAll('.tab-bar .tab-item').forEach(b => b.classList.remove('active'));
       document.querySelector(`.tab-bar .tab-item[data-tab="${tabId}"]`)?.classList.add('active');
-      // Init analytics if needed
       if (tabId === 'analytics') {
         setTimeout(() => {
           renderCharts();
@@ -1101,7 +1112,6 @@
     function toggleSidebar() {
       const sidebar = document.getElementById('appSidebar');
       sidebar.classList.toggle('collapsed');
-      // Toggle button text/icon
       const toggleBtn = document.getElementById('sidebarToggle');
       const globalToggle = document.getElementById('sidebarToggleGlobal');
       if (sidebar.classList.contains('collapsed')) {
@@ -1112,7 +1122,6 @@
         globalToggle.style.display = 'none';
       }
     }
-
     document.getElementById('sidebarToggle').addEventListener('click', toggleSidebar);
     document.getElementById('sidebarToggleGlobal').addEventListener('click', toggleSidebar);
 
@@ -1195,6 +1204,17 @@
         }
       } catch(err) { console.error('❌ Error parsing SSE:', err); }
     };
+
+    // =========================================================================
+    // CLOCK UPDATE (in header)
+    // =========================================================================
+    function updateClock() {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('en-US', { timeZone: 'Africa/Nairobi', hour12: false });
+      document.getElementById('clock-display').textContent = timeStr;
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
 
     // =========================================================================
     // RENDER UI
@@ -1355,25 +1375,69 @@
     }
 
     // =========================================================================
-    // ANALYTICS
+    // ANALYTICS – with fixed colors, donut size, dynamic equity color
     // =========================================================================
     let charts = {};
+    let equityStart = 0; // used to determine if equity curve is above/below start
+
     function renderCharts() {
       if (charts.donut) return;
       const dark = '#787b86', grid = '#2a2f3d';
+
+      // Donut chart (smaller)
       const ctxDonut = document.getElementById('chart-donut').getContext('2d');
       charts.donut = new Chart(ctxDonut, {
         type: 'doughnut',
-        data: { labels: ['R_10', 'R_25', 'R_50', 'R_75', 'R_100'], datasets: [{ data: [0,0,0,0,0], backgroundColor: ['#2962ff','#fbbf24','#787b86','#4ade80','#f87171'], borderColor: '#131722', borderWidth: 2 }] },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: dark, font: { size: 8 } } } } }
+        data: {
+          labels: ['R_10', 'R_25', 'R_50', 'R_75', 'R_100'],
+          datasets: [{
+            data: [0, 0, 0, 0, 0],
+            backgroundColor: ['#2962ff', '#fbbf24', '#787b86', '#089981', '#f23645'],
+            borderColor: '#131722',
+            borderWidth: 2
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '65%',
+          plugins: {
+            legend: { display: false } // we use custom legend in HTML
+          }
+        }
       });
+
+      // Equity Curve (dynamic color)
       const ctxLine = document.getElementById('chart-line').getContext('2d');
       charts.line = new Chart(ctxLine, {
         type: 'line',
-        data: { labels: [], datasets: [{ label: 'P&L', data: [0], borderColor: '#4ade80', backgroundColor: 'transparent', borderWidth: 3, pointRadius: 2, tension: 0.3 }] },
+        data: {
+          labels: [],
+          datasets: [{
+            label: 'P&L',
+            data: [0],
+            borderColor: '#089981', // will be updated dynamically
+            backgroundColor: 'transparent',
+            borderWidth: 3,
+            pointRadius: 2,
+            tension: 0.3
+          }]
+        },
         options: {
-          responsive: true, maintainAspectRatio: false,
-          scales: { x: { grid: { color: grid }, ticks: { color: dark, font: { size: 7 } } }, y: { grid: { color: grid }, ticks: { color: dark, font: { size: 7 } } } },
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              grid: { color: grid },
+              ticks: { color: dark, font: { size: 7 } },
+              title: { display: true, text: 'Trade Sequence', color: dark, font: { size: 7 } }
+            },
+            y: {
+              grid: { color: grid },
+              ticks: { color: dark, font: { size: 7 } },
+              title: { display: true, text: 'Cumulative P&L ($)', color: dark, font: { size: 7 } }
+            }
+          },
           plugins: { legend: { display: false } }
         }
       });
@@ -1386,7 +1450,8 @@
       const equity=[]; let cum=0;
       sorted.forEach(t => {
         const pnl = t.profit_loss || 0;
-        cum += pnl; equity.push(cum);
+        cum += pnl;
+        equity.push(cum);
         if (pnl > 0) { wins++; grossProfit += pnl; } else if (pnl < 0) { losses++; grossLoss += Math.abs(pnl); }
         const asset = t.asset || 'Unknown';
         assetMap[asset] = (assetMap[asset] || 0) + pnl;
@@ -1401,32 +1466,72 @@
     }
 
     function updateUI(metrics, chartData) {
-      document.getElementById('meta-profit').textContent = metrics.profit;
+      // Net Profit with semantic color
+      const profitVal = parseFloat(metrics.profit.replace(/[$,]/g, ''));
+      const profitEl = document.getElementById('meta-profit');
+      profitEl.textContent = metrics.profit;
+      profitEl.className = 'val ' + (profitVal >= 0 ? 'positive' : 'negative');
+
+      // Profit Factor
       document.getElementById('meta-pf').textContent = metrics.pf;
+      // Strike Rate
       document.getElementById('meta-strike').textContent = metrics.strike;
-      document.getElementById('meta-dd').textContent = metrics.drawdown;
-      if (charts.donut) { charts.donut.data.datasets[0].data = chartData.assets; charts.donut.update('none'); }
-      if (charts.line) { const eq = chartData.equity; charts.line.data.labels = eq.map((_,i) => `T${i+1}`); charts.line.data.datasets[0].data = eq; charts.line.update('none'); }
+      // Max Drawdown
+      const ddVal = parseFloat(metrics.drawdown.replace(/[%,]/g, ''));
+      const ddEl = document.getElementById('meta-dd');
+      ddEl.textContent = metrics.drawdown;
+      ddEl.className = 'val ' + (ddVal > 0 ? 'negative' : '');
+
+      // Donut chart
+      if (charts.donut) {
+        charts.donut.data.datasets[0].data = chartData.assets;
+        charts.donut.update('none');
+      }
+
+      // Equity curve – dynamic color
+      if (charts.line) {
+        const eq = chartData.equity;
+        const lastEquity = eq.length > 0 ? eq[eq.length-1] : 0;
+        const startEquity = eq.length > 0 ? eq[0] : 0;
+        const color = lastEquity >= startEquity ? '#089981' : '#f23645';
+
+        charts.line.data.labels = eq.map((_,i) => `T${i+1}`);
+        charts.line.data.datasets[0].data = eq;
+        charts.line.data.datasets[0].borderColor = color;
+        charts.line.update('none');
+      }
     }
 
     async function timeframePreset(btn, mode) {
       if (btn) { document.querySelectorAll('.preset-strip .btn-preset').forEach(b => b.classList.remove('active')); btn.classList.add('active'); }
-      if (mode === 'clear') { updateUI({ profit: '$0.00', pf: 'N/A', strike: '0.0%', drawdown: '0.00%' }, { assets: [0,0,0,0,0], equity: [0] }); return; }
+      if (mode === 'clear') {
+        updateUI({ profit: '$0.00', pf: 'N/A', strike: '0.0%', drawdown: '0.00%' }, { assets: [0,0,0,0,0], equity: [0] });
+        return;
+      }
       try {
         const resp = await fetch(`/api/ledger/analytics?mode=${mode}`);
         const data = await resp.json();
         let assets, equity, pf, strike, dd;
         if (mode === 'session') {
-          assets = [0,0,0,0,0]; equity = [data.totalProfit || 0]; pf = 'N/A'; strike = data.strikeRate || '0.0%'; dd = '0.0%';
+          assets = [0,0,0,0,0];
+          equity = [data.totalProfit || 0];
+          pf = 'N/A';
+          strike = data.strikeRate || '0.0%';
+          dd = '0.0%';
         } else {
           const raw = data.rawData || [];
           const comp = computeRawData(raw);
-          assets = comp.assetData; equity = comp.equity;
-          pf = data.profitFactor || '0.00'; strike = data.strikeRate + '%'; dd = data.drawdown + '%';
+          assets = comp.assetData;
+          equity = comp.equity;
+          pf = data.profitFactor || '0.00';
+          strike = data.strikeRate + '%';
+          dd = data.drawdown + '%';
         }
         updateUI({
           profit: `$${parseFloat(data.totalProfit).toFixed(2)}`,
-          pf, strike, drawdown: dd
+          pf: pf,
+          strike: strike,
+          drawdown: dd
         }, { assets, equity });
       } catch(err) { console.error('Analytics error:', err); }
     }
@@ -1444,24 +1549,16 @@
         const dd = data.drawdown + '%';
         updateUI({
           profit: `$${parseFloat(data.totalProfit).toFixed(2)}`,
-          pf, strike, drawdown: dd
+          pf: pf,
+          strike: strike,
+          drawdown: dd
         }, { assets: comp.assetData, equity: comp.equity });
       } catch(err) { console.error('Filter error:', err); }
     }
 
     // =========================================================================
-    // CLOCK
-    // =========================================================================
-    function updateClock() {
-      document.getElementById('clock-display').textContent = new Date().toLocaleTimeString('en-US', { timeZone: 'Africa/Nairobi', hour12: false });
-    }
-    setInterval(updateClock, 1000);
-    updateClock();
-
-    // =========================================================================
     // INIT
     // =========================================================================
-    // Default to dashboard tab
     document.querySelectorAll('.tab-pages').forEach(p => p.classList.remove('active'));
     document.getElementById('tab-dashboard').classList.add('active');
     document.querySelectorAll('.header-tabs .tab-btn').forEach(b => b.classList.remove('active'));
