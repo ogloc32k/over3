@@ -7,7 +7,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     /* ============================================================
-       ROOT & RESET
+       ROOT & RESET – INSTITUTIONAL PALETTE
        ============================================================ */
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -30,6 +30,7 @@
       --border-subtle: #2a2f3d;
       --text-primary: #d1d4dc;
       --text-secondary: #787b86;
+      --text-muted: #5a5d68;
       --green-profit: #089981;
       --red-loss: #f23645;
       --orange-warn: #fbbf24;
@@ -121,7 +122,6 @@
     }
     .header-clock span { color: var(--neon-blue); }
 
-    /* ---- BODY ---- */
     .app-body {
       display: flex;
       flex: 1;
@@ -142,12 +142,7 @@
       position: relative;
       z-index: 5;
     }
-    .app-sidebar.collapsed {
-      width: 0;
-      padding: 0;
-      border: none;
-      overflow: hidden;
-    }
+    .app-sidebar.collapsed { width: 0; padding: 0; border: none; overflow: hidden; }
     .sidebar-toggle {
       position: absolute;
       top: 6px;
@@ -290,13 +285,13 @@
       z-index: 2;
       box-shadow: 0 1px 4px rgba(0,0,0,0.3);
     }
-    .focus-bar .left { display: flex; align-items: baseline; gap: 10px; }
+    .focus-bar .left { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
     .focus-bar .left .name { font-size: 11px; font-weight: 700; color: var(--neon-blue); }
     .focus-bar .left .price { font-size: 16px; font-weight: 700; font-family: 'Consolas', monospace; color: var(--text-primary); }
     .focus-bar .left .sr { font-size: 8px; color: var(--text-secondary); }
     .focus-bar .left .sr .s { color: var(--green-profit); }
     .focus-bar .left .sr .r { color: var(--red-loss); }
-    .focus-bar .right { display: flex; align-items: center; gap: 8px; font-size: 8px; color: var(--text-secondary); }
+    .focus-bar .right { display: flex; align-items: center; gap: 8px; font-size: 8px; color: var(--text-secondary); flex-wrap: wrap; }
     .focus-bar .right .badge {
       padding: 2px 6px;
       border-radius: 4px;
@@ -318,7 +313,7 @@
     .tab-pages.active { display: block; }
 
     /* ============================================================
-       SETTINGS – REFACTORED
+       SETTINGS – MOBILE OPTIMISED
        ============================================================ */
     .settings-grid {
       padding: 4px 0 70px; /* bottom padding for sticky footer */
@@ -339,11 +334,14 @@
       letter-spacing: 0.3px;
     }
 
-    /* 2‑column grid (3 on wide) */
     .settings-subgrid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 6px 12px;
+    }
+    /* Mobile: single column */
+    @media (max-width: 768px) {
+      .settings-subgrid { grid-template-columns: 1fr; }
     }
     @media (min-width: 1024px) {
       .settings-subgrid { grid-template-columns: 1fr 1fr 1fr; }
@@ -385,6 +383,15 @@
       min-height: 22px;
       transition: border 0.15s;
     }
+    /* Touch-friendly: min-height 44px on mobile */
+    @media (max-width: 768px) {
+      .setting-item input,
+      .setting-item select {
+        min-height: 44px;
+        font-size: 11px;
+        padding: 6px 8px;
+      }
+    }
     .setting-item input:focus,
     .setting-item select:focus { border-color: var(--neon-blue); }
     .setting-item input[type="number"] {
@@ -403,8 +410,8 @@
       bottom: 0;
       background: var(--bg-panel);
       border-top: 1px solid var(--border-subtle);
-      padding: 6px 12px;
-      margin: 0 -12px -4px -12px; /* offset padding of .tab-pages */
+      padding: 8px 12px;
+      margin: 0 -12px -4px -12px;
       display: flex;
       gap: 8px;
       align-items: center;
@@ -412,20 +419,40 @@
       z-index: 5;
       backdrop-filter: blur(4px);
       -webkit-backdrop-filter: blur(4px);
+      min-height: 56px;
+    }
+    @media (max-width: 768px) {
+      .settings-actions {
+        padding: 8px 16px;
+        margin: 0;
+        border-radius: 0;
+        min-height: 64px;
+        position: sticky;
+        bottom: 0;
+        background: var(--bg-panel);
+        border-top: 1px solid var(--border-subtle);
+      }
     }
     .settings-actions .btn-save {
       background: var(--green-profit);
       color: #0b0e14;
       border: none;
-      padding: 4px 16px;
+      padding: 6px 20px;
       font-weight: 700;
-      border-radius: 3px;
+      border-radius: 4px;
       cursor: pointer;
       font-size: 8px;
       text-transform: uppercase;
       letter-spacing: 0.3px;
-      min-height: 26px;
+      min-height: 36px;
       transition: opacity 0.15s;
+    }
+    @media (max-width: 768px) {
+      .settings-actions .btn-save {
+        font-size: 11px;
+        padding: 8px 24px;
+        min-height: 48px;
+      }
     }
     .settings-actions .btn-save:active { transform: scale(0.98); }
     .settings-actions .settings-status {
@@ -434,9 +461,12 @@
       flex: 1;
       text-align: right;
     }
+    @media (max-width: 768px) {
+      .settings-actions .settings-status { font-size: 9px; }
+    }
 
     /* ============================================================
-       OTHER TABS (unchanged – keep as before)
+       OTHER TABS (unchanged)
        ============================================================ */
     .table-container {
       height: 100%;
@@ -751,7 +781,7 @@
       .col-diff { display: none; }
       .header-tabs { display: none; }
       .settings-subgrid { grid-template-columns: 1fr; }
-      .settings-actions { padding: 4px 8px; }
+      .settings-actions { padding: 8px 12px; }
     }
     @media (min-width: 769px) {
       .tab-bar { display: none; }
@@ -868,7 +898,7 @@
         <div class="log-stream" id="log-stream"></div>
       </div>
 
-      <!-- ANALYTICS (unchanged) -->
+      <!-- ANALYTICS -->
       <div class="tab-pages" id="tab-analytics">
         <div class="analytics-grid">
           <div class="filter-bar">
@@ -912,10 +942,9 @@
         </div>
       </div>
 
-      <!-- SETTINGS – REFACTORED -->
+      <!-- SETTINGS – SETTLE_TICKS REMOVED -->
       <div class="tab-pages" id="tab-settings">
         <div class="settings-grid">
-          <!-- Breakout Parameters -->
           <div class="settings-section">
             <h4>📊 Breakout Parameters</h4>
             <div class="settings-subgrid">
@@ -954,13 +983,12 @@
             </div>
           </div>
 
-          <!-- Timing & Cooldowns -->
           <div class="settings-section">
             <h4>⏱ Timing & Cooldowns</h4>
             <div class="settings-subgrid">
               <div class="setting-item">
                 <label>Trigger Interval <span class="hint">(seconds)</span></label>
-                <input type="number" id="config-MIN_TRIGGER_INTERVAL" step="1" value="30" />
+                <input type="number" id="config-MIN_TRIGGER_INTERVAL_SECONDS" step="1" value="30" />
               </div>
               <div class="setting-item">
                 <label>Max Consecutive Losses</label>
@@ -980,7 +1008,6 @@
             </div>
           </div>
 
-          <!-- Risk Management -->
           <div class="settings-section">
             <h4>💰 Risk Management</h4>
             <div class="settings-subgrid">
@@ -1003,7 +1030,6 @@
             </div>
           </div>
 
-          <!-- Trade Execution -->
           <div class="settings-section">
             <h4>⚙️ Trade Execution</h4>
             <div class="settings-subgrid">
@@ -1011,10 +1037,7 @@
                 <label>Cooldown Ticks</label>
                 <input type="number" id="config-COOLDOWN_TICKS" step="1" value="1" />
               </div>
-              <div class="setting-item">
-                <label>Settle Ticks</label>
-                <input type="number" id="config-SETTLE_TICKS" step="1" value="5" />
-              </div>
+              <!-- SETTLE_TICKS REMOVED -->
               <div class="setting-item">
                 <label>Settlement Timeout <span class="hint">(seconds)</span></label>
                 <input type="number" id="config-SETTLEMENT_TIMEOUT_SECONDS" step="1" value="15" />
@@ -1293,14 +1316,13 @@
     }
 
     // =========================================================================
-    // SETTINGS – with conversion helpers
+    // SETTINGS – SETTLE_TICKS REMOVED
     // =========================================================================
     async function loadConfig() {
       try {
         const resp = await fetch('/api/config');
         const config = await resp.json();
 
-        // Map fields directly
         const map = {
           'ANALYSIS_WINDOW': 'ANALYSIS_WINDOW',
           'BOLLINGER_PERIOD': 'BOLLINGER_PERIOD',
@@ -1315,15 +1337,13 @@
           'TP_PERCENT': 'TP_PERCENT',
           'SL_PERCENT': 'SL_PERCENT',
           'MIN_STAKE': 'MIN_STAKE',
-          'COOLDOWN_TICKS': 'COOLDOWN_TICKS',
-          'SETTLE_TICKS': 'SETTLE_TICKS'
+          'COOLDOWN_TICKS': 'COOLDOWN_TICKS'
         };
         for (const [id, key] of Object.entries(map)) {
           const el = document.getElementById('config-' + id);
           if (el && config[key] !== undefined) el.value = config[key];
         }
 
-        // Convert ms fields to seconds
         const msFields = {
           'MIN_TRIGGER_INTERVAL': 1000,
           'LOSS_COOLDOWN_MS': 60000,
@@ -1331,12 +1351,11 @@
           'PNL_SYNC_INTERVAL_MS': 1000
         };
         for (const [id, divisor] of Object.entries(msFields)) {
-          const secondsId = id.replace('_MS', '_SECONDS') || id;
+          const secondsId = id.replace('_MS', '_SECONDS');
           const el = document.getElementById('config-' + secondsId);
           if (el && config[id] !== undefined) {
             el.value = config[id] / divisor;
           }
-          // Also set hidden field if needed (not necessary here)
         }
 
         document.getElementById('settings-status').textContent = 'Config loaded.';
@@ -1349,13 +1368,12 @@
     async function saveSettings() {
       const config = {};
 
-      // Direct fields
       const direct = [
         'ANALYSIS_WINDOW', 'BOLLINGER_PERIOD', 'BOLLINGER_STD', 'RSI_PERIOD',
         'OVERSOLD_THRESHOLD', 'OVERBOUGHT_THRESHOLD', 'MIN_VOLATILITY_PERCENT',
         'DURATION_SECONDS', 'MAX_CONSECUTIVE_LOSSES',
         'RISK_PERCENT', 'TP_PERCENT', 'SL_PERCENT', 'MIN_STAKE',
-        'COOLDOWN_TICKS', 'SETTLE_TICKS'
+        'COOLDOWN_TICKS'
       ];
       for (const id of direct) {
         const el = document.getElementById('config-' + id);
@@ -1365,7 +1383,6 @@
         }
       }
 
-      // Convert seconds fields to ms
       const secondsToMs = {
         'MIN_TRIGGER_INTERVAL_SECONDS': 'MIN_TRIGGER_INTERVAL',
         'LOSS_COOLDOWN_MINUTES': 'LOSS_COOLDOWN_MS',
@@ -1554,7 +1571,6 @@
     // =========================================================================
     // INIT
     // =========================================================================
-    // Default tab
     document.querySelectorAll('.tab-pages').forEach(p => p.classList.remove('active'));
     document.getElementById('tab-dashboard').classList.add('active');
     document.querySelectorAll('.header-tabs .tab-btn').forEach(b => b.classList.remove('active'));
