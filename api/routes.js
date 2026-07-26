@@ -169,7 +169,7 @@ router.post('/control', (req, res) => {
 });
 
 // =====================================================================
-//  MANUAL TRADE – FIXED WITH CONTRACT SUBSCRIPTION
+//  MANUAL TRADE – FIXED WITH NEW SETTLEMENT LOGIC
 // =====================================================================
 router.post('/manual-trade', async (req, res) => {
     try {
@@ -205,20 +205,25 @@ router.post('/manual-trade', async (req, res) => {
         const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
         state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-        // Set trade state
+        // Set trade state – this will be used by the WebSocket's settlement logic
         state.tradeInProgress = true;
         state.activeRealTrade = {
             symbol,
             stake: state.currentStake,
             balanceBefore: state.balance,
             contractType,
+            duration: dur,           // store duration for settlement
+            durationUnit: unit,      // store unit
             barrier: null,
             direction: contractType,
             entryPrice: null,
             executionTime: Date.now(),
-            settlementTimeout: null,
+            settlementTimer: null,
+            tickCounter: null,
+            remainingTicks: unit === 't' ? dur : undefined,
             settled: false,
-            entryLogged: false
+            entryLogged: false,
+            contractId: null
         };
 
         // Send proposal via WebSocket
@@ -236,10 +241,11 @@ router.post('/manual-trade', async (req, res) => {
 
         addLog(`📤 Manual ${contractType} request for ${symbol} (${dur} ${unit === 't' ? 'ticks' : unit === 's' ? 'seconds' : 'minutes'})...`);
 
-        // Return success, but the actual contract ID will come via the WebSocket and be logged
+        // Return success – the settlement will be handled by the WebSocket
         return res.json({ success: true, message: 'Proposal requested.' });
     } catch (err) {
         console.error('Manual trade error:', err);
+        // Rollback trade state if something failed
         state.tradeInProgress = false;
         state.activeRealTrade = null;
         return res.status(500).json({ error: 'Internal server error: ' + err.message });
