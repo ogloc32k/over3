@@ -70,14 +70,21 @@ document.addEventListener('DOMContentLoaded', function() {
     updateClock();
 
     // =========================================================================
-    // MARKETS & DECIMAL FORMATTING
+    // MARKETS & DECIMAL FORMATTING – UPDATED WITH 1-SECOND INDICES
     // =========================================================================
     const MARKETS_CFG = {
+        // Standard
         'R_10': 'Volatility 10 Index',
         'R_25': 'Volatility 25 Index',
         'R_50': 'Volatility 50 Index',
         'R_75': 'Volatility 75 Index',
-        'R_100': 'Volatility 100 Index'
+        'R_100': 'Volatility 100 Index',
+        // 1-Second
+        '1HZ10V': 'Volatility 10 (1s) Index',
+        '1HZ25V': 'Volatility 25 (1s) Index',
+        '1HZ50V': 'Volatility 50 (1s) Index',
+        '1HZ75V': 'Volatility 75 (1s) Index',
+        '1HZ100V': 'Volatility 100 (1s) Index'
     };
 
     const MARKET_DECIMALS = {
@@ -85,7 +92,12 @@ document.addEventListener('DOMContentLoaded', function() {
         'R_25': 3,
         'R_50': 4,
         'R_75': 4,
-        'R_100': 2
+        'R_100': 2,
+        '1HZ10V': 2,
+        '1HZ25V': 2,
+        '1HZ50V': 2,
+        '1HZ75V': 2,
+        '1HZ100V': 2
     };
 
     function formatPrice(symbol, raw) {
@@ -96,6 +108,8 @@ document.addEventListener('DOMContentLoaded', function() {
     let currentFocus = 'R_75';
     let serverMode = 'demo';
     let globalState = null;
+    // Global dictionary to store latest raw prices (for manual trading)
+    window.currentMarketPrices = {};
 
     window.setFocusMarket = function(sym) {
         currentFocus = sym;
@@ -136,6 +150,12 @@ document.addEventListener('DOMContentLoaded', function() {
     window.fireManual = function(type) {
         const duration = parseInt(document.getElementById('manual-duration').value) || 7;
         const unit = document.getElementById('manual-unit').value;
+        // Get current price from global dictionary (raw value)
+        const price = window.currentMarketPrices[currentFocus];
+        if (price === undefined || price === null) {
+            alert('No price data available for ' + currentFocus + '. Please wait for ticks.');
+            return;
+        }
         fetch('/api/manual-trade', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -143,7 +163,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 symbol: currentFocus,
                 contractType: type,
                 duration: duration,
-                durationUnit: unit
+                durationUnit: unit,
+                price: price // optional, backend can use it for logging
             })
         })
         .then(res => res.json())
@@ -174,6 +195,15 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = JSON.parse(e.data);
             if (data.state) {
                 globalState = data.state;
+                // Update global price dictionary from marketMetrics
+                if (data.state.marketMetrics) {
+                    for (const sym in data.state.marketMetrics) {
+                        const metric = data.state.marketMetrics[sym];
+                        if (metric && metric.price !== undefined) {
+                            window.currentMarketPrices[sym] = metric.price;
+                        }
+                    }
+                }
                 renderUI(data.state);
             }
             if (data.logs && data.logs.length > 0) {
@@ -193,11 +223,10 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     // =========================================================================
-    // RENDER UI (with safety checks)
+    // RENDER UI (with safety checks and formatted prices)
     // =========================================================================
     function renderUI(state) {
         try {
-            // Use defaults if state is incomplete
             const safeState = state || {};
             const tradingMode = safeState.tradingMode || 'demo';
             const balance = safeState.balance || null;
@@ -268,7 +297,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('f-vol').textContent = 'Vol: —';
             }
 
-            // ---- Data table ----
+            // ---- Data table – now loops over all 10 markets ----
             const tbody = document.getElementById('tableBody');
             tbody.innerHTML = '';
             let bestScore = -Infinity, bestSym = null;
