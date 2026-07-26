@@ -15,8 +15,8 @@ const DEFAULT_CONFIG = {
     BOLLINGER_PERIOD: 20,
     BOLLINGER_STD: 2,
     RSI_PERIOD: 20,
-    MIN_VOLATILITY_PERCENT: 0.06,    // increased from 0.03 to 0.06
-    MA_DIFF_THRESHOLD: 0.05,         // minimum MA diff % (absolute)
+    MIN_VOLATILITY_PERCENT: 0.10,    // increased to 0.10% for sniper mode
+    MA_DIFF_THRESHOLD: 0.08,         // minimum absolute MA diff for entry
 
     // ---------- Risk ----------
     RISK_PERCENT: 1,
@@ -25,7 +25,7 @@ const DEFAULT_CONFIG = {
     MIN_STAKE: 0.35,
 
     // ---------- Timing ----------
-    MIN_TRIGGER_INTERVAL: 30000,     // 30s cooldown between trades
+    MIN_TRIGGER_INTERVAL: 300000,    // 5 minutes cooldown between trades
     SETTLEMENT_TIMEOUT_MS: 15000,
     PNL_SYNC_INTERVAL_MS: 300000
 };
