@@ -66,7 +66,6 @@ async function connectDeriv() {
             addLog(`🌐 Connected. Balance: $${state.balance.toFixed(2)} | Session: $${state.sessionPnl.toFixed(2)}`);
             send({ balance: 1, subscribe: 1, req_id: getNextReqId() });
 
-            // Subscribe to all markets: history + live ticks (single request)
             const allSymbols = Object.keys(MARKETS);
             for (const key of allSymbols) {
                 send({
@@ -112,8 +111,9 @@ function handleMessage(msg) {
         state.tradeInProgress = false;
         state.activeRealTrade = null;
         state.pendingSettlement = false;
-        if (state.activeRealTrade && state.activeRealTrade.settlementTimeout) {
-            clearTimeout(state.activeRealTrade.settlementTimeout);
+        if (state.activeRealTrade && state.activeRealTrade.settlementTimer) {
+            clearTimeout(state.activeRealTrade.settlementTimer);
+            clearInterval(state.activeRealTrade.tickCounter);
         }
         return;
     }
@@ -124,8 +124,9 @@ function handleMessage(msg) {
             state.tradeInProgress = false;
             state.activeRealTrade = null;
             state.pendingSettlement = false;
-            if (state.activeRealTrade && state.activeRealTrade.settlementTimeout) {
-                clearTimeout(state.activeRealTrade.settlementTimeout);
+            if (state.activeRealTrade && state.activeRealTrade.settlementTimer) {
+                clearTimeout(state.activeRealTrade.settlementTimer);
+                clearInterval(state.activeRealTrade.tickCounter);
             }
         } else {
             send({ buy: msg.proposal.id, price: msg.proposal.ask_price, req_id: getNextReqId() });
@@ -135,10 +136,17 @@ function handleMessage(msg) {
     }
 
     if (msg.msg_type === 'balance') {
-        state.balance = parseFloat(msg.balance.balance);
+        const newBalance = parseFloat(msg.balance.balance);
+        state.balance = newBalance;
         if (state.dailyPnl !== undefined) {
             state.dailyStartBalance = state.balance - state.dailyPnl;
         }
+
+        // ---- Check if we have a pending settlement waiting for balance ----
+        if (state.pendingSettlement && state.activeRealTrade) {
+            settleTradeByBalance();
+        }
+
         broadcastSSE({ state: getFullState() });
         return;
     }
@@ -148,7 +156,6 @@ function handleMessage(msg) {
         const prices = msg.history.prices.map(p => parseFloat(p));
         prices.forEach(p => engine.feed(symbol, p));
         addLog(`✅ History synchronized for ${symbol}`);
-        // Live ticks will come automatically because we set subscribe: 1
         return;
     }
 
@@ -173,138 +180,204 @@ function handleMessage(msg) {
 
             addLog(`💰 Trade Executed: Contract ID ${contractId} at price ${msg.buy.price}`);
 
-            // Subscribe to contract updates
+            // ---- Schedule settlement based on duration ----
+            scheduleTradeSettlement();
+
+            // (Optional) still subscribe to contract updates for debugging
             send({
                 proposal_open_contract: 1,
                 contract_id: contractId,
                 subscribe: 1,
                 req_id: getNextReqId()
             });
-
-            // Safety fallback timeout
-            const durationMs = CONFIG.DURATION * 1000;
-            const bufferMs = 15000;
-            state.activeRealTrade.settlementTimeout = setTimeout(() => {
-                if (state.activeRealTrade && !state.activeRealTrade.settled) {
-                    addLog(`⚠️ Contract ${contractId} not settled via subscription. Falling back to balance check.`);
-                    state.pendingSettlement = true;
-                    send({ balance: 1, req_id: getNextReqId() });
-                }
-            }, durationMs + bufferMs);
         }
         return;
     }
 
-    // ---- Contract lifecycle updates ----
+    // ---- Contract lifecycle updates (optional, for debugging/fallback) ----
     if (msg.msg_type === 'proposal_open_contract') {
         const contract = msg.proposal_open_contract;
         if (!state.activeRealTrade || state.activeRealTrade.contractId !== contract.id) return;
         if (state.activeRealTrade.settled) return;
 
-        // ---- Log entry price once ----
+        // Log entry if available
         if (contract.entry_spot && !state.activeRealTrade.entryLogged) {
             state.activeRealTrade.entryLogged = true;
-            const entryPrice = contract.entry_spot;
-            state.activeRealTrade.entryPrice = entryPrice;
-            addLog(`📌 Entry Price locked at: ${entryPrice} (${state.activeRealTrade.symbol})`);
+            state.activeRealTrade.entryPrice = contract.entry_spot;
+            addLog(`📌 Entry Price locked at: ${contract.entry_spot} (${state.activeRealTrade.symbol})`);
             broadcastSSE({ state: getFullState() });
         }
 
-        // ---- Check if contract is sold (finished) ----
-        if (contract.is_sold === 1) {
-            state.activeRealTrade.settled = true;
-            clearTimeout(state.activeRealTrade.settlementTimeout);
-
-            const profit = contract.profit || (contract.sell_price - contract.buy_price);
-            const isWin = profit >= 0;
-            const exitPrice = contract.sell_price || contract.buy_price;
-
-            state.sessionPnl += profit;
-            state.dailyPnl += profit;
-            if (isWin) {
-                consecutiveLosses = 0;
-            } else {
-                consecutiveLosses++;
-                if (consecutiveLosses >= CONFIG.MAX_CONSECUTIVE_LOSSES) {
-                    state.lossCooldownUntil = Date.now() + CONFIG.LOSS_COOLDOWN_MS;
-                    addLog(`⏳ ${CONFIG.MAX_CONSECUTIVE_LOSSES} consecutive losses. Cooldown for ${CONFIG.LOSS_COOLDOWN_MS/60000} minutes.`);
-                }
+        // If contract sold before our timer, we can settle early
+        if (contract.is_sold === 1 && !state.activeRealTrade.settled) {
+            // Cancel our timer/counter
+            if (state.activeRealTrade.settlementTimer) {
+                clearTimeout(state.activeRealTrade.settlementTimer);
+                clearInterval(state.activeRealTrade.tickCounter);
             }
-
-            const grossPayout = isWin ? (state.activeRealTrade.stake + profit) : 0;
-            saveTradeToCloud({
-                contract_id: contract.id,
-                asset: MARKETS[state.activeRealTrade.symbol]?.name || state.activeRealTrade.symbol,
-                contractType: state.activeRealTrade.contractType,
-                stake: state.activeRealTrade.stake,
-                payout: grossPayout,
-                isWin: isWin,
-                barrier: null,
-                exitTick: null,
-                entry_price: state.activeRealTrade.entryPrice,
-                exit_price: exitPrice,
-                duration_seconds: CONFIG.DURATION,
-                duration_ticks: null
-            });
-
-            addLog(`[Trade Finished] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
-
-            state.tradeInProgress = false;
-            state.activeRealTrade = null;
-            state.pendingSettlement = false;
-            state.cooldownTicksLeft = CONFIG.COOLDOWN_TICKS;
-
-            const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
-            state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
-
-            // Unsubscribe from this contract
-            send({ forget: contract.id, req_id: getNextReqId() });
-
-            (async () => {
-                const limitHit = await syncDailyPnlFromDB();
-                if (limitHit && state.lockReason) addLog(state.lockReason);
-                saveState();
-                broadcastSSE({ state: getFullState() });
-            })();
+            // Let the balance update handle settlement
+            state.pendingSettlement = true;
+            send({ balance: 1, req_id: getNextReqId() });
         }
     }
 }
 
 // =====================================================================
-//  PROCESS LIVE FEED
+//  SETTLEMENT LOGIC (balance-based)
+// =====================================================================
+function settleTradeByBalance() {
+    if (!state.activeRealTrade || state.activeRealTrade.settled) return;
+    if (!state.balance) return;
+
+    const trade = state.activeRealTrade;
+    const profit = state.balance - trade.balanceBefore;
+    const isWin = profit >= 0;
+
+    // Update P&L
+    state.sessionPnl += profit;
+    state.dailyPnl += profit;
+    if (isWin) {
+        consecutiveLosses = 0;
+    } else {
+        consecutiveLosses++;
+        if (consecutiveLosses >= CONFIG.MAX_CONSECUTIVE_LOSSES) {
+            state.lossCooldownUntil = Date.now() + CONFIG.LOSS_COOLDOWN_MS;
+            addLog(`⏳ ${CONFIG.MAX_CONSECUTIVE_LOSSES} consecutive losses. Cooldown for ${CONFIG.LOSS_COOLDOWN_MS/60000} minutes.`);
+        }
+    }
+
+    const grossPayout = isWin ? (trade.stake + profit) : 0;
+    // For exit price, use current market price (from engine) if available, else use entry + profit direction
+    let exitPrice = null;
+    const currentMetric = state.marketMetrics[trade.symbol];
+    if (currentMetric) {
+        exitPrice = currentMetric.price;
+    } else {
+        // fallback: approximate
+        exitPrice = trade.entryPrice + (trade.contractType === 'CALL' ? profit : -profit);
+    }
+
+    saveTradeToCloud({
+        contract_id: trade.contractId || null,
+        asset: MARKETS[trade.symbol]?.name || trade.symbol,
+        contractType: trade.contractType,
+        stake: trade.stake,
+        payout: grossPayout,
+        isWin: isWin,
+        barrier: null,
+        exitTick: null,
+        entry_price: trade.entryPrice,
+        exit_price: exitPrice,
+        duration_seconds: trade.durationUnit === 's' ? trade.duration : (trade.durationUnit === 'm' ? trade.duration * 60 : 0),
+        duration_ticks: trade.durationUnit === 't' ? trade.duration : 0
+    });
+
+    addLog(`[Trade Finished] ${trade.symbol} | ${trade.contractType} | ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
+
+    // Clean up
+    trade.settled = true;
+    state.tradeInProgress = false;
+    state.pendingSettlement = false;
+    state.activeRealTrade = null;
+    state.cooldownTicksLeft = CONFIG.COOLDOWN_TICKS;
+
+    // Recalculate stake
+    const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
+    state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
+
+    // Sync DB and broadcast
+    (async () => {
+        const limitHit = await syncDailyPnlFromDB();
+        if (limitHit && state.lockReason) addLog(state.lockReason);
+        saveState();
+        broadcastSSE({ state: getFullState() });
+    })();
+}
+
+// =====================================================================
+//  SCHEDULE TRADE SETTLEMENT (timer or tick counter)
+// =====================================================================
+function scheduleTradeSettlement() {
+    const trade = state.activeRealTrade;
+    if (!trade) return;
+
+    const duration = trade.duration || CONFIG.DURATION;
+    const unit = trade.durationUnit || 's';
+
+    if (unit === 't') {
+        // ---- Count ticks ----
+        trade.remainingTicks = duration;
+        addLog(`⏳ Counting ${duration} ticks for settlement...`);
+        // We'll decrement in processLiveFeed
+        // Set a safety timer in case ticks stop arriving
+        const safetyTimeout = Math.max(duration * 2, 30) * 1000; // at least 30s
+        trade.settlementTimer = setTimeout(() => {
+            if (!trade.settled) {
+                addLog(`⚠️ Tick counter timed out after ${safetyTimeout/1000}s. Settling by balance.`);
+                state.pendingSettlement = true;
+                send({ balance: 1, req_id: getNextReqId() });
+            }
+        }, safetyTimeout);
+    } else {
+        // ---- Timer for seconds or minutes ----
+        let delayMs;
+        if (unit === 's') {
+            delayMs = duration * 1000;
+        } else if (unit === 'm') {
+            delayMs = duration * 60000;
+        } else {
+            delayMs = duration * 1000; // fallback
+        }
+        // Add a small buffer (3 seconds or 5 ticks equivalent)
+        const bufferMs = 3000;
+        delayMs += bufferMs;
+
+        addLog(`⏳ Waiting ${duration}${unit} + ${bufferMs/1000}s before settling...`);
+        trade.settlementTimer = setTimeout(() => {
+            if (!trade.settled) {
+                addLog(`⏰ Timer expired. Settling by balance.`);
+                state.pendingSettlement = true;
+                send({ balance: 1, req_id: getNextReqId() });
+            }
+        }, delayMs);
+    }
+}
+
+// =====================================================================
+//  PROCESS LIVE FEED (with tick counting)
 // =====================================================================
 function processLiveFeed(symbol, price) {
     if (!MARKETS[symbol]) return;
 
-    if (state.tradeInProgress && state.activeRealTrade && state.activeRealTrade.executionTime) {
-        const elapsedSeconds = (Date.now() - state.activeRealTrade.executionTime) / 1000;
-        if (elapsedSeconds > 120) {
-            addLog(`⚠️ WARNING: Trade stuck for ${elapsedSeconds.toFixed(1)}s. Force resetting.`);
-            if (state.activeRealTrade.settlementTimeout) {
-                clearTimeout(state.activeRealTrade.settlementTimeout);
+    // ---- Tick counting for active trade ----
+    if (state.tradeInProgress && state.activeRealTrade && !state.activeRealTrade.settled) {
+        const trade = state.activeRealTrade;
+        if (trade.symbol === symbol && trade.durationUnit === 't') {
+            if (trade.remainingTicks !== undefined) {
+                trade.remainingTicks--;
+                if (trade.remainingTicks <= 0) {
+                    addLog(`✅ ${symbol} tick countdown finished. Settling by balance.`);
+                    // Cancel the safety timer
+                    if (trade.settlementTimer) {
+                        clearTimeout(trade.settlementTimer);
+                        trade.settlementTimer = null;
+                    }
+                    state.pendingSettlement = true;
+                    send({ balance: 1, req_id: getNextReqId() });
+                }
             }
-            state.tradeInProgress = false;
-            state.activeRealTrade = null;
-            state.pendingSettlement = false;
-            send({ balance: 1, req_id: getNextReqId() });
-            saveState();
-            broadcastSSE({ state: getFullState() });
-            return;
         }
     }
 
-    if (state.pendingSettlement) {
-        broadcastSSE({ state: getFullState() });
-        return;
-    }
-
+    // ---- Feed engine and update metrics ----
     const metric = engine.feed(symbol, price);
     if (!metric) return;
-
     state.marketMetrics[symbol] = metric;
 
+    // ---- Cooldown ----
     if (state.cooldownTicksLeft > 0) state.cooldownTicksLeft--;
 
+    // ---- Strategy execution (unchanged) ----
     if (!state.active || state.locked || state.tradeInProgress || state.cooldownTicksLeft > 0) {
         broadcastSSE({ state: getFullState() });
         return;
@@ -363,13 +436,18 @@ function processLiveFeed(symbol, price) {
             stake: state.currentStake,
             balanceBefore: state.balance,
             contractType: direction,
+            duration: duration,
+            durationUnit: unit,
             barrier: null,
             direction: direction,
             entryPrice: null,
             executionTime: Date.now(),
-            settlementTimeout: null,
+            settlementTimer: null,
+            tickCounter: null,
+            remainingTicks: unit === 't' ? duration : undefined,
             settled: false,
-            entryLogged: false
+            entryLogged: false,
+            contractId: null
         };
 
         state.lastTriggerTime = now;
