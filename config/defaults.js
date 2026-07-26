@@ -6,8 +6,8 @@ const CONFIG_FILE = '/var/data/deriv_config.json';
 const DEFAULT_CONFIG = {
     // ---------- Trade Execution ----------
     DURATION: 7,                     // 7 ticks for auto trading
-    MAX_CONSECUTIVE_LOSSES: 7,
-    LOSS_COOLDOWN_MS: 3000,
+    MAX_CONSECUTIVE_LOSSES: 3,
+    LOSS_COOLDOWN_MS: 300000,
     COOLDOWN_TICKS: 5,
 
     // ---------- Strategy ----------
@@ -15,7 +15,8 @@ const DEFAULT_CONFIG = {
     BOLLINGER_PERIOD: 20,
     BOLLINGER_STD: 2,
     RSI_PERIOD: 20,
-    MIN_VOLATILITY_PERCENT: 0.03,    // 0.03% minimum volatility
+    MIN_VOLATILITY_PERCENT: 0.06,    // increased from 0.03 to 0.06
+    MA_DIFF_THRESHOLD: 0.05,         // minimum MA diff % (absolute)
 
     // ---------- Risk ----------
     RISK_PERCENT: 1,
@@ -24,7 +25,7 @@ const DEFAULT_CONFIG = {
     MIN_STAKE: 0.35,
 
     // ---------- Timing ----------
-    MIN_TRIGGER_INTERVAL: 30000,
+    MIN_TRIGGER_INTERVAL: 30000,     // 30s cooldown between trades
     SETTLEMENT_TIMEOUT_MS: 15000,
     PNL_SYNC_INTERVAL_MS: 300000
 };
