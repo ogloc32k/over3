@@ -9,6 +9,7 @@ let derivWs = null;
 let reqId = 0;
 let keepAliveLoop = null;
 let watchdogTimer = null;
+let tradeSafetyTimer = null; // 25s fallback
 
 const engine = new MultiMarketPipeline(Object.keys(MARKETS));
 
@@ -25,6 +26,7 @@ function getNextReqId() {
 function disconnectDeriv() {
     clearInterval(keepAliveLoop);
     clearTimeout(watchdogTimer);
+    clearTimeout(tradeSafetyTimer);
     if (derivWs) { derivWs.removeAllListeners(); try { derivWs.terminate(); } catch(e) {} derivWs = null; }
 }
 
@@ -109,6 +111,7 @@ function handleMessage(msg) {
         state.tradeInProgress = false;
         state.activeRealTrade = null;
         state.pendingSettlement = false;
+        clearTimeout(tradeSafetyTimer);
         return;
     }
 
@@ -118,6 +121,7 @@ function handleMessage(msg) {
             state.tradeInProgress = false;
             state.activeRealTrade = null;
             state.pendingSettlement = false;
+            clearTimeout(tradeSafetyTimer);
         } else {
             send({ buy: msg.proposal.id, price: msg.proposal.ask_price, req_id: getNextReqId() });
             addLog(`✅ Proposal confirmed: ${msg.proposal.ask_price}. Executing buy...`);
@@ -171,17 +175,30 @@ function handleMessage(msg) {
                 subscribe: 1,
                 req_id: getNextReqId()
             });
+
+            // ---- Start 25‑second safety timer to unlock if settlement is missed ----
+            clearTimeout(tradeSafetyTimer);
+            tradeSafetyTimer = setTimeout(() => {
+                if (state.tradeInProgress) {
+                    console.warn('[System Recovery] Settlement packet delayed. Forcing system back to IDLE.');
+                    addLog('⚠️ Safety timer triggered: trade not settled within 25s. Forcing unlock.');
+                    state.tradeInProgress = false;
+                    state.activeRealTrade = null;
+                    state.pendingSettlement = false;
+                    broadcastSSE({ state: getFullState() });
+                }
+            }, 25000);
         }
         return;
     }
 
-    // ---- Contract lifecycle updates ----
+    // ---- Contract lifecycle updates (Deriv's official stream) ----
     if (msg.msg_type === 'proposal_open_contract') {
         const contract = msg.proposal_open_contract;
         if (!state.activeRealTrade || state.activeRealTrade.contractId !== contract.id) return;
         if (state.activeRealTrade.settled) return;
 
-        // Log entry price if available
+        // ---- Log entry price once ----
         if (contract.entry_spot && !state.activeRealTrade.entryLogged) {
             state.activeRealTrade.entryLogged = true;
             state.activeRealTrade.entryPrice = contract.entry_spot;
@@ -189,13 +206,20 @@ function handleMessage(msg) {
             broadcastSSE({ state: getFullState() });
         }
 
-        // ---- Check if contract is sold ----
+        // ---- Detect contract settlement ----
         if (contract.is_sold === 1) {
-            // --- RESET THE LOCK ---
-            state.activeRealTrade.settled = true;
-            const profit = contract.profit || 0;
-            const isWin = profit >= 0;
+            // Clear safety timer
+            clearTimeout(tradeSafetyTimer);
 
+            // Mark as settled to prevent double processing
+            state.activeRealTrade.settled = true;
+
+            // ---- Compute outcome ----
+            const profit = contract.profit || 0;
+            const isWin = profit > 0;
+            const statusLabel = isWin ? 'WIN' : 'LOSS';
+
+            // ---- Update P&L ----
             state.sessionPnl += profit;
             state.dailyPnl += profit;
             if (isWin) {
@@ -208,6 +232,7 @@ function handleMessage(msg) {
                 }
             }
 
+            // ---- Save to database ----
             const grossPayout = isWin ? (state.activeRealTrade.stake + profit) : 0;
             saveTradeToCloud({
                 contract_id: contract.id,
@@ -224,10 +249,10 @@ function handleMessage(msg) {
                 duration_ticks: null
             });
 
-            // ---- LOG THE RESULT ----
-            addLog(`[Trade Finished] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
+            // ---- Log final result ----
+            addLog(`[Trade Finished] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | ${statusLabel} | Profit/Loss: $${profit.toFixed(2)} | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
 
-            // ---- UNLOCK THE SYSTEM ----
+            // ---- Reset execution lock and clean up ----
             state.tradeInProgress = false;
             state.activeRealTrade = null;
             state.pendingSettlement = false;
@@ -237,10 +262,10 @@ function handleMessage(msg) {
             const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
             state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-            // ---- CLOSE THE SUBSCRIPTION ----
+            // ---- Close the subscription stream ----
             send({ forget: contract.id, req_id: getNextReqId() });
 
-            // ---- SYNC DB & UPDATE UI ----
+            // ---- Sync DB and update UI ----
             (async () => {
                 const limitHit = await syncDailyPnlFromDB();
                 if (limitHit && state.lockReason) addLog(state.lockReason);
