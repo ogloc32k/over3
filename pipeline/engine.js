@@ -8,11 +8,11 @@ class MultiMarketPipeline {
     constructor(symbols) {
         this.buffers = {};
         this.lastPrices = {};
-        this.prevDiffs = {};   // store previous MA diff per symbol
+        this.diffHistory = {};   // store last 3 MA diffs per symbol
         for (const symbol of symbols) {
             this.buffers[symbol] = [];
             this.lastPrices[symbol] = null;
-            this.prevDiffs[symbol] = 0;
+            this.diffHistory[symbol] = [];
         }
     }
 
@@ -103,12 +103,11 @@ class MultiMarketPipeline {
                 volatility: 0,
                 lastPrices: buf.slice(-5),
                 conditions: { breakout: false, rsi: false, bollinger: false, volatility: false, ma: false },
-                // New fields for strategy
                 maDiff: 0,
                 maDiffExpanding: false,
-                maDiffPrevious: 0
+                maDiffTwoTicksAgo: 0,
+                maDiffExpanding2Tick: false
             };
-            this.prevDiffs[symbol] = 0;
             return result;
         }
 
@@ -128,23 +127,43 @@ class MultiMarketPipeline {
         const rsi = this._rsi(buf, CONFIG.RSI_PERIOD);
         const sr = this._findSupportResistance(window);
 
-        // ---- Compute MA diff and expansion ----
+        // ---- Compute MA diff and store history ----
         let maDiff = 0;
-        let maDiffExpanding = false;
-        let maDiffPrevious = this.prevDiffs[symbol] || 0;
         if (fastMA !== null && slowMA !== null) {
             maDiff = ((fastMA - slowMA) / price) * 100; // percentage
-            // Expansion: current diff is more positive (or more negative) than previous
-            if (Math.abs(maDiff) > Math.abs(maDiffPrevious)) {
+        }
+
+        // Store diff in history (keep last 3)
+        const history = this.diffHistory[symbol] || [];
+        history.push(maDiff);
+        if (history.length > 3) history.shift();
+        this.diffHistory[symbol] = history;
+
+        // Determine expansion vs 2 ticks ago
+        let maDiffTwoTicksAgo = 0;
+        let maDiffExpanding2Tick = false;
+        if (history.length >= 3) {
+            const twoTicksAgo = history[history.length - 3];
+            maDiffTwoTicksAgo = twoTicksAgo;
+            // Current diff > diff from 2 ticks ago (absolute)
+            if (Math.abs(maDiff) > Math.abs(twoTicksAgo)) {
+                maDiffExpanding2Tick = true;
+            }
+        }
+
+        // Legacy expansion (1 tick)
+        let maDiffExpanding = false;
+        if (history.length >= 2) {
+            const prev = history[history.length - 2];
+            if (Math.abs(maDiff) > Math.abs(prev)) {
                 maDiffExpanding = true;
             }
         }
-        this.prevDiffs[symbol] = maDiff;
 
         const isBreakout = sr.resistance ? price > sr.resistance * 1.001 : false;
         const isBreakdown = sr.support ? price < sr.support * 0.999 : false;
 
-        // ---- Legacy conditions (kept for backward compatibility) ----
+        // ---- Legacy conditions ----
         const condBreakout = isBreakout;
         const condRSI = rsi >= 50 && rsi <= 85;
         const condBollinger = bb.upper !== null && price >= bb.upper * 0.999;
@@ -192,13 +211,14 @@ class MultiMarketPipeline {
             condValues: {
                 rsiValue: rsi,
                 volValue: vol,
-                maValue: fastMA !== null && slowMA !== null ? ((fastMA - slowMA) / price * 100) : 0
+                maValue: maDiff
             },
             callReady, putReady,
             // New strategy fields
             maDiff: maDiff,
             maDiffExpanding: maDiffExpanding,
-            maDiffPrevious: maDiffPrevious
+            maDiffTwoTicksAgo: maDiffTwoTicksAgo,
+            maDiffExpanding2Tick: maDiffExpanding2Tick
         };
 
         return result;
