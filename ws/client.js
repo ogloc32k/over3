@@ -66,10 +66,9 @@ async function connectDeriv() {
             addLog(`🌐 Connected. Balance: $${state.balance.toFixed(2)} | Session: $${state.sessionPnl.toFixed(2)}`);
             send({ balance: 1, subscribe: 1, req_id: getNextReqId() });
 
-            // ---- Subscribe to all markets: history + live ticks (single request) ----
+            // Subscribe to all markets: history + live ticks (single request)
             const allSymbols = Object.keys(MARKETS);
             for (const key of allSymbols) {
-                // Using `subscribe: 1` automatically starts streaming ticks after history is sent
                 send({
                     ticks_history: key,
                     count: 2000,
@@ -145,12 +144,11 @@ function handleMessage(msg) {
     }
 
     if (msg.msg_type === 'history') {
-        // Historical data is processed; no need to send a separate ticks subscription
         const symbol = msg.echo_req.ticks_history;
         const prices = msg.history.prices.map(p => parseFloat(p));
         prices.forEach(p => engine.feed(symbol, p));
         addLog(`✅ History synchronized for ${symbol}`);
-        // The live ticks will come automatically because we set subscribe: 1
+        // Live ticks will come automatically because we set subscribe: 1
         return;
     }
 
@@ -207,7 +205,6 @@ function handleMessage(msg) {
         if (contract.entry_spot && !state.activeRealTrade.entryLogged) {
             state.activeRealTrade.entryLogged = true;
             const entryPrice = contract.entry_spot;
-            // Update entryPrice in the trade object (for ledger)
             state.activeRealTrade.entryPrice = entryPrice;
             addLog(`📌 Entry Price locked at: ${entryPrice} (${state.activeRealTrade.symbol})`);
             broadcastSSE({ state: getFullState() });
@@ -218,12 +215,10 @@ function handleMessage(msg) {
             state.activeRealTrade.settled = true;
             clearTimeout(state.activeRealTrade.settlementTimeout);
 
-            // Extract profit/loss
             const profit = contract.profit || (contract.sell_price - contract.buy_price);
             const isWin = profit >= 0;
             const exitPrice = contract.sell_price || contract.buy_price;
 
-            // Update P&L
             state.sessionPnl += profit;
             state.dailyPnl += profit;
             if (isWin) {
@@ -252,23 +247,19 @@ function handleMessage(msg) {
                 duration_ticks: null
             });
 
-            // Final log
             addLog(`[Trade Finished] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
 
-            // Clean up trade state
             state.tradeInProgress = false;
             state.activeRealTrade = null;
             state.pendingSettlement = false;
             state.cooldownTicksLeft = CONFIG.COOLDOWN_TICKS;
 
-            // Recalculate stake
             const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
             state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
             // Unsubscribe from this contract
             send({ forget: contract.id, req_id: getNextReqId() });
 
-            // Sync DB and broadcast
             (async () => {
                 const limitHit = await syncDailyPnlFromDB();
                 if (limitHit && state.lockReason) addLog(state.lockReason);
@@ -378,7 +369,7 @@ function processLiveFeed(symbol, price) {
             executionTime: Date.now(),
             settlementTimeout: null,
             settled: false,
-            entryLogged: false   // flag to log entry price once
+            entryLogged: false
         };
 
         state.lastTriggerTime = now;
