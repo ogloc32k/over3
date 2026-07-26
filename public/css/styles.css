@@ -25,10 +25,10 @@ body {
   --text-primary: #d1d4dc;
   --text-secondary: #787b86;
   --text-muted: #5a5d68;
-  --green-profit: #10b981;      /* soft mint */
-  --red-loss: #ef4444;          /* muted coral */
+  --green-profit: #10b981;
+  --red-loss: #ef4444;
   --orange-warn: #f59e0b;
-  --neon-blue: #3b82f6;         /* slate sky blue */
+  --neon-blue: #3b82f6;
   --header-height: 44px;
   --sidebar-width: 220px;
   --tab-height: 60px;
@@ -310,11 +310,9 @@ body.light {
   background: var(--bg-surface);
   color: var(--text-primary);
 }
-/* When sidebar is collapsed, move toggle to the left edge */
 .app-sidebar.collapsed ~ .sidebar-toggle-fixed {
   left: 8px;
 }
-/* On mobile, adjust position */
 @media (max-width: 768px) {
   .sidebar-toggle-fixed {
     top: calc(var(--header-height) + 4px);
@@ -385,7 +383,7 @@ body.light {
 .tab-pages.active { display: block; }
 
 /* ============================================================
-   SETTINGS – with theme support
+   SETTINGS
    ============================================================ */
 .settings-grid {
   padding: 4px 0 70px;
@@ -586,19 +584,88 @@ body.light {
 .data-table .col-diff.positive { color: var(--green-profit); }
 .data-table .col-diff.negative { color: var(--red-loss); }
 .data-table .col-step { text-align: center; }
-.data-table .col-step .step-badge {
-  font-size: 6px;
-  font-weight: 700;
-  padding: 1px 6px;
-  border-radius: 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.2px;
-  border: 1px solid transparent;
+
+/* ---- Soft badge styles for Breakout & Step ---- */
+.badge-up {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 7px;
+  font-weight: 600;
+  display: inline-block;
 }
-.step-badge.step-3 { background: rgba(16,185,129,0.12); color: var(--green-profit); border-color: var(--green-profit); }
-.step-badge.step-2 { background: rgba(245,158,11,0.12); color: var(--orange-warn); border-color: var(--orange-warn); }
-.step-badge.step-1 { background: rgba(59,130,246,0.10); color: var(--neon-blue); border-color: var(--neon-blue); }
-.step-badge.step-0 { background: rgba(120,123,134,0.08); color: var(--text-secondary); border-color: var(--border-subtle); }
+.badge-down {
+  background: #fff1f2;
+  color: #9f1239;
+  border: 1px solid #fecdd3;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 7px;
+  font-weight: 600;
+  display: inline-block;
+}
+.badge-range {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 7px;
+  font-weight: 600;
+  display: inline-block;
+}
+.badge-step-level {
+  background: #eff6ff;
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 7px;
+  font-weight: 600;
+  display: inline-block;
+}
+.badge-step-trend {
+  background: #eef2ff;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 7px;
+  font-weight: 600;
+  display: inline-block;
+}
+.badge-step-spike {
+  background: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fde68a;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 7px;
+  font-weight: 600;
+  display: inline-block;
+}
+.badge-step-entry {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #6ee7b7;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 7px;
+  font-weight: 700;
+  display: inline-block;
+}
+.badge-step-scan {
+  background: #f8fafc;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 7px;
+  font-weight: 600;
+  display: inline-block;
+}
 
 .analytics-grid {
   display: flex;
