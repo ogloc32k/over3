@@ -169,7 +169,7 @@ router.post('/control', (req, res) => {
 });
 
 // =====================================================================
-//  MANUAL TRADE – FIXED WITH NEW SETTLEMENT LOGIC
+//  MANUAL TRADE
 // =====================================================================
 router.post('/manual-trade', async (req, res) => {
     try {
@@ -205,21 +205,20 @@ router.post('/manual-trade', async (req, res) => {
         const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
         state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-        // Set trade state – this will be used by the WebSocket's settlement logic
+        // Set trade state
         state.tradeInProgress = true;
         state.activeRealTrade = {
             symbol,
             stake: state.currentStake,
             balanceBefore: state.balance,
             contractType,
-            duration: dur,           // store duration for settlement
-            durationUnit: unit,      // store unit
+            duration: dur,
+            durationUnit: unit,
             barrier: null,
             direction: contractType,
             entryPrice: null,
             executionTime: Date.now(),
             settlementTimer: null,
-            tickCounter: null,
             remainingTicks: unit === 't' ? dur : undefined,
             settled: false,
             entryLogged: false,
@@ -241,11 +240,9 @@ router.post('/manual-trade', async (req, res) => {
 
         addLog(`📤 Manual ${contractType} request for ${symbol} (${dur} ${unit === 't' ? 'ticks' : unit === 's' ? 'seconds' : 'minutes'})...`);
 
-        // Return success – the settlement will be handled by the WebSocket
         return res.json({ success: true, message: 'Proposal requested.' });
     } catch (err) {
         console.error('Manual trade error:', err);
-        // Rollback trade state if something failed
         state.tradeInProgress = false;
         state.activeRealTrade = null;
         return res.status(500).json({ error: 'Internal server error: ' + err.message });
