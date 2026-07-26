@@ -103,14 +103,12 @@ async function connectDeriv() {
 //  MESSAGE HANDLER
 // =====================================================================
 function handleMessage(msg) {
+    // ---- Error handling: always unlock on error ----
     if (msg.error) {
         addLog(`API Error: ${msg.error.message}`);
         state.tradeInProgress = false;
         state.activeRealTrade = null;
         state.pendingSettlement = false;
-        if (state.activeRealTrade && state.activeRealTrade.settlementTimer) {
-            clearTimeout(state.activeRealTrade.settlementTimer);
-        }
         return;
     }
 
@@ -120,9 +118,6 @@ function handleMessage(msg) {
             state.tradeInProgress = false;
             state.activeRealTrade = null;
             state.pendingSettlement = false;
-            if (state.activeRealTrade && state.activeRealTrade.settlementTimer) {
-                clearTimeout(state.activeRealTrade.settlementTimer);
-            }
         } else {
             send({ buy: msg.proposal.id, price: msg.proposal.ask_price, req_id: getNextReqId() });
             addLog(`✅ Proposal confirmed: ${msg.proposal.ask_price}. Executing buy...`);
@@ -162,7 +157,6 @@ function handleMessage(msg) {
     if (msg.msg_type === 'buy') {
         if (state.activeRealTrade) {
             const contractId = msg.buy.contract_id;
-            // Fix: extract price from correct field
             const entryPrice = msg.buy.buy_price || msg.buy.price || 'Market Price';
             state.activeRealTrade.contractId = contractId;
             state.activeRealTrade.entryPrice = entryPrice;
@@ -195,8 +189,9 @@ function handleMessage(msg) {
             broadcastSSE({ state: getFullState() });
         }
 
-        // Check if contract is sold
+        // ---- Check if contract is sold ----
         if (contract.is_sold === 1) {
+            // --- RESET THE LOCK ---
             state.activeRealTrade.settled = true;
             const profit = contract.profit || 0;
             const isWin = profit >= 0;
@@ -229,19 +224,23 @@ function handleMessage(msg) {
                 duration_ticks: null
             });
 
+            // ---- LOG THE RESULT ----
             addLog(`[Trade Finished] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
 
+            // ---- UNLOCK THE SYSTEM ----
             state.tradeInProgress = false;
             state.activeRealTrade = null;
             state.pendingSettlement = false;
             state.cooldownTicksLeft = CONFIG.COOLDOWN_TICKS;
 
+            // Recalculate stake
             const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
             state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-            // Unsubscribe from this contract
+            // ---- CLOSE THE SUBSCRIPTION ----
             send({ forget: contract.id, req_id: getNextReqId() });
 
+            // ---- SYNC DB & UPDATE UI ----
             (async () => {
                 const limitHit = await syncDailyPnlFromDB();
                 if (limitHit && state.lockReason) addLog(state.lockReason);
@@ -253,7 +252,7 @@ function handleMessage(msg) {
 }
 
 // =====================================================================
-//  PROCESS LIVE FEED (no tick counter)
+//  PROCESS LIVE FEED (no custom tick counter)
 // =====================================================================
 function processLiveFeed(symbol, price) {
     const metric = engine.feed(symbol, price);
@@ -263,7 +262,7 @@ function processLiveFeed(symbol, price) {
     // Cooldown
     if (state.cooldownTicksLeft > 0) state.cooldownTicksLeft--;
 
-    // Strategy execution (skip if trade in progress, locked, etc.)
+    // Strategy execution (skip if locked or trade in progress)
     if (!state.active || state.locked || state.tradeInProgress || state.cooldownTicksLeft > 0) {
         broadcastSSE({ state: getFullState() });
         return;
@@ -320,7 +319,6 @@ function processLiveFeed(symbol, price) {
             direction: direction,
             entryPrice: null,
             executionTime: Date.now(),
-            settlementTimer: null,
             settled: false,
             entryLogged: false,
             contractId: null
