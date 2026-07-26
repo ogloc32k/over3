@@ -25,10 +25,8 @@ const state = {
     lastTriggerTime: 0,
     lossCooldownUntil: 0,
     pendingSettlement: false,
-    consecutiveLosses: 0   // <-- add this line
+    consecutiveLosses: 0
 };
-
-let consecutiveLosses = 0;
 
 function saveState() {
     try {
@@ -70,19 +68,35 @@ function getFullState() {
     return { ...rest, marketMetrics: state.marketMetrics || {} };
 }
 
-// ---- Strategy check ----
+// ---- NEW STRATEGY: MA DIFF, RSI, VOL ----
 function checkStrategy(symbol, metric) {
     if (!metric) return null;
-    const { price, support, resistance, isBreakout, isBreakdown, rsi, bbUpper, bbLower, volatility } = metric;
 
-    if (volatility < CONFIG.MIN_VOLATILITY_PERCENT) return null;
+    const { rsi, volatility, maDiff, maDiffExpanding, fastMA, slowMA } = metric;
 
-    if (isBreakout && bbUpper !== null && price >= bbUpper * 0.999 && rsi >= 50 && rsi <= 85) {
-        return { direction: 'CALL', score: volatility };
+    // 1. Volatility must be > 0.03% (CONFIG.MIN_VOLATILITY_PERCENT)
+    if (volatility < CONFIG.MIN_VOLATILITY_PERCENT) {
+        return null;
     }
 
-    if (isBreakdown && bbLower !== null && price <= bbLower * 1.001 && rsi >= 15 && rsi <= 50) {
-        return { direction: 'PUT', score: volatility };
+    // 2. MA diff must exist and be expanding
+    if (!maDiffExpanding || maDiff === 0) {
+        return null;
+    }
+
+    // 3. CALL (UP) conditions
+    if (maDiff > 0 && rsi >= 52 && rsi <= 68) {
+        // Only if the trend is clearly accelerating: maDiff > 0.01% (optional safety)
+        if (maDiff >= 0.01) {
+            return { direction: 'CALL', score: volatility * 1.5 };
+        }
+    }
+
+    // 4. PUT (DOWN) conditions
+    if (maDiff < 0 && rsi >= 32 && rsi <= 48) {
+        if (maDiff <= -0.01) {
+            return { direction: 'PUT', score: volatility * 1.5 };
+        }
     }
 
     return null;
@@ -102,12 +116,9 @@ async function syncDailyPnlFromDB() {
         const total = data.reduce((sum, row) => sum + (row.profit_loss || 0), 0);
         state.dailyPnl = total;
         if (state.balance !== null) state.dailyStartBalance = state.balance - state.dailyPnl;
-        // We will check limits and return whether they were hit
-        return checkDailyLimits(); // returns true if limit triggered
-    } catch (err) {
-        console.error('❌ Failed to sync daily P&L:', err.message);
-        return false;
-    }
+        const limitHit = checkDailyLimits();
+        return limitHit;
+    } catch (err) { console.error('❌ Failed to sync daily P&L:', err.message); return false; }
 }
 
 function checkDailyLimits() {
@@ -127,7 +138,7 @@ function checkDailyLimits() {
     if (state.locked && state.dailyPnl < tpLimit && state.dailyPnl > -slLimit) {
         state.locked = false;
         state.lockReason = '';
-        return true; // cleared
+        return true;
     }
     return false;
 }
@@ -135,7 +146,6 @@ function checkDailyLimits() {
 module.exports = {
     CONFIG,
     state,
-    consecutiveLosses, // allow mutation
     saveState,
     loadState,
     getFullState,
