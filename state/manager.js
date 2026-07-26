@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { loadConfig } = require('../config/defaults');
 const { supabase } = require('../database');
+
 const CONFIG = loadConfig();
 const STATE_FILE = '/var/data/deriv_multimarket_state.json';
 
@@ -100,10 +101,12 @@ async function syncDailyPnlFromDB() {
         const total = data.reduce((sum, row) => sum + (row.profit_loss || 0), 0);
         state.dailyPnl = total;
         if (state.balance !== null) state.dailyStartBalance = state.balance - state.dailyPnl;
-        checkDailyLimits();
-        // broadcastSSE is imported but we'll call it from the main file to avoid circular
-        return total;
-    } catch (err) { console.error('❌ Failed to sync daily P&L:', err.message); return 0; }
+        // We will check limits and return whether they were hit
+        return checkDailyLimits(); // returns true if limit triggered
+    } catch (err) {
+        console.error('❌ Failed to sync daily P&L:', err.message);
+        return false;
+    }
 }
 
 function checkDailyLimits() {
@@ -113,7 +116,6 @@ function checkDailyLimits() {
     if (state.dailyPnl >= tpLimit) {
         state.locked = true;
         state.lockReason = `🎯 Daily Target Reached: +$${state.dailyPnl.toFixed(2)} (${CONFIG.TP_PERCENT}% of start). Trading paused. Will resume at midnight.`;
-        // log via addLog, but we'll handle outside to avoid circular
         return true;
     }
     if (state.dailyPnl <= -slLimit) {
@@ -124,7 +126,7 @@ function checkDailyLimits() {
     if (state.locked && state.dailyPnl < tpLimit && state.dailyPnl > -slLimit) {
         state.locked = false;
         state.lockReason = '';
-        return true; // indicates cleared
+        return true; // cleared
     }
     return false;
 }
@@ -132,7 +134,7 @@ function checkDailyLimits() {
 module.exports = {
     CONFIG,
     state,
-    consecutiveLosses, // we'll allow mutation
+    consecutiveLosses, // allow mutation
     saveState,
     loadState,
     getFullState,
