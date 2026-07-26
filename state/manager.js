@@ -2,8 +2,6 @@ const fs = require('fs');
 const path = require('path');
 const { loadConfig } = require('../config/defaults');
 const { supabase } = require('../database');
-const { addLog, broadcastSSE } = require('../api/sse'); // circular? we'll fix later
-
 const CONFIG = loadConfig();
 const STATE_FILE = '/var/data/deriv_multimarket_state.json';
 
