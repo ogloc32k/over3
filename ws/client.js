@@ -44,7 +44,6 @@ async function connectDeriv() {
         state.balance = parseFloat(targetAccount.balance);
         state.currency = targetAccount.currency || 'USD';
 
-        // Sync daily P&L and check limits
         const limitHit = await syncDailyPnlFromDB();
         if (limitHit && state.lockReason) addLog(state.lockReason);
         broadcastSSE({ state: getFullState() });
@@ -62,7 +61,14 @@ async function connectDeriv() {
         derivWs.on('open', () => {
             addLog(`🌐 Connected. Balance: $${state.balance.toFixed(2)} | Session: $${state.sessionPnl.toFixed(2)}`);
             send({ balance: 1, subscribe: 1, req_id: ++reqId });
-            for (const key in MARKETS) send({ ticks_history: key, count: 2000, end: 'latest', req_id: ++reqId });
+
+            // ---- FIX 1: Subscribe to live ticks for ALL markets ----
+            const allSymbols = Object.keys(MARKETS);
+            for (const key of allSymbols) {
+                send({ ticks_history: key, count: 2000, end: 'latest', req_id: ++reqId });
+                send({ ticks: key, subscribe: 1, req_id: ++reqId });  // <-- LIVE subscription
+            }
+            addLog(`📡 Subscribed to ${allSymbols.length} markets (history + live ticks).`);
 
             setInterval(() => { broadcastSSE({ state: getFullState() }); }, 3000);
 
@@ -133,12 +139,21 @@ function handleMessage(msg) {
         const prices = msg.history.prices.map(p => parseFloat(p));
         prices.forEach(p => engine.feed(symbol, p));
         addLog(`✅ History synchronized for ${symbol}`);
+        // We already subscribed to live ticks in open, but keep this as a fallback
         send({ ticks: symbol, subscribe: 1, req_id: ++reqId });
         return;
     }
 
     if (msg.msg_type === 'tick') {
-        processLiveFeed(msg.tick.symbol, parseFloat(msg.tick.quote));
+        // ---- FIX 2: Process tick safely ----
+        try {
+            const symbol = msg.tick.symbol;
+            const price = parseFloat(msg.tick.quote);
+            processLiveFeed(symbol, price);
+        } catch (err) {
+            addLog(`❌ Tick handler error: ${err.message}`);
+            console.error('Tick error:', err);
+        }
         return;
     }
 
@@ -171,12 +186,10 @@ function handleMessage(msg) {
         return;
     }
 
-    // ---- Contract settlement via subscription ----
+    // ---- Contract settlement ----
     if (msg.msg_type === 'proposal_open_contract') {
         const contract = msg.proposal_open_contract;
-        if (!state.activeRealTrade || state.activeRealTrade.contractId !== contract.id) {
-            return;
-        }
+        if (!state.activeRealTrade || state.activeRealTrade.contractId !== contract.id) return;
         if (state.activeRealTrade.settled) return;
 
         if (contract.is_sold === 1) {
@@ -226,7 +239,6 @@ function handleMessage(msg) {
 
             send({ forget: contract.id, req_id: ++reqId });
 
-            // Sync daily P&L and check limits, then log if needed
             (async () => {
                 const limitHit = await syncDailyPnlFromDB();
                 if (limitHit && state.lockReason) addLog(state.lockReason);
@@ -241,7 +253,10 @@ function handleMessage(msg) {
 //  PROCESS LIVE FEED
 // =====================================================================
 function processLiveFeed(symbol, price) {
-    // Safety watchdog
+    // ---- Safety: if symbol not in MARKETS, ignore (shouldn't happen) ----
+    if (!MARKETS[symbol]) return;
+
+    // ---- Safety watchdog ----
     if (state.tradeInProgress && state.activeRealTrade && state.activeRealTrade.executionTime) {
         const elapsedSeconds = (Date.now() - state.activeRealTrade.executionTime) / 1000;
         if (elapsedSeconds > 120) {
@@ -264,10 +279,17 @@ function processLiveFeed(symbol, price) {
         return;
     }
 
+    // ---- Feed engine ----
     const metric = engine.feed(symbol, price);
     if (!metric) return;
+
+    // ---- Update state.marketMetrics with the new metric ----
+    state.marketMetrics[symbol] = metric;
+
+    // ---- Cooldown ticks ----
     if (state.cooldownTicksLeft > 0) state.cooldownTicksLeft--;
 
+    // ---- Early exits ----
     if (!state.active || state.locked || state.tradeInProgress || state.cooldownTicksLeft > 0) {
         broadcastSSE({ state: getFullState() });
         return;
@@ -291,6 +313,7 @@ function processLiveFeed(symbol, price) {
         return;
     }
 
+    // ---- Find best candidate ----
     let bestCandidate = null;
     let bestScore = -Infinity;
 
