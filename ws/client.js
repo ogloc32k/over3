@@ -111,7 +111,7 @@ async function connectDeriv() {
 //  MESSAGE HANDLER
 // =====================================================================
 function handleMessage(msg) {
-    // ---- Error handling: always unlock on error ----
+    // ---- Error handling: always unlock ----
     if (msg.error) {
         addLog(`API Error: ${msg.error.message}`);
         state.tradeInProgress = false;
@@ -121,6 +121,7 @@ function handleMessage(msg) {
         return;
     }
 
+    // ---- Proposal confirmation ----
     if (msg.msg_type === 'proposal') {
         if (msg.error) {
             addLog(`❌ Proposal Error: ${msg.error.message}`);
@@ -135,6 +136,7 @@ function handleMessage(msg) {
         return;
     }
 
+    // ---- Balance updates ----
     if (msg.msg_type === 'balance') {
         state.balance = parseFloat(msg.balance.balance);
         if (state.dailyPnl !== undefined) {
@@ -144,6 +146,7 @@ function handleMessage(msg) {
         return;
     }
 
+    // ---- History sync ----
     if (msg.msg_type === 'history') {
         const symbol = msg.echo_req.ticks_history;
         const prices = msg.history.prices.map(p => parseFloat(p));
@@ -152,6 +155,7 @@ function handleMessage(msg) {
         return;
     }
 
+    // ---- Live ticks ----
     if (msg.msg_type === 'tick') {
         try {
             const symbol = msg.tick.symbol;
@@ -164,6 +168,7 @@ function handleMessage(msg) {
         return;
     }
 
+    // ---- Trade executed ----
     if (msg.msg_type === 'buy') {
         if (state.activeRealTrade) {
             const contractId = msg.buy.contract_id;
@@ -174,7 +179,7 @@ function handleMessage(msg) {
 
             addLog(`💰 Trade Executed: Contract ID ${contractId} at price ${entryPrice}`);
 
-            // ---- Subscribe to contract updates ----
+            // --- Step 1: Subscribe to contract stream ----
             const subMsg = {
                 proposal_open_contract: 1,
                 contract_id: contractId,
@@ -184,7 +189,7 @@ function handleMessage(msg) {
             console.log(`[DEBUG] Subscribing to contract ${contractId} with:`, subMsg);
             send(subMsg);
 
-            // ---- Start 25‑second safety timer ----
+            // --- Step 4: Start safety timer (25 seconds) ----
             clearTimeout(tradeSafetyTimer);
             tradeSafetyTimer = setTimeout(() => {
                 if (state.tradeInProgress) {
@@ -200,17 +205,26 @@ function handleMessage(msg) {
         return;
     }
 
-    // ---- Contract lifecycle updates ----
+    // ---- Step 2: Process proposal_open_contract stream ----
     if (msg.msg_type === 'proposal_open_contract') {
         console.log(`[DEBUG] Received proposal_open_contract message:`, msg);
         const contract = msg.proposal_open_contract;
-        // Convert both contract IDs to strings for safe comparison
-        const activeContractId = state.activeRealTrade ? String(state.activeRealTrade.contractId) : null;
+
+        // ---- Ensure we have an active trade ----
+        if (!state.activeRealTrade) {
+            console.log('[DEBUG] No active trade, ignoring.');
+            return;
+        }
+
+        // ---- Compare contract IDs (convert both to strings) ----
+        const activeContractId = String(state.activeRealTrade.contractId);
         const incomingContractId = String(contract.id);
-        if (!state.activeRealTrade || activeContractId !== incomingContractId) {
+        if (activeContractId !== incomingContractId) {
             console.log(`[DEBUG] Contract ID mismatch: active=${activeContractId}, incoming=${incomingContractId}`);
             return;
         }
+
+        // ---- Prevent double processing ----
         if (state.activeRealTrade.settled) {
             console.log('[DEBUG] Contract already settled, ignoring.');
             return;
@@ -224,16 +238,22 @@ function handleMessage(msg) {
             broadcastSSE({ state: getFullState() });
         }
 
-        // ---- Detect contract settlement ----
+        // ---- Step 3: Check if settled ----
         if (contract.is_sold === 1) {
             console.log(`[DEBUG] Contract ${contract.id} settled.`);
+
+            // ---- Clear safety timer ----
             clearTimeout(tradeSafetyTimer);
 
+            // ---- Mark as settled ----
             state.activeRealTrade.settled = true;
+
+            // ---- Extract result ----
             const profit = contract.profit || 0;
             const isWin = profit > 0;
             const statusLabel = isWin ? 'WIN' : 'LOSS';
 
+            // ---- Update P&L ----
             state.sessionPnl += profit;
             state.dailyPnl += profit;
             if (isWin) {
@@ -246,6 +266,7 @@ function handleMessage(msg) {
                 }
             }
 
+            // ---- Save to DB ----
             const grossPayout = isWin ? (state.activeRealTrade.stake + profit) : 0;
             saveTradeToCloud({
                 contract_id: contract.id,
@@ -262,20 +283,23 @@ function handleMessage(msg) {
                 duration_ticks: null
             });
 
+            // ---- Log outcome ----
             addLog(`[Trade Finished] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | ${statusLabel} | Profit/Loss: $${profit.toFixed(2)} | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
 
-            // ---- Unlock ----
+            // ---- Unlock system ----
             state.tradeInProgress = false;
             state.activeRealTrade = null;
             state.pendingSettlement = false;
             state.cooldownTicksLeft = CONFIG.COOLDOWN_TICKS;
 
+            // ---- Recalculate stake ----
             const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
             state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-            // ---- Close subscription ----
+            // ---- Close stream (forget) ----
             send({ forget: contract.id, req_id: getNextReqId() });
 
+            // ---- Sync and broadcast ----
             (async () => {
                 const limitHit = await syncDailyPnlFromDB();
                 if (limitHit && state.lockReason) addLog(state.lockReason);
@@ -287,7 +311,7 @@ function handleMessage(msg) {
 }
 
 // =====================================================================
-//  PROCESS LIVE FEED
+//  PROCESS LIVE FEED (no tick counter)
 // =====================================================================
 function processLiveFeed(symbol, price) {
     const metric = engine.feed(symbol, price);
