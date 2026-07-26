@@ -9,7 +9,7 @@ let derivWs = null;
 let reqId = 0;
 let keepAliveLoop = null;
 let watchdogTimer = null;
-let tradeSafetyTimer = null; // 25s fallback
+let settlementTimer = null; // our custom timer
 
 const engine = new MultiMarketPipeline(Object.keys(MARKETS));
 
@@ -29,7 +29,7 @@ function getNextReqId() {
 function disconnectDeriv() {
     clearInterval(keepAliveLoop);
     clearTimeout(watchdogTimer);
-    clearTimeout(tradeSafetyTimer);
+    clearTimeout(settlementTimer);
     if (derivWs) { derivWs.removeAllListeners(); try { derivWs.terminate(); } catch(e) {} derivWs = null; }
 }
 
@@ -108,24 +108,24 @@ async function connectDeriv() {
 //  MESSAGE HANDLER
 // =====================================================================
 function handleMessage(msg) {
-    // ---- Error handling: always unlock ----
+    // ---- Error handling: unlock ----
     if (msg.error) {
         addLog(`API Error: ${msg.error.message}`);
         state.tradeInProgress = false;
         state.activeRealTrade = null;
         state.pendingSettlement = false;
-        clearTimeout(tradeSafetyTimer);
+        clearTimeout(settlementTimer);
         return;
     }
 
-    // ---- Proposal confirmation ----
+    // ---- Proposal ----
     if (msg.msg_type === 'proposal') {
         if (msg.error) {
             addLog(`❌ Proposal Error: ${msg.error.message}`);
             state.tradeInProgress = false;
             state.activeRealTrade = null;
             state.pendingSettlement = false;
-            clearTimeout(tradeSafetyTimer);
+            clearTimeout(settlementTimer);
         } else {
             send({ buy: msg.proposal.id, price: msg.proposal.ask_price, req_id: getNextReqId() });
             addLog(`✅ Proposal confirmed: ${msg.proposal.ask_price}. Executing buy...`);
@@ -133,7 +133,7 @@ function handleMessage(msg) {
         return;
     }
 
-    // ---- Balance updates ----
+    // ---- Balance updates (keep up to date) ----
     if (msg.msg_type === 'balance') {
         state.balance = parseFloat(msg.balance.balance);
         if (state.dailyPnl !== undefined) {
@@ -143,7 +143,7 @@ function handleMessage(msg) {
         return;
     }
 
-    // ---- History sync ----
+    // ---- History ----
     if (msg.msg_type === 'history') {
         const symbol = msg.echo_req.ticks_history;
         const prices = msg.history.prices.map(p => parseFloat(p));
@@ -152,7 +152,7 @@ function handleMessage(msg) {
         return;
     }
 
-    // ---- Live ticks ----
+    // ---- Ticks ----
     if (msg.msg_type === 'tick') {
         try {
             const symbol = msg.tick.symbol;
@@ -165,7 +165,7 @@ function handleMessage(msg) {
         return;
     }
 
-    // ---- Trade executed (Step 1) ----
+    // ---- Buy executed ----
     if (msg.msg_type === 'buy') {
         if (state.activeRealTrade) {
             const contractId = msg.buy.contract_id;
@@ -176,124 +176,100 @@ function handleMessage(msg) {
 
             addLog(`💰 Trade Executed: Contract ID ${contractId} at price ${entryPrice}`);
 
-            // --- Lock system ---
+            // ---- LOCK THE SYSTEM ----
             state.tradeInProgress = true;
 
-            // --- Subscribe to contract stream ---
-            send({
-                proposal_open_contract: 1,
-                contract_id: contractId,
-                subscribe: 1,
-                req_id: getNextReqId()
-            });
+            // ---- Store pre‑trade balance ----
+            const preTradeBalance = state.balance;
 
-            // --- Safety timer (25s) ---
-            clearTimeout(tradeSafetyTimer);
-            tradeSafetyTimer = setTimeout(() => {
-                if (state.tradeInProgress) {
-                    console.warn('[System Recovery] Settlement packet delayed. Forcing unlock.');
-                    addLog('⚠️ Safety timer triggered: trade not settled within 25s. Forcing unlock.');
-                    state.tradeInProgress = false;
-                    state.activeRealTrade = null;
-                    state.pendingSettlement = false;
-                    broadcastSSE({ state: getFullState() });
+            // ---- Determine market type and calculate delay ----
+            const symbol = state.activeRealTrade.symbol;
+            const isOneSecondIndex = symbol.includes('1HZ');
+            const duration = state.activeRealTrade.duration || CONFIG.DURATION;
+            const msPerTick = isOneSecondIndex ? 1000 : 2000;
+            const bufferMs = 3000; // network buffer
+            const settlementDelayMs = (duration * msPerTick) + bufferMs;
+
+            addLog(`⏳ ${symbol} | ${duration} ticks | ${isOneSecondIndex ? '1s' : '2s'} per tick | waiting ${(settlementDelayMs/1000).toFixed(1)}s`);
+
+            // ---- Clear any existing timer ----
+            clearTimeout(settlementTimer);
+
+            // ---- Start the timer ----
+            settlementTimer = setTimeout(() => {
+                // ---- Get the updated balance ----
+                const postTradeBalance = state.balance;
+
+                // ---- Deduce outcome ----
+                const profit = postTradeBalance - preTradeBalance;
+                const isWin = profit > 0;
+                const stake = state.activeRealTrade ? state.activeRealTrade.stake : 0;
+
+                // ---- Update P&L ----
+                state.sessionPnl += profit;
+                state.dailyPnl += profit;
+
+                if (isWin) {
+                    consecutiveLosses = 0;
+                } else {
+                    consecutiveLosses++;
+                    if (consecutiveLosses >= CONFIG.MAX_CONSECUTIVE_LOSSES) {
+                        state.lossCooldownUntil = Date.now() + CONFIG.LOSS_COOLDOWN_MS;
+                        addLog(`⏳ ${CONFIG.MAX_CONSECUTIVE_LOSSES} consecutive losses. Cooldown for ${CONFIG.LOSS_COOLDOWN_MS/60000} minutes.`);
+                    }
                 }
-            }, 25000);
+
+                // ---- Save to DB ----
+                const grossPayout = isWin ? (stake + profit) : 0;
+                if (state.activeRealTrade) {
+                    saveTradeToCloud({
+                        contract_id: state.activeRealTrade.contractId || null,
+                        asset: MARKETS[state.activeRealTrade.symbol]?.name || state.activeRealTrade.symbol,
+                        contractType: state.activeRealTrade.contractType,
+                        stake: stake,
+                        payout: grossPayout,
+                        isWin: isWin,
+                        barrier: null,
+                        exitTick: null,
+                        entry_price: state.activeRealTrade.entryPrice,
+                        exit_price: null, // we don't have exit price from balance check
+                        duration_seconds: state.activeRealTrade.durationUnit === 's' ? state.activeRealTrade.duration : 0,
+                        duration_ticks: state.activeRealTrade.durationUnit === 't' ? state.activeRealTrade.duration : 0
+                    });
+                }
+
+                // ---- Log result ----
+                addLog(`[Trade Finished] ${state.activeRealTrade ? state.activeRealTrade.symbol : 'Unknown'} | ${state.activeRealTrade ? state.activeRealTrade.contractType : ''} | ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
+
+                // ---- UNLOCK SYSTEM ----
+                state.tradeInProgress = false;
+                state.activeRealTrade = null;
+                state.pendingSettlement = false;
+                state.cooldownTicksLeft = CONFIG.COOLDOWN_TICKS;
+
+                // Recalculate stake
+                const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
+                state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
+
+                // ---- Sync DB and broadcast ----
+                (async () => {
+                    const limitHit = await syncDailyPnlFromDB();
+                    if (limitHit && state.lockReason) addLog(state.lockReason);
+                    saveState();
+                    broadcastSSE({ state: getFullState() });
+                })();
+
+                // ---- Clean up timer reference ----
+                settlementTimer = null;
+
+            }, settlementDelayMs);
         }
         return;
-    }
-
-    // ---- Step 2: Process proposal_open_contract stream ----
-    if (msg.msg_type === 'proposal_open_contract') {
-        const contract = msg.proposal_open_contract;
-        if (!state.activeRealTrade) return;
-
-        // ---- Compare contract IDs ----
-        const activeId = String(state.activeRealTrade.contractId);
-        const incomingId = String(contract.id);
-        if (activeId !== incomingId) return;
-
-        if (state.activeRealTrade.settled) return;
-
-        // ---- Step 2: Log entry price once ----
-        if (contract.entry_spot && !state.activeRealTrade.entryLogged) {
-            state.activeRealTrade.entryLogged = true;
-            state.activeRealTrade.entryPrice = contract.entry_spot;
-            addLog(`📌 Entry Price locked at: ${contract.entry_spot} (${state.activeRealTrade.symbol})`);
-            broadcastSSE({ state: getFullState() });
-        }
-
-        // ---- Step 3: Check if settled ----
-        if (contract.is_sold === 1) {
-            // Clear safety timer
-            clearTimeout(tradeSafetyTimer);
-
-            state.activeRealTrade.settled = true;
-
-            // ---- Extract result ----
-            const profit = contract.profit || 0;
-            const isWin = profit > 0;
-            const statusLabel = isWin ? 'WIN' : 'LOSS';
-
-            // ---- Update P&L ----
-            state.sessionPnl += profit;
-            state.dailyPnl += profit;
-            if (isWin) {
-                consecutiveLosses = 0;
-            } else {
-                consecutiveLosses++;
-                if (consecutiveLosses >= CONFIG.MAX_CONSECUTIVE_LOSSES) {
-                    state.lossCooldownUntil = Date.now() + CONFIG.LOSS_COOLDOWN_MS;
-                    addLog(`⏳ ${CONFIG.MAX_CONSECUTIVE_LOSSES} consecutive losses. Cooldown for ${CONFIG.LOSS_COOLDOWN_MS/60000} minutes.`);
-                }
-            }
-
-            // ---- Save to DB ----
-            const grossPayout = isWin ? (state.activeRealTrade.stake + profit) : 0;
-            saveTradeToCloud({
-                contract_id: contract.id,
-                asset: MARKETS[state.activeRealTrade.symbol]?.name || state.activeRealTrade.symbol,
-                contractType: state.activeRealTrade.contractType,
-                stake: state.activeRealTrade.stake,
-                payout: grossPayout,
-                isWin: isWin,
-                barrier: null,
-                exitTick: null,
-                entry_price: state.activeRealTrade.entryPrice,
-                exit_price: contract.sell_price || contract.buy_price,
-                duration_seconds: CONFIG.DURATION,
-                duration_ticks: null
-            });
-
-            // ---- Log outcome ----
-            addLog(`[Trade Finished] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | ${statusLabel} | Profit/Loss: $${profit.toFixed(2)} | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
-
-            // ---- Step 3: Unlock system ----
-            state.tradeInProgress = false;
-            state.activeRealTrade = null;
-            state.pendingSettlement = false;
-            state.cooldownTicksLeft = CONFIG.COOLDOWN_TICKS;
-
-            // Recalculate stake
-            const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
-            state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
-
-            // ---- Step 3: Close stream ----
-            send({ forget: contract.id, req_id: getNextReqId() });
-
-            // ---- Sync DB and broadcast ----
-            (async () => {
-                const limitHit = await syncDailyPnlFromDB();
-                if (limitHit && state.lockReason) addLog(state.lockReason);
-                saveState();
-                broadcastSSE({ state: getFullState() });
-            })();
-        }
     }
 }
 
 // =====================================================================
-//  PROCESS LIVE FEED (no tick counters)
+//  PROCESS LIVE FEED (no tick counters, just market data)
 // =====================================================================
 function processLiveFeed(symbol, price) {
     const metric = engine.feed(symbol, price);
@@ -335,7 +311,7 @@ function processLiveFeed(symbol, price) {
 
     if (bestCandidate) {
         const { symbol, direction } = bestCandidate;
-        state.tradeInProgress = true;
+        state.tradeInProgress = true; // will be locked until timer fires
         const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
         state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
