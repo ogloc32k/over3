@@ -24,7 +24,8 @@ const state = {
     logs: [],
     lastTriggerTime: 0,
     lossCooldownUntil: 0,
-    pendingSettlement: false
+    pendingSettlement: false,
+    consecutiveLosses: 0   // <-- add this line
 };
 
 let consecutiveLosses = 0;
