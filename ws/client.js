@@ -9,15 +9,13 @@ let derivWs = null;
 let reqId = 0;
 let keepAliveLoop = null;
 let watchdogTimer = null;
-let tradeSafetyTimer = null;
+let tradeSafetyTimer = null; // 25s fallback
 
 const engine = new MultiMarketPipeline(Object.keys(MARKETS));
 
 function send(msg) {
     if (derivWs && derivWs.readyState === WebSocket.OPEN) {
-        const payload = JSON.stringify(msg);
-        console.log(`[DEBUG] Sending: ${payload}`);
-        derivWs.send(payload);
+        derivWs.send(JSON.stringify(msg));
     } else {
         console.warn('[DEBUG] Cannot send: WebSocket not open');
         addLog(`⚠️ Cannot send: WebSocket not open (readyState=${derivWs ? derivWs.readyState : 'null'})`);
@@ -90,7 +88,6 @@ async function connectDeriv() {
         derivWs.on('message', raw => {
             try {
                 const msg = JSON.parse(raw);
-                console.log(`[DEBUG] Received: ${raw}`);
                 if (msg.msg_type === 'ping') { clearTimeout(watchdogTimer); return; }
                 handleMessage(msg);
             } catch(e) {
@@ -168,7 +165,7 @@ function handleMessage(msg) {
         return;
     }
 
-    // ---- Trade executed ----
+    // ---- Trade executed (Step 1) ----
     if (msg.msg_type === 'buy') {
         if (state.activeRealTrade) {
             const contractId = msg.buy.contract_id;
@@ -179,21 +176,22 @@ function handleMessage(msg) {
 
             addLog(`💰 Trade Executed: Contract ID ${contractId} at price ${entryPrice}`);
 
-            // --- Step 1: Subscribe to contract stream ----
-            const subMsg = {
+            // --- Lock system ---
+            state.tradeInProgress = true;
+
+            // --- Subscribe to contract stream ---
+            send({
                 proposal_open_contract: 1,
                 contract_id: contractId,
                 subscribe: 1,
                 req_id: getNextReqId()
-            };
-            console.log(`[DEBUG] Subscribing to contract ${contractId} with:`, subMsg);
-            send(subMsg);
+            });
 
-            // --- Step 4: Start safety timer (25 seconds) ----
+            // --- Safety timer (25s) ---
             clearTimeout(tradeSafetyTimer);
             tradeSafetyTimer = setTimeout(() => {
                 if (state.tradeInProgress) {
-                    console.warn('[System Recovery] Settlement packet delayed. Forcing system back to IDLE.');
+                    console.warn('[System Recovery] Settlement packet delayed. Forcing unlock.');
                     addLog('⚠️ Safety timer triggered: trade not settled within 25s. Forcing unlock.');
                     state.tradeInProgress = false;
                     state.activeRealTrade = null;
@@ -207,30 +205,17 @@ function handleMessage(msg) {
 
     // ---- Step 2: Process proposal_open_contract stream ----
     if (msg.msg_type === 'proposal_open_contract') {
-        console.log(`[DEBUG] Received proposal_open_contract message:`, msg);
         const contract = msg.proposal_open_contract;
+        if (!state.activeRealTrade) return;
 
-        // ---- Ensure we have an active trade ----
-        if (!state.activeRealTrade) {
-            console.log('[DEBUG] No active trade, ignoring.');
-            return;
-        }
+        // ---- Compare contract IDs ----
+        const activeId = String(state.activeRealTrade.contractId);
+        const incomingId = String(contract.id);
+        if (activeId !== incomingId) return;
 
-        // ---- Compare contract IDs (convert both to strings) ----
-        const activeContractId = String(state.activeRealTrade.contractId);
-        const incomingContractId = String(contract.id);
-        if (activeContractId !== incomingContractId) {
-            console.log(`[DEBUG] Contract ID mismatch: active=${activeContractId}, incoming=${incomingContractId}`);
-            return;
-        }
+        if (state.activeRealTrade.settled) return;
 
-        // ---- Prevent double processing ----
-        if (state.activeRealTrade.settled) {
-            console.log('[DEBUG] Contract already settled, ignoring.');
-            return;
-        }
-
-        // ---- Log entry price once ----
+        // ---- Step 2: Log entry price once ----
         if (contract.entry_spot && !state.activeRealTrade.entryLogged) {
             state.activeRealTrade.entryLogged = true;
             state.activeRealTrade.entryPrice = contract.entry_spot;
@@ -240,12 +225,9 @@ function handleMessage(msg) {
 
         // ---- Step 3: Check if settled ----
         if (contract.is_sold === 1) {
-            console.log(`[DEBUG] Contract ${contract.id} settled.`);
-
-            // ---- Clear safety timer ----
+            // Clear safety timer
             clearTimeout(tradeSafetyTimer);
 
-            // ---- Mark as settled ----
             state.activeRealTrade.settled = true;
 
             // ---- Extract result ----
@@ -286,20 +268,20 @@ function handleMessage(msg) {
             // ---- Log outcome ----
             addLog(`[Trade Finished] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | ${statusLabel} | Profit/Loss: $${profit.toFixed(2)} | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
 
-            // ---- Unlock system ----
+            // ---- Step 3: Unlock system ----
             state.tradeInProgress = false;
             state.activeRealTrade = null;
             state.pendingSettlement = false;
             state.cooldownTicksLeft = CONFIG.COOLDOWN_TICKS;
 
-            // ---- Recalculate stake ----
+            // Recalculate stake
             const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
             state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-            // ---- Close stream (forget) ----
+            // ---- Step 3: Close stream ----
             send({ forget: contract.id, req_id: getNextReqId() });
 
-            // ---- Sync and broadcast ----
+            // ---- Sync DB and broadcast ----
             (async () => {
                 const limitHit = await syncDailyPnlFromDB();
                 if (limitHit && state.lockReason) addLog(state.lockReason);
@@ -311,7 +293,7 @@ function handleMessage(msg) {
 }
 
 // =====================================================================
-//  PROCESS LIVE FEED (no tick counter)
+//  PROCESS LIVE FEED (no tick counters)
 // =====================================================================
 function processLiveFeed(symbol, price) {
     const metric = engine.feed(symbol, price);
