@@ -1,5 +1,5 @@
 const WebSocket = require('ws');
-const { state, CONFIG, checkStrategy, syncDailyPnlFromDB, getFullState, saveState, checkDailyLimits } = require('../state/manager');
+const { state, CONFIG, syncDailyPnlFromDB, getFullState, saveState, checkDailyLimits } = require('../state/manager');
 const { addLog, broadcastSSE } = require('../api/sse');
 const { MARKETS, formatMarketPrice } = require('../markets/definitions');
 const { saveTradeToCloud } = require('../database');
@@ -11,7 +11,12 @@ let keepAliveLoop = null;
 let watchdogTimer = null;
 let settlementTimer = null;
 
-const engine = new MultiMarketPipeline(Object.keys(MARKETS));
+// ---- Sniper mode state (per symbol) ----
+const maDiffHistory = {};
+const symbols = Object.keys(MARKETS);
+symbols.forEach(sym => { maDiffHistory[sym] = [0, 0, 0]; }); // last 3 diffs
+
+const engine = new MultiMarketPipeline(symbols);
 
 function send(msg) {
     if (derivWs && derivWs.readyState === WebSocket.OPEN) {
@@ -53,6 +58,9 @@ async function connectDeriv() {
         state.balance = parseFloat(targetAccount.balance);
         state.currency = targetAccount.currency || 'USD';
 
+        // Set daily start balance for limits
+        if (state.dailyStartBalance === null) state.dailyStartBalance = state.balance;
+
         const limitHit = await syncDailyPnlFromDB();
         if (limitHit && state.lockReason) addLog(state.lockReason);
         broadcastSSE({ state: getFullState() });
@@ -71,11 +79,10 @@ async function connectDeriv() {
             addLog(`🌐 Connected. Balance: $${state.balance.toFixed(2)} | Session: $${state.sessionPnl.toFixed(2)}`);
             send({ balance: 1, subscribe: 1, req_id: getNextReqId() });
 
-            const allSymbols = Object.keys(MARKETS);
-            for (const key of allSymbols) {
+            for (const key of symbols) {
                 send({ ticks_history: key, count: 2000, end: 'latest', subscribe: 1, req_id: getNextReqId() });
             }
-            addLog(`📡 Subscribed to ${allSymbols.length} markets.`);
+            addLog(`📡 Subscribed to ${symbols.length} markets.`);
 
             setInterval(() => { broadcastSSE({ state: getFullState() }); }, 3000);
 
@@ -169,9 +176,6 @@ function handleMessage(msg) {
 
             state.tradeInProgress = true;
 
-            // preTradeBalance is already stored in trade.balanceBefore (before stake deduction)
-            // We'll use that for profit calculation.
-
             const symbol = state.activeRealTrade.symbol;
             const duration = state.activeRealTrade.duration || CONFIG.DURATION;
             const stake = state.activeRealTrade.stake;
@@ -187,20 +191,17 @@ function handleMessage(msg) {
 
             settlementTimer = setTimeout(() => {
                 try {
-                    // ---- Corrected profit calculation ----
                     const postBal = state.balance;
-                    const preBal = state.activeRealTrade.balanceBefore; // balance before stake deduction
+                    const preBal = state.activeRealTrade.balanceBefore;
                     const stake = state.activeRealTrade.stake;
 
                     if (isNaN(postBal) || isNaN(preBal) || isNaN(stake)) {
                         throw new Error(`Invalid numbers: postBal=${postBal}, preBal=${preBal}, stake=${stake}`);
                     }
 
-                    // Net profit = current balance - balance before trade (stake already accounted)
                     const netProfit = postBal - preBal;
                     const isWin = netProfit > 0;
 
-                    // Update P&L
                     state.sessionPnl += netProfit;
                     state.dailyPnl += netProfit;
 
@@ -239,7 +240,6 @@ function handleMessage(msg) {
                     console.error('[Trade Check Error]', error.message);
                     addLog(`⚠️ Trade check error: ${error.message}`);
                 } finally {
-                    // ---- UNLOCK SYSTEM ----
                     state.tradeInProgress = false;
                     state.activeRealTrade = null;
                     state.pendingSettlement = false;
@@ -264,87 +264,120 @@ function handleMessage(msg) {
     }
 }
 
+// =====================================================================
+//  SNIPER ENTRY EVALUATION
+// =====================================================================
+function evaluateSniperEntry(symbol, metric) {
+    if (!metric) return 'IDLE';
+
+    const { rsi, volatility, maDiff } = metric;
+
+    // 1. Master system locks
+    if (state.locked || state.dailyLimitReached) return 'IDLE (LOCKED)';
+    const now = Date.now();
+    if (now - state.lastTradeTimestamp < CONFIG.MIN_TRIGGER_INTERVAL) {
+        return 'IDLE (COOLDOWN)';
+    }
+
+    // 2. Minimum volatility (0.10%)
+    if (volatility < CONFIG.MIN_VOLATILITY_PERCENT) return 'IDLE (LOW VOL)';
+
+    // 3. Update MA Diff history for this symbol
+    if (!maDiffHistory[symbol]) maDiffHistory[symbol] = [0, 0, 0];
+    const history = maDiffHistory[symbol];
+    history.shift();
+    history.push(maDiff);
+
+    // 4. Consecutive expansion rule (3 ticks)
+    const isBullishExpansion = (history[2] > history[1]) && (history[1] > history[0]) && (history[2] >= CONFIG.MA_DIFF_THRESHOLD);
+    const isBearishExpansion = (history[2] < history[1]) && (history[1] < history[0]) && (history[2] <= -CONFIG.MA_DIFF_THRESHOLD);
+
+    // 5. Surgical RSI zones
+    if (isBullishExpansion && rsi >= 60 && rsi <= 67) {
+        state.lastTradeTimestamp = now;
+        return 'CALL';
+    }
+
+    if (isBearishExpansion && rsi >= 33 && rsi <= 40) {
+        state.lastTradeTimestamp = now;
+        return 'PUT';
+    }
+
+    return 'IDLE';
+}
+
+// =====================================================================
+//  PROCESS LIVE FEED (with sniper mode)
+// =====================================================================
 function processLiveFeed(symbol, price) {
     const metric = engine.feed(symbol, price);
     if (!metric) return;
     state.marketMetrics[symbol] = metric;
 
+    // Cooldown ticks (still used for tick-based cooldown)
     if (state.cooldownTicksLeft > 0) state.cooldownTicksLeft--;
 
+    // Skip if automation off, locked, or trade in progress
     if (!state.active || state.locked || state.tradeInProgress || state.cooldownTicksLeft > 0) {
         broadcastSSE({ state: getFullState() });
         return;
     }
 
+    // Loss cooldown
     const now = Date.now();
-    if (now < state.lossCooldownUntil || now - state.lastTriggerTime < CONFIG.MIN_TRIGGER_INTERVAL) {
+    if (now < state.lossCooldownUntil) {
         broadcastSSE({ state: getFullState() });
         return;
     }
 
-    if (state.balance < CONFIG.MIN_STAKE) {
-        state.locked = true;
-        state.lockReason = '⚠️ Insufficient funds for minimum stake. Trading paused.';
-        addLog(state.lockReason);
+    // ---- Sniper evaluation ----
+    const signal = evaluateSniperEntry(symbol, metric);
+    if (signal === 'IDLE' || signal.startsWith('IDLE')) {
         broadcastSSE({ state: getFullState() });
         return;
     }
 
-    let bestCandidate = null;
-    let bestScore = -Infinity;
-    for (const sym in MARKETS) {
-        const m = state.marketMetrics[sym];
-        if (!m) continue;
-        const signal = checkStrategy(sym, m);
-        if (signal && signal.score > bestScore) {
-            bestScore = signal.score;
-            bestCandidate = { symbol: sym, ...signal };
-        }
-    }
+    // ---- Signal found: execute trade ----
+    const direction = signal;
+    state.tradeInProgress = true;
+    const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
+    state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-    if (bestCandidate) {
-        const { symbol, direction } = bestCandidate;
-        state.tradeInProgress = true;
-        const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
-        state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
+    addLog(`🔥 Sniper Signal: ${symbol} | ${direction} | RSI: ${metric.rsi.toFixed(1)} | Vol: ${metric.volatility.toFixed(2)}% | MA Diff: ${metric.maDiff.toFixed(3)}%`);
 
-        const metric = state.marketMetrics[symbol];
-        addLog(`🔥 Signal: ${symbol} | ${direction} | RSI: ${metric.rsi.toFixed(1)} | Vol: ${metric.volatility.toFixed(2)}%`);
+    const duration = CONFIG.DURATION;
+    const unit = 't'; // always ticks for auto
 
-        let duration = CONFIG.DURATION;
-        let unit = 't'; // always ticks for auto (7 ticks)
-        // duration is already in ticks
+    state.activeRealTrade = {
+        symbol,
+        stake: state.currentStake,
+        balanceBefore: state.balance,
+        contractType: direction,
+        duration: duration,
+        durationUnit: unit,
+        barrier: null,
+        direction: direction,
+        entryPrice: null,
+        executionTime: Date.now(),
+        settled: false,
+        entryLogged: false,
+        contractId: null
+    };
 
-        state.activeRealTrade = {
-            symbol,
-            stake: state.currentStake,
-            balanceBefore: state.balance, // capture before stake deduction
-            contractType: direction,
-            duration: duration,
-            durationUnit: unit,
-            barrier: null,
-            direction: direction,
-            entryPrice: null,
-            executionTime: Date.now(),
-            settled: false,
-            entryLogged: false,
-            contractId: null
-        };
+    state.lastTriggerTime = now;
+    addLog(`📤 Requesting ${direction} proposal for ${symbol} (${duration} ticks)...`);
+    send({
+        proposal: 1,
+        amount: state.currentStake,
+        basis: 'stake',
+        contract_type: direction,
+        currency: state.currency || 'USD',
+        duration: duration,
+        duration_unit: unit,
+        underlying_symbol: symbol,
+        req_id: getNextReqId()
+    });
 
-        state.lastTriggerTime = now;
-        addLog(`📤 Requesting ${direction} proposal for ${symbol} (${duration} ticks)...`);
-        send({
-            proposal: 1,
-            amount: state.currentStake,
-            basis: 'stake',
-            contract_type: direction,
-            currency: state.currency || 'USD',
-            duration: duration,
-            duration_unit: unit,
-            underlying_symbol: symbol,
-            req_id: getNextReqId()
-        });
-    }
     broadcastSSE({ state: getFullState() });
 }
 
