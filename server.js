@@ -13,55 +13,31 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 const STATE_FILE = '/var/data/deriv_multimarket_state.json';
 const CONFIG_FILE = '/var/data/deriv_config.json';
-const STRATEGIES_DIR = path.join(__dirname, 'strategies');
 
 // =====================================================================
-//  LOAD ALL BOT STRATEGIES
-// =====================================================================
-const bots = new Map(); // id -> { instance, config, active, state }
-
-function loadStrategies() {
-    if (!fs.existsSync(STRATEGIES_DIR)) {
-        fs.mkdirSync(STRATEGIES_DIR, { recursive: true });
-        console.log('📁 Created strategies directory. Please add bot files.');
-        return;
-    }
-    const files = fs.readdirSync(STRATEGIES_DIR).filter(f => f.endsWith('.js'));
-    for (const file of files) {
-        try {
-            const bot = require(path.join(STRATEGIES_DIR, file));
-            if (!bot.id || !bot.name || typeof bot.evaluate !== 'function') {
-                console.warn(`⚠️ Skipping ${file}: missing id, name, or evaluate function.`);
-                continue;
-            }
-            // Default config if not provided
-            if (!bot.config) bot.config = {};
-            // Default allow_reconfigure
-            if (bot.allow_reconfigure === undefined) bot.allow_reconfigure = true;
-            // Store bot instance
-            bots.set(bot.id, {
-                instance: bot,
-                config: { ...bot.config }, // copy default config
-                active: false,              // not running by default
-                state: {}                   // per‑bot internal state (if needed)
-            });
-            console.log(`✅ Loaded bot: ${bot.name} (${bot.id})`);
-        } catch(err) {
-            console.error(`❌ Failed to load ${file}:`, err.message);
-        }
-    }
-}
-loadStrategies();
-
-// =====================================================================
-//  DEFAULT CONFIG (shared across bots)
+//  DEFAULT CONFIG
 // =====================================================================
 const DEFAULT_CONFIG = {
+    // ---------- Trade Execution ----------
+    DURATION: 15,                     // seconds if >=15, ticks if <=10
+    MAX_CONSECUTIVE_LOSSES: 3,
+    LOSS_COOLDOWN_MS: 300000,
+    COOLDOWN_TICKS: 5,
+
+    // ---------- Strategy ----------
     ANALYSIS_WINDOW: 500,
     BOLLINGER_PERIOD: 20,
     BOLLINGER_STD: 2,
     RSI_PERIOD: 20,
     MIN_VOLATILITY_PERCENT: 0.3,
+
+    // ---------- Risk ----------
+    RISK_PERCENT: 1,
+    TP_PERCENT: 5,
+    SL_PERCENT: 10,
+    MIN_STAKE: 0.35,
+
+    // ---------- Timing ----------
     MIN_TRIGGER_INTERVAL: 30000,
     SETTLEMENT_TIMEOUT_MS: 15000,
     PNL_SYNC_INTERVAL_MS: 300000
@@ -109,9 +85,7 @@ function scheduleRestart() {
 }
 scheduleRestart();
 
-// =====================================================================
-//  DATABASE HEALTH CHECK
-// =====================================================================
+// --- DATABASE HEALTH CHECK ---
 async function checkDatabaseConnection() {
   try {
     const { count, error } = await supabase
@@ -130,7 +104,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
 // =====================================================================
-//  CONFIG API (shared)
+//  CONFIG API – FIXED (merge with current CONFIG)
 // =====================================================================
 app.get('/api/config', (req, res) => { res.json(CONFIG); });
 
@@ -138,6 +112,7 @@ app.post('/api/config', (req, res) => {
     try {
         const newConfig = req.body;
         if (typeof newConfig !== 'object') throw new Error('Invalid config');
+        // Merge with current active config, not DEFAULT_CONFIG
         CONFIG = { ...CONFIG, ...newConfig };
         saveConfig(CONFIG);
         res.json({ success: true, config: CONFIG });
@@ -147,57 +122,10 @@ app.post('/api/config', (req, res) => {
 });
 
 // =====================================================================
-//  BOT MANAGEMENT API
-// =====================================================================
-
-// List all bots (with their active status and current config)
-app.get('/api/bots', (req, res) => {
-    const list = [];
-    for (const [id, entry] of bots) {
-        list.push({
-            id,
-            name: entry.instance.name,
-            description: entry.instance.description || '',
-            allow_reconfigure: entry.instance.allow_reconfigure,
-            active: entry.active,
-            config: entry.config
-        });
-    }
-    res.json(list);
-});
-
-// Start or reconfigure a bot
-app.post('/api/bots/:id/start', (req, res) => {
-    const { id } = req.params;
-    const entry = bots.get(id);
-    if (!entry) return res.status(404).json({ error: 'Bot not found' });
-
-    // If bot allows reconfiguration, merge new config from body
-    if (entry.instance.allow_reconfigure && req.body.config) {
-        entry.config = { ...entry.config, ...req.body.config };
-    }
-    entry.active = true;
-    // Reset bot state if needed
-    entry.state = {};
-    addLog(`🚀 Bot ${entry.instance.name} (${id}) started.`);
-    res.json({ success: true, config: entry.config });
-});
-
-// Stop a bot
-app.post('/api/bots/:id/stop', (req, res) => {
-    const { id } = req.params;
-    const entry = bots.get(id);
-    if (!entry) return res.status(404).json({ error: 'Bot not found' });
-    entry.active = false;
-    addLog(`🛑 Bot ${entry.instance.name} (${id}) stopped.`);
-    res.json({ success: true });
-});
-
-// =====================================================================
-//  ANALYTICS (with optional bot filter)
+//  ANALYTICS API
 // =====================================================================
 app.get('/api/ledger/analytics', async (req, res) => {
-  const { start, end, mode, bot } = req.query;
+  const { start, end, mode } = req.query;
 
   if (mode === 'session') {
     const settlements = state.logs ? state.logs.filter(l => l.message.includes('Settlement')) : [];
@@ -240,17 +168,12 @@ app.get('/api/ledger/analytics', async (req, res) => {
   }
 
   try {
-    let query = supabase
+    const { data, error } = await supabase
       .from('trading_ledger')
       .select('*')
       .gte('created_at', startDate)
       .lte('created_at', endDate);
 
-    if (bot) {
-      query = query.eq('bot_name', bot);
-    }
-
-    const { data, error } = await query;
     if (error) throw error;
 
     const totalProfit = data.reduce((acc, curr) => acc + (curr.profit_loss || 0), 0);
@@ -291,7 +214,7 @@ app.get('/api/ledger/analytics', async (req, res) => {
 });
 
 // =====================================================================
-//  SSE & LOGGING (same as before)
+//  SSE & LOGGING
 // =====================================================================
 const sseClients = new Set();
 let logId = 1;
@@ -305,28 +228,13 @@ function addLog(msg) {
 
 function getFullState() {
   const { logs, ...rest } = state;
-  return { ...rest, marketMetrics: state.marketMetrics || {}, bots: getBotsStatus() };
-}
-
-function getBotsStatus() {
-    const status = {};
-    for (const [id, entry] of bots) {
-        status[id] = {
-            active: entry.active,
-            name: entry.instance.name,
-            config: entry.config
-        };
-    }
-    return status;
+  return { ...rest, marketMetrics: state.marketMetrics || {} };
 }
 
 function broadcastSSE(payload) {
   if (!payload.state) payload.state = getFullState();
   if (payload.state && !payload.state.marketMetrics) {
     payload.state.marketMetrics = state.marketMetrics || {};
-  }
-  if (payload.state && !payload.state.bots) {
-    payload.state.bots = getBotsStatus();
   }
   sseClients.forEach(c => c.write(`data: ${JSON.stringify(payload)}\n\n`));
 }
@@ -346,7 +254,7 @@ app.get('/api/logs', (req, res) => {
 });
 
 // =====================================================================
-//  CONTROL API (legacy, but we keep it for manual override)
+//  CONTROL API
 // =====================================================================
 app.post('/api/control', (req, res) => {
   const { action, mode } = req.body;
@@ -381,7 +289,7 @@ app.post('/api/control', (req, res) => {
 });
 
 // =====================================================================
-//  MARKETS & PIPELINE (unchanged)
+//  MARKETS
 // =====================================================================
 const MARKETS = {
   'R_10':  { id: 'R_10',  name: 'Volatility 10 Index' },
@@ -391,8 +299,11 @@ const MARKETS = {
   'R_100': { id: 'R_100', name: 'Volatility 100 Index' }
 };
 const BUFFER_CAPACITY = 2000;
-const BUFFER_CLEANUP_THRESHOLD = 2200;
+const BUFFER_CLEANUP_THRESHOLD = 2200; // clean when exceeding this
 
+// =====================================================================
+//  PIPELINE – BUFFER OPTIMIZED
+// =====================================================================
 class MultiMarketPipeline {
   constructor() {
     this.buffers = {};
@@ -469,6 +380,7 @@ class MultiMarketPipeline {
     const buf = this.buffers[symbol];
     buf.push(price);
 
+    // --- CHUNK-BASED BUFFER CLEANUP (instead of shift) ---
     if (buf.length > BUFFER_CLEANUP_THRESHOLD) {
       this.buffers[symbol] = buf.slice(-BUFFER_CAPACITY);
     }
@@ -572,7 +484,7 @@ class MultiMarketPipeline {
 const engine = new MultiMarketPipeline();
 
 // =====================================================================
-//  STATE (global)
+//  STATE
 // =====================================================================
 const state = {
   active: false,
@@ -596,7 +508,27 @@ const state = {
 };
 
 // =====================================================================
-//  P&L SYNC & LIMITS (shared)
+//  STRATEGY CHECK
+// =====================================================================
+function checkStrategy(symbol, metric) {
+  if (!metric) return null;
+  const { price, support, resistance, isBreakout, isBreakdown, rsi, bbUpper, bbLower, volatility } = metric;
+
+  if (volatility < CONFIG.MIN_VOLATILITY_PERCENT) return null;
+
+  if (isBreakout && bbUpper !== null && price >= bbUpper * 0.999 && rsi >= 50 && rsi <= 85) {
+    return { direction: 'CALL', score: volatility };
+  }
+
+  if (isBreakdown && bbLower !== null && price <= bbLower * 1.001 && rsi >= 15 && rsi <= 50) {
+    return { direction: 'PUT', score: volatility };
+  }
+
+  return null;
+}
+
+// =====================================================================
+//  P&L SYNC & LIMITS
 // =====================================================================
 async function syncDailyPnlFromDB() {
   try {
@@ -641,6 +573,9 @@ function checkDailyLimits() {
   return false;
 }
 
+// =====================================================================
+//  STATE PERSISTENCE
+// =====================================================================
 function saveState() {
   try {
     const dir = path.dirname(STATE_FILE);
@@ -677,7 +612,7 @@ function loadState() {
 }
 
 // =====================================================================
-//  SETTLEMENT (shared)
+//  SETTLEMENT – with balance check
 // =====================================================================
 function settleRealTrade() {
   if (!state.activeRealTrade || !state.activeRealTrade.contractId || state.balance == null) {
@@ -693,6 +628,7 @@ function settleRealTrade() {
     return;
   }
 
+  // ---- Stake & Balance Failsafe (settlement) ----
   if (state.balance < CONFIG.MIN_STAKE) {
     state.locked = true;
     state.lockReason = '⚠️ Insufficient funds for minimum stake. Trading paused.';
@@ -724,7 +660,6 @@ function settleRealTrade() {
     }
   }
 
-  // Insert with bot_name
   saveTradeToCloud({
     contract_id: state.activeRealTrade.contractId,
     asset: MARKETS[state.activeRealTrade.symbol]?.name || state.activeRealTrade.symbol,
@@ -736,12 +671,11 @@ function settleRealTrade() {
     exitTick: null,
     entry_price: state.activeRealTrade.entryPrice || null,
     exit_price: null,
-    duration_seconds: CONFIG.DURATION_SECONDS,
-    duration_ticks: null,
-    bot_name: state.activeRealTrade.botId || 'unknown'   // <-- new field
+    duration_seconds: CONFIG.DURATION,
+    duration_ticks: null
   });
 
-  addLog(`[Settlement] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | Result: ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Bot: ${state.activeRealTrade.botId || 'unknown'} | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
+  addLog(`[Settlement] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | Result: ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
 
   if (state.activeRealTrade.settlementTimeout) {
     clearTimeout(state.activeRealTrade.settlementTimeout);
@@ -752,6 +686,7 @@ function settleRealTrade() {
   state.pendingSettlement = false;
   state.cooldownTicksLeft = CONFIG.COOLDOWN_TICKS;
 
+  // ---- Recalculate stake safely ----
   const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
   state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
@@ -761,21 +696,26 @@ function settleRealTrade() {
 let consecutiveLosses = 0;
 
 // =====================================================================
-//  TICK PROCESSING – MULTI‑BOT EVALUATION
+//  PROCESS LIVE FEED – with duration logic and balance failsafe
 // =====================================================================
 function processLiveFeed(symbol, price) {
   // ---- 60-SECOND FAILSAFE WATCHDOG ----
   if (state.tradeInProgress && state.activeRealTrade && state.activeRealTrade.executionTime) {
     const elapsedSeconds = (Date.now() - state.activeRealTrade.executionTime) / 1000;
+    
     if (elapsedSeconds > 60) {
       addLog(`⚠️ WARNING: Trade stuck in progress for ${elapsedSeconds.toFixed(1)}s. Forcefully resetting state.`);
+      
       if (state.activeRealTrade.settlementTimeout) {
         clearTimeout(state.activeRealTrade.settlementTimeout);
       }
+
       state.tradeInProgress = false;
       state.activeRealTrade = null;
       state.pendingSettlement = false;
+      
       send({ balance: 1, req_id: ++reqId });
+      
       saveState();
       broadcastSSE({ state: getFullState() });
       return;
@@ -807,6 +747,7 @@ function processLiveFeed(symbol, price) {
     return;
   }
 
+  // ---- Insufficient funds check ----
   if (state.balance < CONFIG.MIN_STAKE) {
     state.locked = true;
     state.lockReason = '⚠️ Insufficient funds for minimum stake. Trading paused.';
@@ -815,102 +756,69 @@ function processLiveFeed(symbol, price) {
     return;
   }
 
-  // ---- Evaluate all active bots ----
-  let bestProposal = null;
+  // ---- Find best candidate ----
+  let bestCandidate = null;
   let bestScore = -Infinity;
-  let bestBotId = null;
 
-  for (const [botId, entry] of bots) {
-    if (!entry.active) continue;
-    try {
-      // Build marketData for this bot (could be enriched with bot‑specific fields)
-      const marketData = {
-        symbol,
-        price: metric.price,
-        volatility: metric.volatility,
-        rsi: metric.rsi,
-        bbUpper: metric.bbUpper,
-        bbLower: metric.bbLower,
-        support: metric.support,
-        resistance: metric.resistance,
-        isBreakout: metric.isBreakout,
-        isBreakdown: metric.isBreakdown,
-        // ... add more as needed
-      };
-      const proposal = entry.instance.evaluate(marketData, entry.config, entry.state);
-      if (proposal) {
-        // Use a score (e.g., volatility) to pick the best if multiple bots fire
-        const score = proposal.score || metric.volatility || 0;
-        if (score > bestScore) {
-          bestScore = score;
-          bestProposal = proposal;
-          bestBotId = botId;
-        }
-      }
-    } catch(err) {
-      console.error(`❌ Bot ${botId} evaluation error:`, err.message);
+  for (const sym in MARKETS) {
+    const m = state.marketMetrics[sym];
+    if (!m) continue;
+    const signal = checkStrategy(sym, m);
+    if (signal && signal.score > bestScore) {
+      bestScore = signal.score;
+      bestCandidate = { symbol: sym, ...signal };
     }
   }
 
-  if (!bestProposal || !bestBotId) {
-    broadcastSSE({ state: getFullState() });
-    return;
+  if (bestCandidate) {
+    const { symbol, direction } = bestCandidate;
+    state.tradeInProgress = true;
+    const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
+    state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
+
+    const metric = state.marketMetrics[symbol];
+    addLog(`🔥 Signal: ${symbol} | ${direction} | RSI: ${metric.rsi.toFixed(1)} | Vol: ${metric.volatility.toFixed(2)}%`);
+
+    // ---- Dynamic duration based on API limits ----
+    let duration = CONFIG.DURATION;
+    let unit = 's';
+    if (duration <= 10) {
+      unit = 't';
+    } else {
+      unit = 's';
+    }
+
+    state.activeRealTrade = {
+      symbol,
+      stake: state.currentStake,
+      balanceBefore: state.balance,
+      contractType: direction,
+      barrier: null,
+      direction: direction,
+      entryPrice: null,
+      executionTime: Date.now(),
+      settlementTimeout: null
+    };
+
+    state.lastTriggerTime = now;
+    addLog(`📤 Requesting ${direction} proposal for ${symbol} (${duration} ${unit === 't' ? 'ticks' : 'seconds'})...`);
+    send({
+      proposal: 1,
+      amount: state.currentStake,
+      basis: 'stake',
+      contract_type: direction,
+      currency: state.currency || 'USD',
+      duration: duration,
+      duration_unit: unit,
+      underlying_symbol: symbol,
+      req_id: ++reqId
+    });
   }
-
-  // ---- Execute the winning bot's proposal ----
-  const botEntry = bots.get(bestBotId);
-  const proposal = bestProposal;
-
-  // Build the Deriv API request from the proposal
-  const { contract_type, symbol: sym, amount, basis, duration, duration_unit, barrier, growth_rate } = proposal;
-
-  state.tradeInProgress = true;
-  const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
-  state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
-
-  addLog(`🔥 Bot ${botEntry.instance.name} | Signal: ${sym} | ${contract_type} | Stake: $${state.currentStake}`);
-
-  state.activeRealTrade = {
-    symbol: sym,
-    stake: state.currentStake,
-    balanceBefore: state.balance,
-    contractType: contract_type,
-    barrier: barrier || null,
-    direction: null, // some bots may set direction; we keep generic
-    entryPrice: null,
-    executionTime: Date.now(),
-    settlementTimeout: null,
-    botId: bestBotId,
-    // Save the original proposal for later reference
-    proposal: proposal
-  };
-
-  state.lastTriggerTime = now;
-
-  // Build the Deriv request payload (could be extended)
-  const reqPayload = {
-    proposal: 1,
-    amount: state.currentStake,
-    basis: basis || 'stake',
-    contract_type: contract_type,
-    currency: state.currency || 'USD',
-    duration: duration || CONFIG.DURATION_SECONDS,
-    duration_unit: duration_unit || 's',
-    underlying_symbol: sym,
-    req_id: ++reqId
-  };
-  // Add optional fields if present
-  if (barrier) reqPayload.barrier = barrier;
-  if (growth_rate) reqPayload.growth_rate = growth_rate;
-
-  addLog(`📤 Requesting ${contract_type} proposal for ${sym}...`);
-  send(reqPayload);
-
   broadcastSSE({ state: getFullState() });
 }
 
 // =====================================================================
-//  WEBSOCKET CONNECTION (unchanged)
+//  WEBSOCKET CONNECTION
 // =====================================================================
 let derivWs = null;
 let reqId = 0;
@@ -988,7 +896,7 @@ async function connectDeriv() {
 }
 
 // =====================================================================
-//  MESSAGE HANDLER (updated to accept bot‑specific proposals)
+//  MESSAGE HANDLER
 // =====================================================================
 function handleMessage(msg) {
   if (msg.error) {
@@ -1054,7 +962,7 @@ function handleMessage(msg) {
 
       addLog(`💰 Trade Executed: Contract ID ${msg.buy.contract_id} at price ${msg.buy.price}`);
 
-      const durationMs = CONFIG.DURATION_SECONDS * 1000;
+      const durationMs = CONFIG.DURATION * 1000;
       const bufferMs = 5000;
       const totalWaitMs = durationMs + bufferMs;
 
@@ -1073,7 +981,7 @@ function handleMessage(msg) {
 }
 
 // =====================================================================
-//  MANUAL TRADING (kept as before, but could be removed)
+//  MANUAL TRADING
 // =====================================================================
 app.post('/api/manual-trade', (req, res) => {
   const { symbol, contractType, duration, durationUnit } = req.body;
@@ -1086,11 +994,12 @@ app.post('/api/manual-trade', (req, res) => {
     return res.status(400).json({ error: 'Invalid contract type. Use "CALL" or "PUT".' });
   }
 
+  // ---- Insufficient funds check ----
   if (state.balance < CONFIG.MIN_STAKE) {
     return res.status(400).json({ error: 'Insufficient funds for minimum stake. Trading paused.' });
   }
 
-  let dur = parseInt(duration) || CONFIG.DURATION_SECONDS;
+  let dur = parseInt(duration) || CONFIG.DURATION;
   let unit = durationUnit || 's';
   if (unit === 't') { if (dur < 1) dur = 1; if (dur > 10) dur = 10; }
   if (unit === 's') { if (dur < 5) dur = 5; if (dur > 600) dur = 600; }
@@ -1109,8 +1018,7 @@ app.post('/api/manual-trade', (req, res) => {
     direction: contractType,
     entryPrice: null,
     executionTime: Date.now(),
-    settlementTimeout: null,
-    botId: 'manual'
+    settlementTimeout: null
   };
 
   send({
