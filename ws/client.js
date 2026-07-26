@@ -91,7 +91,10 @@ async function connectDeriv() {
                 const msg = JSON.parse(raw);
                 if (msg.msg_type === 'ping') { clearTimeout(watchdogTimer); return; }
                 handleMessage(msg);
-            } catch(e) {}
+            } catch(e) {
+                console.error('Message handler error:', e);
+                addLog(`❌ WebSocket message error: ${e.message}`);
+            }
         });
 
         derivWs.on('close', () => { disconnectDeriv(); setTimeout(connectDeriv, 2000); });
@@ -142,8 +145,8 @@ function handleMessage(msg) {
             state.dailyStartBalance = state.balance - state.dailyPnl;
         }
 
-        // ---- Check if we have a pending settlement waiting for balance ----
-        if (state.pendingSettlement && state.activeRealTrade) {
+        // If we were waiting for settlement, process it now
+        if (state.pendingSettlement && state.activeRealTrade && !state.activeRealTrade.settled) {
             settleTradeByBalance();
         }
 
@@ -182,43 +185,8 @@ function handleMessage(msg) {
 
             // ---- Schedule settlement based on duration ----
             scheduleTradeSettlement();
-
-            // (Optional) still subscribe to contract updates for debugging
-            send({
-                proposal_open_contract: 1,
-                contract_id: contractId,
-                subscribe: 1,
-                req_id: getNextReqId()
-            });
         }
         return;
-    }
-
-    // ---- Contract lifecycle updates (optional, for debugging/fallback) ----
-    if (msg.msg_type === 'proposal_open_contract') {
-        const contract = msg.proposal_open_contract;
-        if (!state.activeRealTrade || state.activeRealTrade.contractId !== contract.id) return;
-        if (state.activeRealTrade.settled) return;
-
-        // Log entry if available
-        if (contract.entry_spot && !state.activeRealTrade.entryLogged) {
-            state.activeRealTrade.entryLogged = true;
-            state.activeRealTrade.entryPrice = contract.entry_spot;
-            addLog(`📌 Entry Price locked at: ${contract.entry_spot} (${state.activeRealTrade.symbol})`);
-            broadcastSSE({ state: getFullState() });
-        }
-
-        // If contract sold before our timer, we can settle early
-        if (contract.is_sold === 1 && !state.activeRealTrade.settled) {
-            // Cancel our timer/counter
-            if (state.activeRealTrade.settlementTimer) {
-                clearTimeout(state.activeRealTrade.settlementTimer);
-                clearInterval(state.activeRealTrade.tickCounter);
-            }
-            // Let the balance update handle settlement
-            state.pendingSettlement = true;
-            send({ balance: 1, req_id: getNextReqId() });
-        }
     }
 }
 
@@ -226,10 +194,10 @@ function handleMessage(msg) {
 //  SETTLEMENT LOGIC (balance-based)
 // =====================================================================
 function settleTradeByBalance() {
-    if (!state.activeRealTrade || state.activeRealTrade.settled) return;
-    if (!state.balance) return;
-
     const trade = state.activeRealTrade;
+    if (!trade || trade.settled) return;
+    if (state.balance === null) return;
+
     const profit = state.balance - trade.balanceBefore;
     const isWin = profit >= 0;
 
@@ -247,7 +215,7 @@ function settleTradeByBalance() {
     }
 
     const grossPayout = isWin ? (trade.stake + profit) : 0;
-    // For exit price, use current market price (from engine) if available, else use entry + profit direction
+    // Use current price from engine as exit price
     let exitPrice = null;
     const currentMetric = state.marketMetrics[trade.symbol];
     if (currentMetric) {
@@ -304,12 +272,22 @@ function scheduleTradeSettlement() {
     const duration = trade.duration || CONFIG.DURATION;
     const unit = trade.durationUnit || 's';
 
+    // Clear any existing timers
+    if (trade.settlementTimer) {
+        clearTimeout(trade.settlementTimer);
+        trade.settlementTimer = null;
+    }
+    if (trade.tickCounter) {
+        clearInterval(trade.tickCounter);
+        trade.tickCounter = null;
+    }
+
     if (unit === 't') {
-        // ---- Count ticks ----
+        // ---- Tick counting ----
         trade.remainingTicks = duration;
-        addLog(`⏳ Counting ${duration} ticks for settlement...`);
-        // We'll decrement in processLiveFeed
-        // Set a safety timer in case ticks stop arriving
+        addLog(`⏳ Counting ${duration} ticks for ${trade.symbol} settlement...`);
+
+        // We'll decrement in processLiveFeed. Also set a safety timeout.
         const safetyTimeout = Math.max(duration * 2, 30) * 1000; // at least 30s
         trade.settlementTimer = setTimeout(() => {
             if (!trade.settled) {
@@ -328,8 +306,7 @@ function scheduleTradeSettlement() {
         } else {
             delayMs = duration * 1000; // fallback
         }
-        // Add a small buffer (3 seconds or 5 ticks equivalent)
-        const bufferMs = 3000;
+        const bufferMs = 3000; // small buffer
         delayMs += bufferMs;
 
         addLog(`⏳ Waiting ${duration}${unit} + ${bufferMs/1000}s before settling...`);
@@ -347,37 +324,37 @@ function scheduleTradeSettlement() {
 //  PROCESS LIVE FEED (with tick counting)
 // =====================================================================
 function processLiveFeed(symbol, price) {
-    if (!MARKETS[symbol]) return;
-
-    // ---- Tick counting for active trade ----
-    if (state.tradeInProgress && state.activeRealTrade && !state.activeRealTrade.settled) {
-        const trade = state.activeRealTrade;
-        if (trade.symbol === symbol && trade.durationUnit === 't') {
-            if (trade.remainingTicks !== undefined) {
-                trade.remainingTicks--;
-                if (trade.remainingTicks <= 0) {
-                    addLog(`✅ ${symbol} tick countdown finished. Settling by balance.`);
-                    // Cancel the safety timer
-                    if (trade.settlementTimer) {
-                        clearTimeout(trade.settlementTimer);
-                        trade.settlementTimer = null;
-                    }
-                    state.pendingSettlement = true;
-                    send({ balance: 1, req_id: getNextReqId() });
-                }
-            }
-        }
-    }
-
-    // ---- Feed engine and update metrics ----
+    // ---- Feed engine first (updates marketMetrics) ----
     const metric = engine.feed(symbol, price);
     if (!metric) return;
     state.marketMetrics[symbol] = metric;
 
-    // ---- Cooldown ----
+    // ---- Tick counting for active trade ----
+    if (state.tradeInProgress && state.activeRealTrade && !state.activeRealTrade.settled) {
+        const trade = state.activeRealTrade;
+        if (trade.symbol === symbol && trade.durationUnit === 't' && trade.remainingTicks !== undefined) {
+            trade.remainingTicks--;
+            // Log every 5 ticks for visibility
+            if (trade.remainingTicks % 5 === 0 || trade.remainingTicks <= 3) {
+                addLog(`🔢 ${symbol} tick countdown: ${trade.remainingTicks} ticks remaining`);
+            }
+            if (trade.remainingTicks <= 0) {
+                addLog(`✅ ${symbol} tick countdown finished. Settling by balance.`);
+                // Cancel the safety timer
+                if (trade.settlementTimer) {
+                    clearTimeout(trade.settlementTimer);
+                    trade.settlementTimer = null;
+                }
+                state.pendingSettlement = true;
+                send({ balance: 1, req_id: getNextReqId() });
+            }
+        }
+    }
+
+    // ---- Cooldown ticks ----
     if (state.cooldownTicksLeft > 0) state.cooldownTicksLeft--;
 
-    // ---- Strategy execution (unchanged) ----
+    // ---- Strategy execution (skip if trade in progress, locked, etc.) ----
     if (!state.active || state.locked || state.tradeInProgress || state.cooldownTicksLeft > 0) {
         broadcastSSE({ state: getFullState() });
         return;
@@ -443,7 +420,6 @@ function processLiveFeed(symbol, price) {
             entryPrice: null,
             executionTime: Date.now(),
             settlementTimer: null,
-            tickCounter: null,
             remainingTicks: unit === 't' ? duration : undefined,
             settled: false,
             entryLogged: false,
