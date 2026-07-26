@@ -18,6 +18,10 @@ function send(msg) {
     }
 }
 
+function getNextReqId() {
+    return ++reqId;
+}
+
 function disconnectDeriv() {
     clearInterval(keepAliveLoop);
     clearTimeout(watchdogTimer);
@@ -60,13 +64,13 @@ async function connectDeriv() {
 
         derivWs.on('open', () => {
             addLog(`🌐 Connected. Balance: $${state.balance.toFixed(2)} | Session: $${state.sessionPnl.toFixed(2)}`);
-            send({ balance: 1, subscribe: 1, req_id: ++reqId });
+            send({ balance: 1, subscribe: 1, req_id: getNextReqId() });
 
-            // ---- FIX 1: Subscribe to live ticks for ALL markets ----
+            // Subscribe to live ticks for ALL markets
             const allSymbols = Object.keys(MARKETS);
             for (const key of allSymbols) {
-                send({ ticks_history: key, count: 2000, end: 'latest', req_id: ++reqId });
-                send({ ticks: key, subscribe: 1, req_id: ++reqId });  // <-- LIVE subscription
+                send({ ticks_history: key, count: 2000, end: 'latest', req_id: getNextReqId() });
+                send({ ticks: key, subscribe: 1, req_id: getNextReqId() });
             }
             addLog(`📡 Subscribed to ${allSymbols.length} markets (history + live ticks).`);
 
@@ -119,7 +123,7 @@ function handleMessage(msg) {
                 clearTimeout(state.activeRealTrade.settlementTimeout);
             }
         } else {
-            send({ buy: msg.proposal.id, price: msg.proposal.ask_price, req_id: ++reqId });
+            send({ buy: msg.proposal.id, price: msg.proposal.ask_price, req_id: getNextReqId() });
             addLog(`✅ Proposal confirmed: ${msg.proposal.ask_price}. Executing buy...`);
         }
         return;
@@ -139,13 +143,11 @@ function handleMessage(msg) {
         const prices = msg.history.prices.map(p => parseFloat(p));
         prices.forEach(p => engine.feed(symbol, p));
         addLog(`✅ History synchronized for ${symbol}`);
-        // We already subscribed to live ticks in open, but keep this as a fallback
-        send({ ticks: symbol, subscribe: 1, req_id: ++reqId });
+        send({ ticks: symbol, subscribe: 1, req_id: getNextReqId() });
         return;
     }
 
     if (msg.msg_type === 'tick') {
-        // ---- FIX 2: Process tick safely ----
         try {
             const symbol = msg.tick.symbol;
             const price = parseFloat(msg.tick.quote);
@@ -170,7 +172,7 @@ function handleMessage(msg) {
                 proposal_open_contract: 1,
                 contract_id: contractId,
                 subscribe: 1,
-                req_id: ++reqId
+                req_id: getNextReqId()
             });
 
             const durationMs = CONFIG.DURATION * 1000;
@@ -179,7 +181,7 @@ function handleMessage(msg) {
                 if (state.activeRealTrade && !state.activeRealTrade.settled) {
                     addLog(`⚠️ Contract ${contractId} not settled via subscription. Falling back to balance check.`);
                     state.pendingSettlement = true;
-                    send({ balance: 1, req_id: ++reqId });
+                    send({ balance: 1, req_id: getNextReqId() });
                 }
             }, durationMs + bufferMs);
         }
@@ -237,7 +239,7 @@ function handleMessage(msg) {
             const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
             state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-            send({ forget: contract.id, req_id: ++reqId });
+            send({ forget: contract.id, req_id: getNextReqId() });
 
             (async () => {
                 const limitHit = await syncDailyPnlFromDB();
@@ -253,10 +255,8 @@ function handleMessage(msg) {
 //  PROCESS LIVE FEED
 // =====================================================================
 function processLiveFeed(symbol, price) {
-    // ---- Safety: if symbol not in MARKETS, ignore (shouldn't happen) ----
     if (!MARKETS[symbol]) return;
 
-    // ---- Safety watchdog ----
     if (state.tradeInProgress && state.activeRealTrade && state.activeRealTrade.executionTime) {
         const elapsedSeconds = (Date.now() - state.activeRealTrade.executionTime) / 1000;
         if (elapsedSeconds > 120) {
@@ -267,7 +267,7 @@ function processLiveFeed(symbol, price) {
             state.tradeInProgress = false;
             state.activeRealTrade = null;
             state.pendingSettlement = false;
-            send({ balance: 1, req_id: ++reqId });
+            send({ balance: 1, req_id: getNextReqId() });
             saveState();
             broadcastSSE({ state: getFullState() });
             return;
@@ -279,17 +279,13 @@ function processLiveFeed(symbol, price) {
         return;
     }
 
-    // ---- Feed engine ----
     const metric = engine.feed(symbol, price);
     if (!metric) return;
 
-    // ---- Update state.marketMetrics with the new metric ----
     state.marketMetrics[symbol] = metric;
 
-    // ---- Cooldown ticks ----
     if (state.cooldownTicksLeft > 0) state.cooldownTicksLeft--;
 
-    // ---- Early exits ----
     if (!state.active || state.locked || state.tradeInProgress || state.cooldownTicksLeft > 0) {
         broadcastSSE({ state: getFullState() });
         return;
@@ -313,7 +309,6 @@ function processLiveFeed(symbol, price) {
         return;
     }
 
-    // ---- Find best candidate ----
     let bestCandidate = null;
     let bestScore = -Infinity;
 
@@ -368,7 +363,7 @@ function processLiveFeed(symbol, price) {
             duration: duration,
             duration_unit: unit,
             underlying_symbol: symbol,
-            req_id: ++reqId
+            req_id: getNextReqId()
         });
     }
     broadcastSSE({ state: getFullState() });
@@ -376,8 +371,9 @@ function processLiveFeed(symbol, price) {
 
 module.exports = {
     derivWs,
-    reqId,
+    reqId,          // read-only access
     send,
+    getNextReqId,
     disconnectDeriv,
     connectDeriv,
     engine,
