@@ -1,5 +1,5 @@
 const WebSocket = require('ws');
-const { state, CONFIG, consecutiveLosses, checkStrategy, syncDailyPnlFromDB, getFullState, saveState } = require('../state/manager');
+const { state, CONFIG, consecutiveLosses, checkStrategy, syncDailyPnlFromDB, getFullState, saveState, checkDailyLimits } = require('../state/manager');
 const { addLog, broadcastSSE } = require('../api/sse');
 const { MARKETS, formatMarketPrice } = require('../markets/definitions');
 const { saveTradeToCloud } = require('../database');
@@ -44,7 +44,9 @@ async function connectDeriv() {
         state.balance = parseFloat(targetAccount.balance);
         state.currency = targetAccount.currency || 'USD';
 
-        await syncDailyPnlFromDB();
+        // Sync daily P&L and check limits
+        const limitHit = await syncDailyPnlFromDB();
+        if (limitHit && state.lockReason) addLog(state.lockReason);
         broadcastSSE({ state: getFullState() });
 
         const otpRes = await fetch(`https://api.derivws.com/trading/v1/options/accounts/${targetAccount.account_id}/otp`, {
@@ -149,7 +151,6 @@ function handleMessage(msg) {
 
             addLog(`💰 Trade Executed: Contract ID ${contractId} at price ${msg.buy.price}`);
 
-            // Subscribe to contract updates
             send({
                 proposal_open_contract: 1,
                 contract_id: contractId,
@@ -157,7 +158,6 @@ function handleMessage(msg) {
                 req_id: ++reqId
             });
 
-            // Safety fallback timeout
             const durationMs = CONFIG.DURATION * 1000;
             const bufferMs = 15000;
             state.activeRealTrade.settlementTimeout = setTimeout(() => {
@@ -226,10 +226,13 @@ function handleMessage(msg) {
 
             send({ forget: contract.id, req_id: ++reqId });
 
-            syncDailyPnlFromDB().then(() => {
+            // Sync daily P&L and check limits, then log if needed
+            (async () => {
+                const limitHit = await syncDailyPnlFromDB();
+                if (limitHit && state.lockReason) addLog(state.lockReason);
                 saveState();
                 broadcastSSE({ state: getFullState() });
-            });
+            })();
         }
     }
 }
