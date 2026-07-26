@@ -4,22 +4,29 @@ const path = require('path');
 const CONFIG_FILE = '/var/data/deriv_config.json';
 
 const DEFAULT_CONFIG = {
-    DURATION: 15,
-    MAX_CONSECUTIVE_LOSSES: 3,
-    LOSS_COOLDOWN_MS: 300000,
+    // ---------- Trade Execution ----------
+    DURATION: 7,                     // 7 ticks for auto trading
+    MAX_CONSECUTIVE_LOSSES: 7,
+    LOSS_COOLDOWN_MS: 3000,
     COOLDOWN_TICKS: 5,
+
+    // ---------- Strategy ----------
     ANALYSIS_WINDOW: 500,
     BOLLINGER_PERIOD: 20,
     BOLLINGER_STD: 2,
     RSI_PERIOD: 20,
-    MIN_VOLATILITY_PERCENT: 0.3,
+    MIN_VOLATILITY_PERCENT: 0.03,    // 0.03% minimum volatility
+
+    // ---------- Risk ----------
     RISK_PERCENT: 1,
     TP_PERCENT: 5,
     SL_PERCENT: 10,
     MIN_STAKE: 0.35,
+
+    // ---------- Timing ----------
     MIN_TRIGGER_INTERVAL: 30000,
-    SETTLEMENT_TIMEOUT_MS: 150000,
-    PNL_SYNC_INTERVAL_MS: 3000000
+    SETTLEMENT_TIMEOUT_MS: 15000,
+    PNL_SYNC_INTERVAL_MS: 300000
 };
 
 function loadConfig() {
