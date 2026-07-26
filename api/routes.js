@@ -169,7 +169,7 @@ router.post('/control', (req, res) => {
 });
 
 // =====================================================================
-//  MANUAL TRADE – FIXED
+//  MANUAL TRADE – FIXED WITH CONTRACT SUBSCRIPTION
 // =====================================================================
 router.post('/manual-trade', async (req, res) => {
     try {
@@ -217,7 +217,8 @@ router.post('/manual-trade', async (req, res) => {
             entryPrice: null,
             executionTime: Date.now(),
             settlementTimeout: null,
-            settled: false
+            settled: false,
+            entryLogged: false
         };
 
         // Send proposal via WebSocket
@@ -235,10 +236,10 @@ router.post('/manual-trade', async (req, res) => {
 
         addLog(`📤 Manual ${contractType} request for ${symbol} (${dur} ${unit === 't' ? 'ticks' : unit === 's' ? 'seconds' : 'minutes'})...`);
 
+        // Return success, but the actual contract ID will come via the WebSocket and be logged
         return res.json({ success: true, message: 'Proposal requested.' });
     } catch (err) {
         console.error('Manual trade error:', err);
-        // Rollback trade state if something failed
         state.tradeInProgress = false;
         state.activeRealTrade = null;
         return res.status(500).json({ error: 'Internal server error: ' + err.message });
