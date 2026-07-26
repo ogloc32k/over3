@@ -25,94 +25,122 @@ router.post('/config', (req, res) => {
 });
 
 // =====================================================================
-//  ANALYTICS API
+//  ANALYTICS API – FIXED
 // =====================================================================
 router.get('/ledger/analytics', async (req, res) => {
-    const { start, end, mode } = req.query;
-
-    if (mode === 'session') {
-        const settlements = state.logs ? state.logs.filter(l => l.message.includes('Settlement')) : [];
-        const wins = settlements.filter(l => l.message.includes('WIN')).length;
-        const strikeRate = settlements.length > 0 ? ((wins / settlements.length) * 100).toFixed(1) : 0;
-        return res.json({
-            totalProfit: state.sessionPnl || 0,
-            strikeRate: strikeRate,
-            totalTrades: settlements.length,
-            rawData: []
-        });
-    }
-
-    let startDate = start, endDate = end;
-    const now = new Date();
-    if (mode === 'hour') {
-        const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
-        startDate = oneHourAgo.toISOString();
-        endDate = now.toISOString();
-    } else if (mode === '24h') {
-        const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-        startDate = oneDayAgo.toISOString();
-        endDate = now.toISOString();
-    } else if (mode === 'month') {
-        const oneMonthAgo = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
-        startDate = oneMonthAgo.toISOString();
-        endDate = now.toISOString();
-    } else if (mode === '6months') {
-        const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
-        startDate = sixMonthsAgo.toISOString();
-        endDate = now.toISOString();
-    } else if (mode === '1year') {
-        const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
-        startDate = oneYearAgo.toISOString();
-        endDate = now.toISOString();
-    }
-
-    if (!startDate || !endDate) {
-        return res.status(400).json({ error: 'Invalid date range. Please provide start and end dates.' });
-    }
-
     try {
-        const { data, error } = await supabase
+        const { start, end, mode } = req.query;
+        const now = new Date();
+
+        let startDate, endDate;
+
+        // ---- Determine date range based on mode ----
+        if (mode === 'session') {
+            // For session, we only return session P&L (no DB query)
+            const settlements = state.logs ? state.logs.filter(l => l.message.includes('Settlement')) : [];
+            const wins = settlements.filter(l => l.message.includes('WIN')).length;
+            const strikeRate = settlements.length > 0 ? ((wins / settlements.length) * 100).toFixed(1) : 0;
+            return res.json({
+                totalProfit: state.sessionPnl || 0,
+                strikeRate: strikeRate,
+                totalTrades: settlements.length,
+                rawData: []
+            });
+        }
+
+        if (mode === 'hour') {
+            startDate = new Date(now.getTime() - 60 * 60 * 1000);
+            endDate = now;
+        } else if (mode === '24h') {
+            startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+            endDate = now;
+        } else if (mode === 'week' || mode === '1w') {
+            startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            endDate = now;
+        } else if (mode === 'month' || mode === '1m') {
+            startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+            endDate = now;
+        } else if (mode === '6months' || mode === '6m') {
+            startDate = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
+            endDate = now;
+        } else if (mode === '1year' || mode === '1y') {
+            startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+            endDate = now;
+        } else if (start && end) {
+            // Custom date range provided
+            startDate = new Date(start);
+            endDate = new Date(end);
+            if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+                return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' });
+            }
+        } else {
+            // Default to all trades (no filter)
+            startDate = null;
+            endDate = null;
+        }
+
+        // ---- Build Supabase query ----
+        let query = supabase
             .from('trading_ledger')
-            .select('*')
-            .gte('created_at', startDate)
-            .lte('created_at', endDate);
+            .select('*');
 
-        if (error) throw error;
+        if (startDate && endDate) {
+            // Ensure dates are in ISO format with timezone
+            const startISO = startDate.toISOString();
+            const endISO = endDate.toISOString();
+            query = query.gte('created_at', startISO).lte('created_at', endISO);
+        }
 
-        const totalProfit = data.reduce((acc, curr) => acc + (curr.profit_loss || 0), 0);
+        // ---- Execute query ----
+        const { data, error } = await query.order('created_at', { ascending: true });
+
+        if (error) {
+            console.error('❌ Supabase query error:', error.message);
+            return res.status(500).json({ error: 'Database query failed: ' + error.message });
+        }
+
+        // ---- Compute metrics ----
         const totalTrades = data.length;
-        const wins = data.filter(t => t.is_win).length;
-        const strikeRate = totalTrades > 0 ? ((wins / totalTrades) * 100).toFixed(1) : 0;
+        let totalProfit = 0;
+        let wins = 0;
+        let grossProfit = 0;
+        let grossLoss = 0;
+        let cum = 0;
+        let peak = 0;
+        let maxDrawdown = 0;
 
-        let grossProfit = 0, grossLoss = 0;
         data.forEach(t => {
             const pnl = t.profit_loss || 0;
-            if (pnl > 0) grossProfit += pnl;
-            else if (pnl < 0) grossLoss += Math.abs(pnl);
-        });
-        const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? Infinity : 0);
-
-        const sorted = data.slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-        let peak = 0, maxDrawdown = 0, cum = 0;
-        sorted.forEach(t => {
-            cum += (t.profit_loss || 0);
+            totalProfit += pnl;
+            if (pnl > 0) {
+                wins++;
+                grossProfit += pnl;
+            } else if (pnl < 0) {
+                grossLoss += Math.abs(pnl);
+            }
+            cum += pnl;
             if (cum > peak) peak = cum;
             const drawdown = peak - cum;
             if (drawdown > maxDrawdown) maxDrawdown = drawdown;
         });
+
+        const strikeRate = totalTrades > 0 ? ((wins / totalTrades) * 100).toFixed(1) : 0;
+        const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? Infinity : 0);
         const drawdownPercent = (peak > 0) ? (maxDrawdown / peak) * 100 : 0;
 
+        // ---- Return response ----
         res.json({
-            totalProfit: totalProfit.toFixed(2),
-            strikeRate,
+            totalProfit: parseFloat(totalProfit.toFixed(2)),
+            strikeRate: parseFloat(strikeRate),
             totalTrades,
-            profitFactor: profitFactor.toFixed(2),
-            drawdown: drawdownPercent.toFixed(2),
+            profitFactor: profitFactor === Infinity ? 'Infinity' : parseFloat(profitFactor.toFixed(2)),
+            drawdown: parseFloat(drawdownPercent.toFixed(2)),
             rawData: data
         });
+
     } catch (err) {
-        console.error('❌ Analytics Error:', err.message);
-        res.status(500).json({ error: 'Failed to fetch historical data' });
+        console.error('❌ Analytics error:', err);
+        res.status(500).json({ error: 'Internal server error: ' + err.message });
     }
 });
 
@@ -175,7 +203,6 @@ router.post('/manual-trade', async (req, res) => {
     try {
         const { symbol, contractType, duration, durationUnit, price } = req.body;
 
-        // Validate inputs
         if (!symbol || !MARKETS[symbol]) {
             return res.status(400).json({ error: 'Invalid or missing symbol.' });
         }
@@ -183,7 +210,6 @@ router.post('/manual-trade', async (req, res) => {
             return res.status(400).json({ error: 'Invalid contract type. Use "CALL" or "PUT".' });
         }
 
-        // Check system state
         if (state.locked) {
             return res.status(400).json({ error: state.lockReason || 'System is locked.' });
         }
@@ -194,18 +220,15 @@ router.post('/manual-trade', async (req, res) => {
             return res.status(400).json({ error: 'Insufficient funds for minimum stake.' });
         }
 
-        // Parse duration
         let dur = parseInt(duration) || CONFIG.DURATION;
         let unit = durationUnit || 's';
         if (unit === 't') { if (dur < 1) dur = 1; if (dur > 10) dur = 10; }
         if (unit === 's') { if (dur < 5) dur = 5; if (dur > 600) dur = 600; }
         if (unit === 'm') { if (dur < 1) dur = 1; if (dur > 10) dur = 10; }
 
-        // Calculate stake
         const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
         state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-        // Set trade state
         state.tradeInProgress = true;
         state.activeRealTrade = {
             symbol,
@@ -218,14 +241,11 @@ router.post('/manual-trade', async (req, res) => {
             direction: contractType,
             entryPrice: null,
             executionTime: Date.now(),
-            settlementTimer: null,
-            remainingTicks: unit === 't' ? dur : undefined,
             settled: false,
             entryLogged: false,
             contractId: null
         };
 
-        // Send proposal via WebSocket
         send({
             proposal: 1,
             amount: state.currentStake,
