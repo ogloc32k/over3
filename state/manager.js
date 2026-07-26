@@ -68,41 +68,42 @@ function getFullState() {
     return { ...rest, marketMetrics: state.marketMetrics || {} };
 }
 
-// ---- NEW STRATEGY: MA DIFF, RSI, VOL ----
+// ---- TIGHTENED STRATEGY ----
 function checkStrategy(symbol, metric) {
     if (!metric) return null;
 
-    const { rsi, volatility, maDiff, maDiffExpanding, fastMA, slowMA } = metric;
+    const { rsi, volatility, maDiff, maDiffExpanding2Tick } = metric;
 
-    // 1. Volatility must be > 0.03% (CONFIG.MIN_VOLATILITY_PERCENT)
+    // 1. Volatility must be >= 0.06%
     if (volatility < CONFIG.MIN_VOLATILITY_PERCENT) {
         return null;
     }
 
-    // 2. MA diff must exist and be expanding
-    if (!maDiffExpanding || maDiff === 0) {
+    // 2. MA Diff must be expanding vs 2 ticks ago
+    if (!maDiffExpanding2Tick) {
         return null;
     }
 
-    // 3. CALL (UP) conditions
-    if (maDiff > 0 && rsi >= 52 && rsi <= 68) {
-        // Only if the trend is clearly accelerating: maDiff > 0.01% (optional safety)
-        if (maDiff >= 0.01) {
-            return { direction: 'CALL', score: volatility * 1.5 };
-        }
+    // 3. MA Diff must be ≥ threshold (0.05%) in either direction
+    const absMaDiff = Math.abs(maDiff);
+    if (absMaDiff < CONFIG.MA_DIFF_THRESHOLD) {
+        return null;
     }
 
-    // 4. PUT (DOWN) conditions
-    if (maDiff < 0 && rsi >= 32 && rsi <= 48) {
-        if (maDiff <= -0.01) {
-            return { direction: 'PUT', score: volatility * 1.5 };
-        }
+    // 4. CALL conditions (RSI 58-68, maDiff positive)
+    if (maDiff > 0 && rsi >= 58 && rsi <= 68) {
+        return { direction: 'CALL', score: volatility * 1.5 };
+    }
+
+    // 5. PUT conditions (RSI 32-42, maDiff negative)
+    if (maDiff < 0 && rsi >= 32 && rsi <= 42) {
+        return { direction: 'PUT', score: volatility * 1.5 };
     }
 
     return null;
 }
 
-// ---- P&L sync and limits ----
+// ---- P&L sync and limits (unchanged) ----
 async function syncDailyPnlFromDB() {
     try {
         const now = new Date();
