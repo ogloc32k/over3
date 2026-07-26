@@ -1,4 +1,4 @@
-const { CONFIG } = require('../state/manager'); // will be defined later
+const { CONFIG } = require('../state/manager');
 const { formatMarketPrice } = require('../markets/definitions');
 
 const BUFFER_CAPACITY = 2000;
@@ -8,9 +8,11 @@ class MultiMarketPipeline {
     constructor(symbols) {
         this.buffers = {};
         this.lastPrices = {};
+        this.prevDiffs = {};   // store previous MA diff per symbol
         for (const symbol of symbols) {
             this.buffers[symbol] = [];
             this.lastPrices[symbol] = null;
+            this.prevDiffs[symbol] = 0;
         }
     }
 
@@ -100,8 +102,13 @@ class MultiMarketPipeline {
                 step: 0, score: 0,
                 volatility: 0,
                 lastPrices: buf.slice(-5),
-                conditions: { breakout: false, rsi: false, bollinger: false, volatility: false, ma: false }
+                conditions: { breakout: false, rsi: false, bollinger: false, volatility: false, ma: false },
+                // New fields for strategy
+                maDiff: 0,
+                maDiffExpanding: false,
+                maDiffPrevious: 0
             };
+            this.prevDiffs[symbol] = 0;
             return result;
         }
 
@@ -121,9 +128,23 @@ class MultiMarketPipeline {
         const rsi = this._rsi(buf, CONFIG.RSI_PERIOD);
         const sr = this._findSupportResistance(window);
 
+        // ---- Compute MA diff and expansion ----
+        let maDiff = 0;
+        let maDiffExpanding = false;
+        let maDiffPrevious = this.prevDiffs[symbol] || 0;
+        if (fastMA !== null && slowMA !== null) {
+            maDiff = ((fastMA - slowMA) / price) * 100; // percentage
+            // Expansion: current diff is more positive (or more negative) than previous
+            if (Math.abs(maDiff) > Math.abs(maDiffPrevious)) {
+                maDiffExpanding = true;
+            }
+        }
+        this.prevDiffs[symbol] = maDiff;
+
         const isBreakout = sr.resistance ? price > sr.resistance * 1.001 : false;
         const isBreakdown = sr.support ? price < sr.support * 0.999 : false;
 
+        // ---- Legacy conditions (kept for backward compatibility) ----
         const condBreakout = isBreakout;
         const condRSI = rsi >= 50 && rsi <= 85;
         const condBollinger = bb.upper !== null && price >= bb.upper * 0.999;
@@ -136,7 +157,7 @@ class MultiMarketPipeline {
 
         const callReady = condBreakout && condRSI && condBollinger && condVolatility;
         const putReady = condBreakdown && condRSIPut && condBollingerPut && condVolatilityPut;
-        
+
         let step = 0, score = 0;
         if (callReady || putReady) {
             step = 3;
@@ -173,7 +194,11 @@ class MultiMarketPipeline {
                 volValue: vol,
                 maValue: fastMA !== null && slowMA !== null ? ((fastMA - slowMA) / price * 100) : 0
             },
-            callReady, putReady
+            callReady, putReady,
+            // New strategy fields
+            maDiff: maDiff,
+            maDiffExpanding: maDiffExpanding,
+            maDiffPrevious: maDiffPrevious
         };
 
         return result;
