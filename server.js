@@ -15,33 +15,30 @@ const STATE_FILE = '/var/data/deriv_multimarket_state.json';
 const CONFIG_FILE = '/var/data/deriv_config.json';
 
 // =====================================================================
-//  DEFAULT CONFIG (updated with new parameters)
+//  DEFAULT CONFIG
 // =====================================================================
 const DEFAULT_CONFIG = {
     // ---------- Trade Execution ----------
-    DURATION_SECONDS: 15,           // trade duration in seconds
+    DURATION: 15,                     // seconds if >=15, ticks if <=10
     MAX_CONSECUTIVE_LOSSES: 3,
-    LOSS_COOLDOWN_MS: 300000,       // 5 minutes cooldown after max losses
-    COOLDOWN_TICKS: 5,              // ticks to wait after settlement before next trade
+    LOSS_COOLDOWN_MS: 300000,
+    COOLDOWN_TICKS: 5,
 
-    // ---------- Strategy Parameters ----------
+    // ---------- Strategy ----------
     ANALYSIS_WINDOW: 500,
     BOLLINGER_PERIOD: 20,
     BOLLINGER_STD: 2,
     RSI_PERIOD: 20,
-    OVERSOLD_THRESHOLD: 30,
-    OVERBOUGHT_THRESHOLD: 30,
     MIN_VOLATILITY_PERCENT: 0.3,
 
-    // ---------- Risk Management ----------
+    // ---------- Risk ----------
     RISK_PERCENT: 1,
     TP_PERCENT: 5,
     SL_PERCENT: 10,
     MIN_STAKE: 0.35,
 
-    // ---------- Other ----------
+    // ---------- Timing ----------
     MIN_TRIGGER_INTERVAL: 30000,
-    SETTLE_TICKS: 5,
     SETTLEMENT_TIMEOUT_MS: 15000,
     PNL_SYNC_INTERVAL_MS: 300000
 };
@@ -67,7 +64,7 @@ function saveConfig(config) {
 let CONFIG = loadConfig();
 
 // =====================================================================
-//  SCHEDULED RESTART (03:00 EAT)
+//  SCHEDULED RESTART
 // =====================================================================
 function scheduleRestart() {
   const now = Date.now();
@@ -107,7 +104,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
 // =====================================================================
-//  CONFIG API
+//  CONFIG API – FIXED (merge with current CONFIG)
 // =====================================================================
 app.get('/api/config', (req, res) => { res.json(CONFIG); });
 
@@ -115,7 +112,8 @@ app.post('/api/config', (req, res) => {
     try {
         const newConfig = req.body;
         if (typeof newConfig !== 'object') throw new Error('Invalid config');
-        CONFIG = { ...DEFAULT_CONFIG, ...newConfig };
+        // Merge with current active config, not DEFAULT_CONFIG
+        CONFIG = { ...CONFIG, ...newConfig };
         saveConfig(CONFIG);
         res.json({ success: true, config: CONFIG });
     } catch(err) {
@@ -301,9 +299,10 @@ const MARKETS = {
   'R_100': { id: 'R_100', name: 'Volatility 100 Index' }
 };
 const BUFFER_CAPACITY = 2000;
+const BUFFER_CLEANUP_THRESHOLD = 2200; // clean when exceeding this
 
 // =====================================================================
-//  PIPELINE (unchanged)
+//  PIPELINE – BUFFER OPTIMIZED
 // =====================================================================
 class MultiMarketPipeline {
   constructor() {
@@ -367,50 +366,25 @@ class MultiMarketPipeline {
 
   _findSupportResistance(window) {
     const lookback = Math.min(50, window.length);
-    if (lookback < 10) return { support: null, resistance: null };
-
+    if (lookback < 10) {
+      const price = window[window.length - 1];
+      return { support: price * 0.98, resistance: price * 1.02 };
+    }
     const recent = window.slice(-lookback);
-    const tolerance = 0.002;
-
-    const lows = [], highs = [];
-    for (let i = 2; i < recent.length - 2; i++) {
-      if (recent[i] < recent[i-1] && recent[i] < recent[i-2] && recent[i] < recent[i+1] && recent[i] < recent[i+2]) {
-        lows.push(recent[i]);
-      }
-      if (recent[i] > recent[i-1] && recent[i] > recent[i-2] && recent[i] > recent[i+1] && recent[i] > recent[i+2]) {
-        highs.push(recent[i]);
-      }
-    }
-
-    let support = null, supportBounces = 0;
-    const sortedLows = lows.sort((a,b) => a - b);
-    for (let i = 0; i < sortedLows.length; i++) {
-      let count = 1;
-      for (let j = i + 1; j < sortedLows.length; j++) {
-        if (Math.abs(sortedLows[j] - sortedLows[i]) / sortedLows[i] < tolerance) count++;
-      }
-      if (count > supportBounces) { supportBounces = count; support = sortedLows[i]; }
-    }
-
-    let resistance = null, resistanceBounces = 0;
-    const sortedHighs = highs.sort((a,b) => a - b);
-    for (let i = sortedHighs.length - 1; i >= 0; i--) {
-      let count = 1;
-      for (let j = i - 1; j >= 0; j--) {
-        if (Math.abs(sortedHighs[j] - sortedHighs[i]) / sortedHighs[i] < tolerance) count++;
-      }
-      if (count > resistanceBounces) { resistanceBounces = count; resistance = sortedHighs[i]; }
-    }
-
-    if (supportBounces < 2) support = null;
-    if (resistanceBounces < 2) resistance = null;
-    return { support, resistance };
+    const min = Math.min(...recent);
+    const max = Math.max(...recent);
+    return { support: min, resistance: max };
   }
 
   feed(symbol, price) {
     const buf = this.buffers[symbol];
     buf.push(price);
-    if (buf.length > BUFFER_CAPACITY) buf.shift();
+
+    // --- CHUNK-BASED BUFFER CLEANUP (instead of shift) ---
+    if (buf.length > BUFFER_CLEANUP_THRESHOLD) {
+      this.buffers[symbol] = buf.slice(-BUFFER_CAPACITY);
+    }
+
     this.lastPrices[symbol] = price;
 
     const analysisWindow = Math.min(CONFIG.ANALYSIS_WINDOW, buf.length);
@@ -452,19 +426,17 @@ class MultiMarketPipeline {
     const isBreakdown = sr.support ? price < sr.support * 0.999 : false;
 
     const condBreakout = isBreakout;
-    const condRSI = rsi < 70;
+    const condRSI = rsi >= 50 && rsi <= 85;
     const condBollinger = bb.upper !== null && price >= bb.upper * 0.999;
     const condVolatility = vol >= CONFIG.MIN_VOLATILITY_PERCENT;
-    const condMA = fastMA !== null && slowMA !== null && fastMA > slowMA;
 
     const condBreakdown = isBreakdown;
-    const condRSIPut = rsi > 30;
+    const condRSIPut = rsi >= 15 && rsi <= 50;
     const condBollingerPut = bb.lower !== null && price <= bb.lower * 1.001;
     const condVolatilityPut = vol >= CONFIG.MIN_VOLATILITY_PERCENT;
-    const condMAPut = fastMA !== null && slowMA !== null && fastMA < slowMA;
 
-    const callReady = condBreakout && condRSI && condBollinger && condVolatility && condMA;
-    const putReady = condBreakdown && condRSIPut && condBollingerPut && condVolatilityPut && condMAPut;
+    const callReady = condBreakout && condRSI && condBollinger && condVolatility;
+    const putReady = condBreakdown && condRSIPut && condBollingerPut && condVolatilityPut;
     
     let step = 0, score = 0;
     if (callReady || putReady) {
@@ -494,7 +466,7 @@ class MultiMarketPipeline {
         rsi: condRSI || condRSIPut,
         bollinger: condBollinger || condBollingerPut,
         volatility: condVolatility || condVolatilityPut,
-        ma: condMA || condMAPut
+        ma: true
       },
       condValues: {
         rsiValue: rsi,
@@ -536,19 +508,19 @@ const state = {
 };
 
 // =====================================================================
-//  STRATEGY CHECK (same as before)
+//  STRATEGY CHECK
 // =====================================================================
 function checkStrategy(symbol, metric) {
   if (!metric) return null;
-  const { price, support, resistance, isBreakout, isBreakdown, rsi, bbUpper, bbLower, volatility, fastMA, slowMA } = metric;
+  const { price, support, resistance, isBreakout, isBreakdown, rsi, bbUpper, bbLower, volatility } = metric;
 
   if (volatility < CONFIG.MIN_VOLATILITY_PERCENT) return null;
 
-  if (isBreakout && bbUpper !== null && price >= bbUpper * 0.999 && rsi < 70 && fastMA !== null && slowMA !== null && fastMA > slowMA) {
+  if (isBreakout && bbUpper !== null && price >= bbUpper * 0.999 && rsi >= 50 && rsi <= 85) {
     return { direction: 'CALL', score: volatility };
   }
 
-  if (isBreakdown && bbLower !== null && price <= bbLower * 1.001 && rsi > 30 && fastMA !== null && slowMA !== null && fastMA < slowMA) {
+  if (isBreakdown && bbLower !== null && price <= bbLower * 1.001 && rsi >= 15 && rsi <= 50) {
     return { direction: 'PUT', score: volatility };
   }
 
@@ -640,7 +612,7 @@ function loadState() {
 }
 
 // =====================================================================
-//  SETTLEMENT (updated with new logic)
+//  SETTLEMENT – with balance check
 // =====================================================================
 function settleRealTrade() {
   if (!state.activeRealTrade || !state.activeRealTrade.contractId || state.balance == null) {
@@ -653,6 +625,21 @@ function settleRealTrade() {
     if (state.activeRealTrade && state.activeRealTrade.settlementTimeout) {
       clearTimeout(state.activeRealTrade.settlementTimeout);
     }
+    return;
+  }
+
+  // ---- Stake & Balance Failsafe (settlement) ----
+  if (state.balance < CONFIG.MIN_STAKE) {
+    state.locked = true;
+    state.lockReason = '⚠️ Insufficient funds for minimum stake. Trading paused.';
+    addLog(state.lockReason);
+    state.tradeInProgress = false;
+    state.activeRealTrade = null;
+    state.pendingSettlement = false;
+    if (state.activeRealTrade && state.activeRealTrade.settlementTimeout) {
+      clearTimeout(state.activeRealTrade.settlementTimeout);
+    }
+    broadcastSSE({ state: getFullState() });
     return;
   }
 
@@ -673,7 +660,6 @@ function settleRealTrade() {
     }
   }
 
-  // Save trade to DB (duration in seconds)
   saveTradeToCloud({
     contract_id: state.activeRealTrade.contractId,
     asset: MARKETS[state.activeRealTrade.symbol]?.name || state.activeRealTrade.symbol,
@@ -685,13 +671,12 @@ function settleRealTrade() {
     exitTick: null,
     entry_price: state.activeRealTrade.entryPrice || null,
     exit_price: null,
-    duration_seconds: CONFIG.DURATION_SECONDS,
+    duration_seconds: CONFIG.DURATION,
     duration_ticks: null
   });
 
   addLog(`[Settlement] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | Result: ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
 
-  // Clear settlement timeout
   if (state.activeRealTrade.settlementTimeout) {
     clearTimeout(state.activeRealTrade.settlementTimeout);
   }
@@ -701,6 +686,7 @@ function settleRealTrade() {
   state.pendingSettlement = false;
   state.cooldownTicksLeft = CONFIG.COOLDOWN_TICKS;
 
+  // ---- Recalculate stake safely ----
   const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
   state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
@@ -710,7 +696,7 @@ function settleRealTrade() {
 let consecutiveLosses = 0;
 
 // =====================================================================
-//  PROCESS LIVE FEED (with 60s failsafe watchdog)
+//  PROCESS LIVE FEED – with duration logic and balance failsafe
 // =====================================================================
 function processLiveFeed(symbol, price) {
   // ---- 60-SECOND FAILSAFE WATCHDOG ----
@@ -736,22 +722,7 @@ function processLiveFeed(symbol, price) {
     }
   }
 
-  // ---- Settlement check (balance will be requested via timeout) ----
   if (state.pendingSettlement) {
-    // We already set the timeout to trigger balance request, so we just wait.
-    // However, we still broadcast to keep UI updated.
-    broadcastSSE({ state: getFullState() });
-    return;
-  }
-
-  // ---- Normal settlement tick count (legacy, but we keep for compatibility) ----
-  if (state.settleTicksRemaining && state.settleTicksRemaining > 0) {
-    state.settleTicksRemaining--;
-    if (state.settleTicksRemaining === 0) {
-      state.pendingSettlement = true;
-      addLog(`⏳ Settlement ticks elapsed. Requesting balance...`);
-      send({ balance: 1, req_id: ++reqId });
-    }
     broadcastSSE({ state: getFullState() });
     return;
   }
@@ -772,6 +743,15 @@ function processLiveFeed(symbol, price) {
     return;
   }
   if (now - state.lastTriggerTime < CONFIG.MIN_TRIGGER_INTERVAL) {
+    broadcastSSE({ state: getFullState() });
+    return;
+  }
+
+  // ---- Insufficient funds check ----
+  if (state.balance < CONFIG.MIN_STAKE) {
+    state.locked = true;
+    state.lockReason = '⚠️ Insufficient funds for minimum stake. Trading paused.';
+    addLog(state.lockReason);
     broadcastSSE({ state: getFullState() });
     return;
   }
@@ -799,6 +779,15 @@ function processLiveFeed(symbol, price) {
     const metric = state.marketMetrics[symbol];
     addLog(`🔥 Signal: ${symbol} | ${direction} | RSI: ${metric.rsi.toFixed(1)} | Vol: ${metric.volatility.toFixed(2)}%`);
 
+    // ---- Dynamic duration based on API limits ----
+    let duration = CONFIG.DURATION;
+    let unit = 's';
+    if (duration <= 10) {
+      unit = 't';
+    } else {
+      unit = 's';
+    }
+
     state.activeRealTrade = {
       symbol,
       stake: state.currentStake,
@@ -807,20 +796,20 @@ function processLiveFeed(symbol, price) {
       barrier: null,
       direction: direction,
       entryPrice: null,
-      executionTime: Date.now(),      // for failsafe
-      settlementTimeout: null         // will be set on buy response
+      executionTime: Date.now(),
+      settlementTimeout: null
     };
 
     state.lastTriggerTime = now;
-    addLog(`📤 Requesting ${direction} proposal for ${symbol} (${CONFIG.DURATION_SECONDS} seconds)...`);
+    addLog(`📤 Requesting ${direction} proposal for ${symbol} (${duration} ${unit === 't' ? 'ticks' : 'seconds'})...`);
     send({
       proposal: 1,
       amount: state.currentStake,
       basis: 'stake',
       contract_type: direction,
       currency: state.currency || 'USD',
-      duration: CONFIG.DURATION_SECONDS,
-      duration_unit: 's',
+      duration: duration,
+      duration_unit: unit,
       underlying_symbol: symbol,
       req_id: ++reqId
     });
@@ -907,7 +896,7 @@ async function connectDeriv() {
 }
 
 // =====================================================================
-//  MESSAGE HANDLER (updated with dynamic settlement)
+//  MESSAGE HANDLER
 // =====================================================================
 function handleMessage(msg) {
   if (msg.error) {
@@ -921,7 +910,6 @@ function handleMessage(msg) {
     return;
   }
 
-  // ---- PROPOSAL ----
   if (msg.msg_type === 'proposal') {
     if (msg.error) {
       addLog(`❌ Proposal Error: ${msg.error.message}`);
@@ -938,7 +926,6 @@ function handleMessage(msg) {
     return;
   }
 
-  // ---- BALANCE (triggers settlement) ----
   if (msg.msg_type === 'balance') {
     state.balance = parseFloat(msg.balance.balance);
     if (state.pendingSettlement && state.activeRealTrade) {
@@ -952,7 +939,6 @@ function handleMessage(msg) {
     return;
   }
 
-  // ---- HISTORY ----
   if (msg.msg_type === 'history') {
     const symbol = msg.echo_req.ticks_history;
     const prices = msg.history.prices.map(p => parseFloat(p));
@@ -962,13 +948,11 @@ function handleMessage(msg) {
     return;
   }
 
-  // ---- TICK ----
   if (msg.msg_type === 'tick') {
     processLiveFeed(msg.tick.symbol, parseFloat(msg.tick.quote));
     return;
   }
 
-  // ---- BUY (execution & dynamic timer) ----
   if (msg.msg_type === 'buy') {
     if (state.activeRealTrade) {
       state.activeRealTrade.contractId = msg.buy.contract_id;
@@ -978,8 +962,7 @@ function handleMessage(msg) {
 
       addLog(`💰 Trade Executed: Contract ID ${msg.buy.contract_id} at price ${msg.buy.price}`);
 
-      // Dynamic settlement timer: duration + 5s buffer
-      const durationMs = CONFIG.DURATION_SECONDS * 1000;
+      const durationMs = CONFIG.DURATION * 1000;
       const bufferMs = 5000;
       const totalWaitMs = durationMs + bufferMs;
 
@@ -989,7 +972,6 @@ function handleMessage(msg) {
         clearTimeout(state.activeRealTrade.settlementTimeout);
       }
       state.activeRealTrade.settlementTimeout = setTimeout(() => {
-        // Request balance to trigger settlement
         state.pendingSettlement = true;
         send({ balance: 1, req_id: ++reqId });
       }, totalWaitMs);
@@ -1012,8 +994,12 @@ app.post('/api/manual-trade', (req, res) => {
     return res.status(400).json({ error: 'Invalid contract type. Use "CALL" or "PUT".' });
   }
 
-  // Use provided duration or fallback to config
-  let dur = parseInt(duration) || CONFIG.DURATION_SECONDS;
+  // ---- Insufficient funds check ----
+  if (state.balance < CONFIG.MIN_STAKE) {
+    return res.status(400).json({ error: 'Insufficient funds for minimum stake. Trading paused.' });
+  }
+
+  let dur = parseInt(duration) || CONFIG.DURATION;
   let unit = durationUnit || 's';
   if (unit === 't') { if (dur < 1) dur = 1; if (dur > 10) dur = 10; }
   if (unit === 's') { if (dur < 5) dur = 5; if (dur > 600) dur = 600; }
