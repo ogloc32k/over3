@@ -104,7 +104,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
 // =====================================================================
-//  CONFIG API – FIXED (merge with current CONFIG)
+//  CONFIG API
 // =====================================================================
 app.get('/api/config', (req, res) => { res.json(CONFIG); });
 
@@ -112,7 +112,6 @@ app.post('/api/config', (req, res) => {
     try {
         const newConfig = req.body;
         if (typeof newConfig !== 'object') throw new Error('Invalid config');
-        // Merge with current active config, not DEFAULT_CONFIG
         CONFIG = { ...CONFIG, ...newConfig };
         saveConfig(CONFIG);
         res.json({ success: true, config: CONFIG });
@@ -289,7 +288,7 @@ app.post('/api/control', (req, res) => {
 });
 
 // =====================================================================
-//  MARKETS
+//  MARKETS & DECIMAL PLACES
 // =====================================================================
 const MARKETS = {
   'R_10':  { id: 'R_10',  name: 'Volatility 10 Index' },
@@ -298,8 +297,23 @@ const MARKETS = {
   'R_75':  { id: 'R_75',  name: 'Volatility 75 Index' },
   'R_100': { id: 'R_100', name: 'Volatility 100 Index' }
 };
+
+// ---- Exact decimal places per market ----
+const MARKET_DECIMALS = {
+  'R_10':  2,
+  'R_25':  3,
+  'R_50':  4,
+  'R_75':  4,
+  'R_100': 2
+};
+
+function formatMarketPrice(symbol, rawPrice) {
+  const decimals = MARKET_DECIMALS[symbol] || 2;
+  return Number(rawPrice).toFixed(decimals);
+}
+
 const BUFFER_CAPACITY = 2000;
-const BUFFER_CLEANUP_THRESHOLD = 2200; // clean when exceeding this
+const BUFFER_CLEANUP_THRESHOLD = 2200;
 
 // =====================================================================
 //  PIPELINE – BUFFER OPTIMIZED
@@ -380,7 +394,6 @@ class MultiMarketPipeline {
     const buf = this.buffers[symbol];
     buf.push(price);
 
-    // --- CHUNK-BASED BUFFER CLEANUP (instead of shift) ---
     if (buf.length > BUFFER_CLEANUP_THRESHOLD) {
       this.buffers[symbol] = buf.slice(-BUFFER_CAPACITY);
     }
@@ -391,6 +404,7 @@ class MultiMarketPipeline {
     if (analysisWindow < 50) {
       const result = {
         symbol, price,
+        formattedPrice: formatMarketPrice(symbol, price),
         risePct: 0, fallPct: 0,
         rsi: 50,
         bbUpper: null, bbLower: null, bbMiddle: null,
@@ -452,6 +466,7 @@ class MultiMarketPipeline {
 
     const result = {
       symbol, price,
+      formattedPrice: formatMarketPrice(symbol, price),
       risePct, fallPct,
       rsi,
       bbUpper: bb.upper, bbLower: bb.lower, bbMiddle: bb.middle,
@@ -612,110 +627,27 @@ function loadState() {
 }
 
 // =====================================================================
-//  SETTLEMENT – with balance check
+//  (REMOVED old settleRealTrade function - now handled by subscription)
 // =====================================================================
-function settleRealTrade() {
-  if (!state.activeRealTrade || !state.activeRealTrade.contractId || state.balance == null) {
-    if (state.activeRealTrade) {
-      addLog("⚠️ Trade closed or never executed. Resetting state.");
-      state.tradeInProgress = false;
-      state.activeRealTrade = null;
-    }
-    state.pendingSettlement = false;
-    if (state.activeRealTrade && state.activeRealTrade.settlementTimeout) {
-      clearTimeout(state.activeRealTrade.settlementTimeout);
-    }
-    return;
-  }
-
-  // ---- Stake & Balance Failsafe (settlement) ----
-  if (state.balance < CONFIG.MIN_STAKE) {
-    state.locked = true;
-    state.lockReason = '⚠️ Insufficient funds for minimum stake. Trading paused.';
-    addLog(state.lockReason);
-    state.tradeInProgress = false;
-    state.activeRealTrade = null;
-    state.pendingSettlement = false;
-    if (state.activeRealTrade && state.activeRealTrade.settlementTimeout) {
-      clearTimeout(state.activeRealTrade.settlementTimeout);
-    }
-    broadcastSSE({ state: getFullState() });
-    return;
-  }
-
-  const profit = state.balance - state.activeRealTrade.balanceBefore;
-  state.sessionPnl += profit;
-  state.dailyPnl += profit;
-
-  const isWin = profit >= 0;
-  const grossPayout = isWin ? (state.activeRealTrade.stake + profit) : 0;
-
-  if (isWin) {
-    consecutiveLosses = 0;
-  } else {
-    consecutiveLosses++;
-    if (consecutiveLosses >= CONFIG.MAX_CONSECUTIVE_LOSSES) {
-      state.lossCooldownUntil = Date.now() + CONFIG.LOSS_COOLDOWN_MS;
-      addLog(`⏳ ${CONFIG.MAX_CONSECUTIVE_LOSSES} consecutive losses. Cooling down for ${CONFIG.LOSS_COOLDOWN_MS/60000} minutes.`);
-    }
-  }
-
-  saveTradeToCloud({
-    contract_id: state.activeRealTrade.contractId,
-    asset: MARKETS[state.activeRealTrade.symbol]?.name || state.activeRealTrade.symbol,
-    contractType: state.activeRealTrade.contractType,
-    stake: state.activeRealTrade.stake,
-    payout: grossPayout,
-    isWin: isWin,
-    barrier: null,
-    exitTick: null,
-    entry_price: state.activeRealTrade.entryPrice || null,
-    exit_price: null,
-    duration_seconds: CONFIG.DURATION,
-    duration_ticks: null
-  });
-
-  addLog(`[Settlement] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | Result: ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
-
-  if (state.activeRealTrade.settlementTimeout) {
-    clearTimeout(state.activeRealTrade.settlementTimeout);
-  }
-
-  state.tradeInProgress = false;
-  state.activeRealTrade = null;
-  state.pendingSettlement = false;
-  state.cooldownTicksLeft = CONFIG.COOLDOWN_TICKS;
-
-  // ---- Recalculate stake safely ----
-  const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
-  state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
-
-  syncDailyPnlFromDB().then(() => { saveState(); broadcastSSE({ state: getFullState() }); });
-}
 
 let consecutiveLosses = 0;
 
 // =====================================================================
-//  PROCESS LIVE FEED – with duration logic and balance failsafe
+//  PROCESS LIVE FEED
 // =====================================================================
 function processLiveFeed(symbol, price) {
-  // ---- 60-SECOND FAILSAFE WATCHDOG ----
+  // Safety watchdog: if a trade is stuck for > 120s, reset
   if (state.tradeInProgress && state.activeRealTrade && state.activeRealTrade.executionTime) {
     const elapsedSeconds = (Date.now() - state.activeRealTrade.executionTime) / 1000;
-    
-    if (elapsedSeconds > 60) {
-      addLog(`⚠️ WARNING: Trade stuck in progress for ${elapsedSeconds.toFixed(1)}s. Forcefully resetting state.`);
-      
+    if (elapsedSeconds > 120) {
+      addLog(`⚠️ WARNING: Trade stuck for ${elapsedSeconds.toFixed(1)}s. Force resetting.`);
       if (state.activeRealTrade.settlementTimeout) {
         clearTimeout(state.activeRealTrade.settlementTimeout);
       }
-
       state.tradeInProgress = false;
       state.activeRealTrade = null;
       state.pendingSettlement = false;
-      
       send({ balance: 1, req_id: ++reqId });
-      
       saveState();
       broadcastSSE({ state: getFullState() });
       return;
@@ -727,7 +659,6 @@ function processLiveFeed(symbol, price) {
     return;
   }
 
-  // ---- Feed engine ----
   const metric = engine.feed(symbol, price);
   if (!metric) return;
   if (state.cooldownTicksLeft > 0) state.cooldownTicksLeft--;
@@ -747,7 +678,6 @@ function processLiveFeed(symbol, price) {
     return;
   }
 
-  // ---- Insufficient funds check ----
   if (state.balance < CONFIG.MIN_STAKE) {
     state.locked = true;
     state.lockReason = '⚠️ Insufficient funds for minimum stake. Trading paused.';
@@ -756,7 +686,6 @@ function processLiveFeed(symbol, price) {
     return;
   }
 
-  // ---- Find best candidate ----
   let bestCandidate = null;
   let bestScore = -Infinity;
 
@@ -779,7 +708,6 @@ function processLiveFeed(symbol, price) {
     const metric = state.marketMetrics[symbol];
     addLog(`🔥 Signal: ${symbol} | ${direction} | RSI: ${metric.rsi.toFixed(1)} | Vol: ${metric.volatility.toFixed(2)}%`);
 
-    // ---- Dynamic duration based on API limits ----
     let duration = CONFIG.DURATION;
     let unit = 's';
     if (duration <= 10) {
@@ -797,7 +725,8 @@ function processLiveFeed(symbol, price) {
       direction: direction,
       entryPrice: null,
       executionTime: Date.now(),
-      settlementTimeout: null
+      settlementTimeout: null,
+      settled: false      // flag to prevent double settlement
     };
 
     state.lastTriggerTime = now;
@@ -928,10 +857,7 @@ function handleMessage(msg) {
 
   if (msg.msg_type === 'balance') {
     state.balance = parseFloat(msg.balance.balance);
-    if (state.pendingSettlement && state.activeRealTrade) {
-      state.pendingSettlement = false;
-      settleRealTrade();
-    }
+    // If we still have a pending fallback settlement (old code), we could handle it, but we rely on subscription now.
     if (state.dailyPnl !== undefined) {
       state.dailyStartBalance = state.balance - state.dailyPnl;
     }
@@ -955,28 +881,106 @@ function handleMessage(msg) {
 
   if (msg.msg_type === 'buy') {
     if (state.activeRealTrade) {
-      state.activeRealTrade.contractId = msg.buy.contract_id;
+      const contractId = msg.buy.contract_id;
+      state.activeRealTrade.contractId = contractId;
       state.activeRealTrade.entryPrice = msg.buy.price;
-      state.activeRealTrade.balanceBefore = state.balance;
       state.activeRealTrade.executionTime = Date.now();
 
-      addLog(`💰 Trade Executed: Contract ID ${msg.buy.contract_id} at price ${msg.buy.price}`);
+      addLog(`💰 Trade Executed: Contract ID ${contractId} at price ${msg.buy.price}`);
 
+      // ---- SUBSCRIBE to contract updates ----
+      send({
+        proposal_open_contract: 1,
+        contract_id: contractId,
+        subscribe: 1,
+        req_id: ++reqId
+      });
+
+      // ---- Safety fallback timeout (will only act if not settled via subscription) ----
       const durationMs = CONFIG.DURATION * 1000;
-      const bufferMs = 5000;
-      const totalWaitMs = durationMs + bufferMs;
-
-      addLog(`⏱️ Timer started. Waiting ${totalWaitMs / 1000}s for settlement...`);
-
-      if (state.activeRealTrade.settlementTimeout) {
-        clearTimeout(state.activeRealTrade.settlementTimeout);
-      }
+      const bufferMs = 15000;
       state.activeRealTrade.settlementTimeout = setTimeout(() => {
-        state.pendingSettlement = true;
-        send({ balance: 1, req_id: ++reqId });
-      }, totalWaitMs);
+        if (state.activeRealTrade && !state.activeRealTrade.settled) {
+          addLog(`⚠️ Contract ${contractId} not settled via subscription. Falling back to balance check.`);
+          state.pendingSettlement = true;
+          send({ balance: 1, req_id: ++reqId });
+        }
+      }, durationMs + bufferMs);
     }
     return;
+  }
+
+  // ---- NEW: Contract settlement via subscription ----
+  if (msg.msg_type === 'proposal_open_contract') {
+    const contract = msg.proposal_open_contract;
+    // Only process if this contract matches the active trade
+    if (!state.activeRealTrade || state.activeRealTrade.contractId !== contract.id) {
+      return;
+    }
+
+    // If already settled, ignore
+    if (state.activeRealTrade.settled) return;
+
+    // Check if the contract is sold (settled)
+    if (contract.is_sold === 1) {
+      // Mark as settled to prevent double processing
+      state.activeRealTrade.settled = true;
+      clearTimeout(state.activeRealTrade.settlementTimeout);
+
+      // Calculate profit/loss
+      const profit = contract.profit || (contract.sell_price - contract.buy_price);
+      const isWin = profit >= 0;
+
+      // Update P&L
+      state.sessionPnl += profit;
+      state.dailyPnl += profit;
+      if (isWin) consecutiveLosses = 0;
+      else {
+        consecutiveLosses++;
+        if (consecutiveLosses >= CONFIG.MAX_CONSECUTIVE_LOSSES) {
+          state.lossCooldownUntil = Date.now() + CONFIG.LOSS_COOLDOWN_MS;
+          addLog(`⏳ ${CONFIG.MAX_CONSECUTIVE_LOSSES} consecutive losses. Cooldown for ${CONFIG.LOSS_COOLDOWN_MS/60000} minutes.`);
+        }
+      }
+
+      // Save to cloud ledger
+      const grossPayout = isWin ? (state.activeRealTrade.stake + profit) : 0;
+      saveTradeToCloud({
+        contract_id: contract.id,
+        asset: MARKETS[state.activeRealTrade.symbol]?.name || state.activeRealTrade.symbol,
+        contractType: state.activeRealTrade.contractType,
+        stake: state.activeRealTrade.stake,
+        payout: grossPayout,
+        isWin: isWin,
+        barrier: null,
+        exitTick: null,
+        entry_price: state.activeRealTrade.entryPrice,
+        exit_price: contract.sell_price,
+        duration_seconds: CONFIG.DURATION,
+        duration_ticks: null
+      });
+
+      addLog(`[Settlement] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | Result: ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
+
+      // Clean up trade state
+      state.tradeInProgress = false;
+      state.activeRealTrade = null;
+      state.pendingSettlement = false;
+      state.cooldownTicksLeft = CONFIG.COOLDOWN_TICKS;
+
+      // Recalculate stake
+      const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
+      state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
+
+      // Send FORGET to stop subscription
+      send({ forget: contract.id, req_id: ++reqId });
+
+      // Sync daily P&L & broadcast
+      syncDailyPnlFromDB().then(() => {
+        saveState();
+        broadcastSSE({ state: getFullState() });
+      });
+    }
   }
 }
 
@@ -994,7 +998,6 @@ app.post('/api/manual-trade', (req, res) => {
     return res.status(400).json({ error: 'Invalid contract type. Use "CALL" or "PUT".' });
   }
 
-  // ---- Insufficient funds check ----
   if (state.balance < CONFIG.MIN_STAKE) {
     return res.status(400).json({ error: 'Insufficient funds for minimum stake. Trading paused.' });
   }
@@ -1018,7 +1021,8 @@ app.post('/api/manual-trade', (req, res) => {
     direction: contractType,
     entryPrice: null,
     executionTime: Date.now(),
-    settlementTimeout: null
+    settlementTimeout: null,
+    settled: false
   };
 
   send({
