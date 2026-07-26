@@ -70,7 +70,7 @@ document.addEventListener('DOMContentLoaded', function() {
     updateClock();
 
     // =========================================================================
-    // MARKETS & DECIMAL FORMATTING – UPDATED WITH 1-SECOND INDICES
+    // MARKETS & DECIMAL FORMATTING
     // =========================================================================
     const MARKETS_CFG = {
         // Standard
@@ -108,7 +108,6 @@ document.addEventListener('DOMContentLoaded', function() {
     let currentFocus = 'R_75';
     let serverMode = 'demo';
     let globalState = null;
-    // Global dictionary to store latest raw prices (for manual trading)
     window.currentMarketPrices = {};
 
     window.setFocusMarket = function(sym) {
@@ -147,15 +146,16 @@ document.addEventListener('DOMContentLoaded', function() {
         .catch(err => console.error('Swap error:', err));
     };
 
+    // ---- Fixed manual trade with robust error handling ----
     window.fireManual = function(type) {
         const duration = parseInt(document.getElementById('manual-duration').value) || 7;
         const unit = document.getElementById('manual-unit').value;
-        // Get current price from global dictionary (raw value)
         const price = window.currentMarketPrices[currentFocus];
         if (price === undefined || price === null) {
             alert('No price data available for ' + currentFocus + '. Please wait for ticks.');
             return;
         }
+
         fetch('/api/manual-trade', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -164,15 +164,32 @@ document.addEventListener('DOMContentLoaded', function() {
                 contractType: type,
                 duration: duration,
                 durationUnit: unit,
-                price: price // optional, backend can use it for logging
+                price: price
             })
         })
-        .then(res => res.json())
-        .then(data => {
-            if (data.error) alert('Manual trade failed: ' + data.error);
-            else console.log('Manual trade request sent:', data.message);
+        .then(async (response) => {
+            const text = await response.text();
+            if (!response.ok) {
+                let errMsg;
+                try {
+                    const errData = JSON.parse(text);
+                    errMsg = errData.error || 'Server error';
+                } catch (e) {
+                    errMsg = `Server responded with ${response.status}: ${text.slice(0, 100)}`;
+                }
+                throw new Error(errMsg);
+            }
+            const data = JSON.parse(text);
+            if (data.error) {
+                alert('Manual trade failed: ' + data.error);
+            } else {
+                console.log('Manual trade request sent:', data.message);
+            }
         })
-        .catch(err => alert('Network error: ' + err.message));
+        .catch(err => {
+            alert('Network error: ' + err.message);
+            console.error('Manual trade fetch error:', err);
+        });
     };
 
     window.clearLogs = function() {
@@ -195,7 +212,6 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = JSON.parse(e.data);
             if (data.state) {
                 globalState = data.state;
-                // Update global price dictionary from marketMetrics
                 if (data.state.marketMetrics) {
                     for (const sym in data.state.marketMetrics) {
                         const metric = data.state.marketMetrics[sym];
@@ -223,7 +239,7 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     // =========================================================================
-    // RENDER UI (with safety checks and formatted prices)
+    // RENDER UI
     // =========================================================================
     function renderUI(state) {
         try {
@@ -241,7 +257,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             serverMode = tradingMode;
 
-            // ---- Header status ----
+            // Header status
             const header = document.getElementById('header-status');
             const now = Date.now();
             if (locked) {
@@ -258,7 +274,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 header.className = 'header-status';
             }
 
-            // ---- Sidebar metrics ----
+            // Sidebar metrics
             document.getElementById('m-profile').textContent = tradingMode.toUpperCase();
             document.getElementById('m-balance').textContent = balance !== null ? `$${Number(balance).toFixed(2)}` : '---';
             const sessVal = Number(sessionPnl);
@@ -271,7 +287,7 @@ document.addEventListener('DOMContentLoaded', function() {
             dailyEl.className = 'val ' + (dailyVal >= 0 ? 'green' : 'red');
             document.getElementById('m-stake').textContent = `$${Number(currentStake).toFixed(2)}`;
 
-            // ---- Focus bar ----
+            // Focus bar
             const focusMetric = marketMetrics[currentFocus] || null;
             document.getElementById('f-name').textContent = MARKETS_CFG[currentFocus] || 'Volatility 75 Index';
             const priceDisplay = focusMetric
@@ -297,7 +313,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('f-vol').textContent = 'Vol: —';
             }
 
-            // ---- Data table – now loops over all 10 markets ----
+            // Data table
             const tbody = document.getElementById('tableBody');
             tbody.innerHTML = '';
             let bestScore = -Infinity, bestSym = null;
@@ -360,7 +376,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // ---- Initial render with empty state ----
     renderUI({});
 
     // =========================================================================
@@ -611,7 +626,7 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     // =========================================================================
-    // INIT – set default active tab and ensure functions are global
+    // INIT
     // =========================================================================
     document.querySelectorAll('.tab-pages').forEach(p => p.classList.remove('active'));
     document.getElementById('tab-dashboard').classList.add('active');
