@@ -169,7 +169,9 @@ function handleMessage(msg) {
 
             state.tradeInProgress = true;
 
-            const preTradeBalance = state.balance;
+            // preTradeBalance is already stored in trade.balanceBefore (before stake deduction)
+            // We'll use that for profit calculation.
+
             const symbol = state.activeRealTrade.symbol;
             const duration = state.activeRealTrade.duration || CONFIG.DURATION;
             const stake = state.activeRealTrade.stake;
@@ -185,18 +187,22 @@ function handleMessage(msg) {
 
             settlementTimer = setTimeout(() => {
                 try {
+                    // ---- Corrected profit calculation ----
                     const postBal = state.balance;
-                    const preBal = preTradeBalance;
+                    const preBal = state.activeRealTrade.balanceBefore; // balance before stake deduction
+                    const stake = state.activeRealTrade.stake;
 
-                    if (isNaN(postBal) || isNaN(preBal)) {
-                        throw new Error(`Balance reading failed. Pre: ${preBal}, Post: ${postBal}`);
+                    if (isNaN(postBal) || isNaN(preBal) || isNaN(stake)) {
+                        throw new Error(`Invalid numbers: postBal=${postBal}, preBal=${preBal}, stake=${stake}`);
                     }
 
-                    const profit = postBal - preBal;
-                    const isWin = profit > 0;
+                    // Net profit = current balance - balance before trade (stake already accounted)
+                    const netProfit = postBal - preBal;
+                    const isWin = netProfit > 0;
 
-                    state.sessionPnl += profit;
-                    state.dailyPnl += profit;
+                    // Update P&L
+                    state.sessionPnl += netProfit;
+                    state.dailyPnl += netProfit;
 
                     if (isWin) {
                         state.consecutiveLosses = 0;
@@ -208,7 +214,7 @@ function handleMessage(msg) {
                         }
                     }
 
-                    const grossPayout = isWin ? (stake + profit) : 0;
+                    const grossPayout = isWin ? (stake + netProfit) : 0;
                     if (state.activeRealTrade) {
                         saveTradeToCloud({
                             contract_id: state.activeRealTrade.contractId || null,
@@ -226,12 +232,14 @@ function handleMessage(msg) {
                         });
                     }
 
-                    addLog(`[Trade Finished] ${symbol} | ${state.activeRealTrade ? state.activeRealTrade.contractType : ''} | ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
+                    const outcomeLabel = isWin ? `🟢 WIN (+$${netProfit.toFixed(2)})` : `🔴 LOSS (-$${Math.abs(netProfit).toFixed(2)})`;
+                    addLog(`[Trade Finished] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | ${outcomeLabel} | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
 
                 } catch (error) {
                     console.error('[Trade Check Error]', error.message);
                     addLog(`⚠️ Trade check error: ${error.message}`);
                 } finally {
+                    // ---- UNLOCK SYSTEM ----
                     state.tradeInProgress = false;
                     state.activeRealTrade = null;
                     state.pendingSettlement = false;
@@ -304,14 +312,13 @@ function processLiveFeed(symbol, price) {
         addLog(`🔥 Signal: ${symbol} | ${direction} | RSI: ${metric.rsi.toFixed(1)} | Vol: ${metric.volatility.toFixed(2)}%`);
 
         let duration = CONFIG.DURATION;
-        let unit = 's';
-        if (duration <= 10) unit = 't';
-        else unit = 's';
+        let unit = 't'; // always ticks for auto (7 ticks)
+        // duration is already in ticks
 
         state.activeRealTrade = {
             symbol,
             stake: state.currentStake,
-            balanceBefore: state.balance,
+            balanceBefore: state.balance, // capture before stake deduction
             contractType: direction,
             duration: duration,
             durationUnit: unit,
@@ -325,7 +332,7 @@ function processLiveFeed(symbol, price) {
         };
 
         state.lastTriggerTime = now;
-        addLog(`📤 Requesting ${direction} proposal for ${symbol} (${duration} ${unit === 't' ? 'ticks' : 'seconds'})...`);
+        addLog(`📤 Requesting ${direction} proposal for ${symbol} (${duration} ticks)...`);
         send({
             proposal: 1,
             amount: state.currentStake,
