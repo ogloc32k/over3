@@ -302,7 +302,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('f-vol').textContent = 'Vol: —';
             }
 
-            // Data table
+            // ---- Data table (updated Breakout & Step) ----
             const tbody = document.getElementById('tableBody');
             tbody.innerHTML = '';
             let bestScore = -Infinity, bestSym = null;
@@ -315,22 +315,58 @@ document.addEventListener('DOMContentLoaded', function() {
                 const isActive = sym === currentFocus;
                 let priceDisplay = '—', step = 0, stepLabel = 'SCAN', stepClass = 'step-0', score = 0;
                 let support = '—', resistance = '—';
-                let breakoutIcon = '⚪', breakoutText = '';
+                let breakoutLabel = '⚪ —';
+                let breakoutClass = 'badge-range';
+                let stepBadgeClass = 'badge-step-scan';
                 let rsiVal = '—', rsiClass = '';
                 let fastMA = '—', slowMA = '—', vol = '—', diff = '—', diffClass = '';
+
                 if (metric) {
                     priceDisplay = metric.formattedPrice || formatPrice(sym, metric.price);
                     step = metric.step || 0;
                     score = metric.score || 0;
-                    if (step === 3) { stepLabel = 'ENTRY'; stepClass = 'step-3'; }
-                    else if (step === 2) { stepLabel = 'NEAR'; stepClass = 'step-2'; }
-                    else if (step === 1) { stepLabel = 'LEVEL'; stepClass = 'step-1'; }
-                    else { stepLabel = 'SCAN'; stepClass = 'step-0'; }
+
+                    // ---- Breakout evaluation ----
+                    const price = metric.price;
+                    const sup = metric.support;
+                    const res = metric.resistance;
+                    if (sup !== null && res !== null) {
+                        if (price > res) {
+                            breakoutLabel = '🟢 UP';
+                            breakoutClass = 'badge-up';
+                        } else if (price < sup) {
+                            breakoutLabel = '🔴 DOWN';
+                            breakoutClass = 'badge-down';
+                        } else {
+                            breakoutLabel = '⚪ RANGE';
+                            breakoutClass = 'badge-range';
+                        }
+                    } else {
+                        breakoutLabel = '⚪ —';
+                        breakoutClass = 'badge-range';
+                    }
+
+                    // ---- Step label & class ----
+                    if (step === 3) {
+                        stepLabel = 'ENTRY';
+                        stepClass = 'step-3';
+                        stepBadgeClass = 'badge-step-entry';
+                    } else if (step === 2) {
+                        stepLabel = 'NEAR';
+                        stepClass = 'step-2';
+                        stepBadgeClass = 'badge-step-trend';
+                    } else if (step === 1) {
+                        stepLabel = 'LEVEL';
+                        stepClass = 'step-1';
+                        stepBadgeClass = 'badge-step-level';
+                    } else {
+                        stepLabel = 'SCAN';
+                        stepClass = 'step-0';
+                        stepBadgeClass = 'badge-step-scan';
+                    }
+
                     support = metric.support ? Number(metric.support).toFixed(2) : '—';
                     resistance = metric.resistance ? Number(metric.resistance).toFixed(2) : '—';
-                    if (metric.isBreakout) { breakoutIcon = '✅'; breakoutText = 'Breakout'; }
-                    else if (metric.isBreakdown) { breakoutIcon = '❌'; breakoutText = 'Breakdown'; }
-                    else { breakoutIcon = '⚪'; breakoutText = '—'; }
                     rsiVal = metric.rsi !== undefined ? Number(metric.rsi).toFixed(1) : '—';
                     if (metric.rsi !== undefined && metric.rsi > 70) rsiClass = 'overbought';
                     else if (metric.rsi !== undefined && metric.rsi < 30) rsiClass = 'oversold';
@@ -343,6 +379,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         diffClass = d >= 0 ? 'positive' : 'negative';
                     } else { diff = '—'; diffClass = ''; }
                 }
+
                 const tr = document.createElement('tr');
                 tr.className = `${isActive ? 'active' : ''} ${stepClass}`;
                 tr.onclick = () => window.setFocusMarket(sym);
@@ -350,13 +387,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td class="col-asset">${MARKETS_CFG[sym]}</td>
                     <td class="col-price">${priceDisplay}</td>
                     <td class="col-sr"><span class="s">${support}</span> / <span class="r">${resistance}</span></td>
-                    <td class="col-status"><span class="icon">${breakoutIcon}</span> ${breakoutText}</td>
+                    <td class="col-status"><span class="${breakoutClass}">${breakoutLabel}</span></td>
                     <td class="col-rsi ${rsiClass}">${rsiVal}</td>
                     <td class="col-ma"><span class="fast">${fastMA}</span></td>
                     <td class="col-ma"><span class="slow">${slowMA}</span></td>
                     <td class="col-vol">${vol}</td>
                     <td class="col-diff ${diffClass}">${diff}</td>
-                    <td class="col-step"><span class="step-badge ${stepClass}">${stepLabel}</span></td>
+                    <td class="col-step"><span class="${stepBadgeClass}">${stepLabel}</span></td>
                 `;
                 tbody.appendChild(tr);
             }
@@ -548,10 +585,8 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     };
 
-    // ---- Time-bucket processing ----
     function processEquityBuckets(rawData, mode, startTime, endTime) {
         if (!rawData || rawData.length === 0) {
-            // No trades: return a flat line at current balance
             const now = endTime || Date.now();
             const start = startTime || (now - 24*60*60*1000);
             return {
@@ -560,10 +595,7 @@ document.addEventListener('DOMContentLoaded', function() {
             };
         }
 
-        // Sort by timestamp
         const sorted = rawData.slice().sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
-
-        // Compute cumulative equity from start
         let cum = 0;
         const points = sorted.map(t => {
             cum += (t.profit_loss || 0);
@@ -573,33 +605,30 @@ document.addEventListener('DOMContentLoaded', function() {
             };
         });
 
-        // Determine bucket size based on mode
         let bucketMs;
         const now = Date.now();
         const range = endTime - startTime;
         switch (mode) {
             case 'hour':
-                bucketMs = 5 * 60 * 1000; // 5 min
+                bucketMs = 5 * 60 * 1000;
                 break;
             case '24h':
-                bucketMs = 15 * 60 * 1000; // 15 min
+                bucketMs = 15 * 60 * 1000;
                 break;
             case 'month':
-                bucketMs = 24 * 60 * 60 * 1000; // 1 day
+                bucketMs = 24 * 60 * 60 * 1000;
                 break;
             case '6months':
             case '1year':
-                bucketMs = 7 * 24 * 60 * 60 * 1000; // 1 week
+                bucketMs = 7 * 24 * 60 * 60 * 1000;
                 break;
             default:
-                bucketMs = 24 * 60 * 60 * 1000; // 1 day
+                bucketMs = 24 * 60 * 60 * 1000;
                 break;
         }
-        // If range is small, use smaller buckets
-        if (range < 2 * 60 * 60 * 1000) bucketMs = 5 * 60 * 1000; // 5 min
-        if (range < 30 * 60 * 1000) bucketMs = 60 * 1000; // 1 min
+        if (range < 2 * 60 * 60 * 1000) bucketMs = 5 * 60 * 1000;
+        if (range < 30 * 60 * 1000) bucketMs = 60 * 1000;
 
-        // Build buckets
         const buckets = [];
         let currentBucketStart = startTime;
         let idx = 0;
@@ -607,35 +636,27 @@ document.addEventListener('DOMContentLoaded', function() {
 
         while (currentBucketStart < endTime) {
             const bucketEnd = Math.min(currentBucketStart + bucketMs, endTime);
-            // Find the last trade point in this bucket
             let equityAtEnd = lastEquity;
             while (idx < points.length && points[idx].timestamp <= bucketEnd) {
                 equityAtEnd = points[idx].equity;
                 idx++;
             }
-            // Insert bucket point
             buckets.push({
-                x: currentBucketStart + bucketMs / 2, // midpoint of bucket
+                x: currentBucketStart + bucketMs / 2,
                 y: equityAtEnd
             });
             lastEquity = equityAtEnd;
             currentBucketStart = bucketEnd;
         }
 
-        // Ensure we have at least two points
         if (buckets.length < 2) {
-            // Add start and end points
             const firstEquity = points.length > 0 ? points[0].equity : 0;
             return {
-                data: [
-                    {x: startTime, y: firstEquity},
-                    {x: endTime, y: firstEquity}
-                ],
+                data: [{x: startTime, y: firstEquity}, {x: endTime, y: firstEquity}],
                 bucketSize: bucketMs
             };
         }
 
-        // Anchor the first point to startTime with the equity of the first trade or 0
         const startEquity = points.length > 0 ? points[0].equity : 0;
         buckets[0].y = startEquity;
 
@@ -645,7 +666,6 @@ document.addEventListener('DOMContentLoaded', function() {
         };
     }
 
-    // ---- Compute asset contribution ----
     function computeAssetContribution(rawData) {
         const assetMap = {};
         rawData.forEach(t => {
@@ -656,7 +676,6 @@ document.addEventListener('DOMContentLoaded', function() {
         return assetLabels.map(name => assetMap[name] || 0);
     }
 
-    // ---- Update UI metrics ----
     function updateUI(metrics, chartData) {
         const profitVal = parseFloat(metrics.profit.replace(/[$,]/g, ''));
         const profitEl = document.getElementById('meta-profit');
@@ -677,9 +696,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (charts.line) {
             const equityPoints = chartData.equityData || [];
             if (equityPoints.length > 0) {
-                // Set the dataset data
                 charts.line.data.datasets[0].data = equityPoints;
-                // Update color based on last point vs first point
                 const last = equityPoints[equityPoints.length-1];
                 const first = equityPoints[0];
                 const color = (last && first && last.y >= first.y) ? '#10b981' : '#ef4444';
@@ -689,7 +706,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // ---- Timeframe preset ----
     window.timeframePreset = async function(btn, mode) {
         if (btn) {
             document.querySelectorAll('.preset-strip .btn-preset').forEach(b => b.classList.remove('active'));
@@ -704,22 +720,18 @@ document.addEventListener('DOMContentLoaded', function() {
             const resp = await fetch(`/api/ledger/analytics?mode=${mode}`);
             const data = await resp.json();
 
-            // Extract raw trades and total profit
             const rawData = data.rawData || [];
             const totalProfit = parseFloat(data.totalProfit) || 0;
             const strikeRate = data.strikeRate || '0.0';
             const profitFactor = data.profitFactor || '0.00';
             const drawdown = data.drawdown || '0.0';
 
-            // Compute asset contribution
             const assetData = computeAssetContribution(rawData);
 
-            // Compute equity curve with time-bucketing
             let equityPoints = [];
             let startTime, endTime;
             const now = Date.now();
 
-            // Determine time window based on mode
             switch (mode) {
                 case 'hour':
                     startTime = now - 60 * 60 * 1000;
@@ -743,15 +755,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     break;
                 case 'session':
                 default:
-                    // For session, just use the trades from the session (no time filtering)
                     startTime = 0;
                     endTime = now;
                     break;
             }
 
-            // For session, we use raw data directly (no bucketing)
             if (mode === 'session') {
-                // Sort by timestamp
                 const sorted = rawData.slice().sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
                 let cum = 0;
                 equityPoints = sorted.map(t => {
@@ -762,21 +771,17 @@ document.addEventListener('DOMContentLoaded', function() {
                     };
                 });
                 if (equityPoints.length === 0) {
-                    // No trades, flat line at 0
                     equityPoints = [{x: now - 1000, y: 0}, {x: now, y: 0}];
                 }
             } else {
-                // Use time-bucket processing
                 const bucketed = processEquityBuckets(rawData, mode, startTime, endTime);
                 equityPoints = bucketed.data;
-                // If we got fewer than 2 points, pad to make a line
                 if (equityPoints.length < 2) {
                     const val = equityPoints.length === 1 ? equityPoints[0].y : 0;
                     equityPoints = [{x: startTime, y: val}, {x: endTime, y: val}];
                 }
             }
 
-            // Update UI
             updateUI({
                 profit: `$${totalProfit.toFixed(2)}`,
                 pf: profitFactor,
@@ -787,7 +792,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 equityData: equityPoints
             });
 
-            // Store for later use
             currentEquityData = equityPoints;
 
         } catch(err) {
@@ -795,7 +799,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
-    // ---- Date filter ----
     window.applyDateFilter = async function() {
         const start = document.getElementById('date-start').value;
         const end = document.getElementById('date-end').value;
@@ -809,8 +812,6 @@ document.addEventListener('DOMContentLoaded', function() {
             const drawdown = data.drawdown || '0.0';
 
             const assetData = computeAssetContribution(rawData);
-
-            // For custom date range, use time-bucketing with 1-day buckets
             const startTime = new Date(start).getTime();
             const endTime = new Date(end).getTime();
             const bucketed = processEquityBuckets(rawData, 'month', startTime, endTime);
