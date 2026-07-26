@@ -11,6 +11,9 @@ let keepAliveLoop = null;
 let watchdogTimer = null;
 let settlementTimer = null;
 
+// ---- All mutable variables are declared with 'let' ----
+let consecutiveLosses = 0; // <-- CHANGED FROM const TO let
+
 const engine = new MultiMarketPipeline(Object.keys(MARKETS));
 
 function send(msg) {
@@ -183,28 +186,23 @@ function handleMessage(msg) {
 
             clearTimeout(settlementTimer);
 
-            // ---- ARMOUR-PLATED TIMER ----
             settlementTimer = setTimeout(() => {
                 try {
-                    // 1. Read current balance
                     const postBal = state.balance;
                     const preBal = preTradeBalance;
 
-                    // 2. Validate
                     if (isNaN(postBal) || isNaN(preBal)) {
                         throw new Error(`Balance reading failed. Pre: ${preBal}, Post: ${postBal}`);
                     }
 
-                    // 3. Deduce outcome
                     const profit = postBal - preBal;
                     const isWin = profit > 0;
 
-                    // 4. Update P&L
                     state.sessionPnl += profit;
                     state.dailyPnl += profit;
 
                     if (isWin) {
-                        consecutiveLosses = 0;
+                        consecutiveLosses = 0; // <-- allowed because it's `let`
                     } else {
                         consecutiveLosses++;
                         if (consecutiveLosses >= CONFIG.MAX_CONSECUTIVE_LOSSES) {
@@ -213,7 +211,6 @@ function handleMessage(msg) {
                         }
                     }
 
-                    // 5. Save to DB
                     const grossPayout = isWin ? (stake + profit) : 0;
                     if (state.activeRealTrade) {
                         saveTradeToCloud({
@@ -232,15 +229,12 @@ function handleMessage(msg) {
                         });
                     }
 
-                    // 6. Log result
                     addLog(`[Trade Finished] ${symbol} | ${state.activeRealTrade ? state.activeRealTrade.contractType : ''} | ${isWin ? '🟢 WIN (+$' : '🔴 LOSS (-$'}${Math.abs(profit).toFixed(2)}) | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
 
                 } catch (error) {
-                    // ---- Catch any variable/math errors ----
                     console.error('[Trade Check Error]', error.message);
                     addLog(`⚠️ Trade check error: ${error.message}`);
                 } finally {
-                    // ---- UNLOCK SYSTEM (guaranteed) ----
                     state.tradeInProgress = false;
                     state.activeRealTrade = null;
                     state.pendingSettlement = false;
