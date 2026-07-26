@@ -9,13 +9,18 @@ let derivWs = null;
 let reqId = 0;
 let keepAliveLoop = null;
 let watchdogTimer = null;
-let tradeSafetyTimer = null; // 25s fallback
+let tradeSafetyTimer = null;
 
 const engine = new MultiMarketPipeline(Object.keys(MARKETS));
 
 function send(msg) {
     if (derivWs && derivWs.readyState === WebSocket.OPEN) {
-        derivWs.send(JSON.stringify(msg));
+        const payload = JSON.stringify(msg);
+        console.log(`[DEBUG] Sending: ${payload}`);
+        derivWs.send(payload);
+    } else {
+        console.warn('[DEBUG] Cannot send: WebSocket not open');
+        addLog(`⚠️ Cannot send: WebSocket not open (readyState=${derivWs ? derivWs.readyState : 'null'})`);
     }
 }
 
@@ -85,6 +90,7 @@ async function connectDeriv() {
         derivWs.on('message', raw => {
             try {
                 const msg = JSON.parse(raw);
+                console.log(`[DEBUG] Received: ${raw}`);
                 if (msg.msg_type === 'ping') { clearTimeout(watchdogTimer); return; }
                 handleMessage(msg);
             } catch(e) {
@@ -169,14 +175,16 @@ function handleMessage(msg) {
             addLog(`💰 Trade Executed: Contract ID ${contractId} at price ${entryPrice}`);
 
             // ---- Subscribe to contract updates ----
-            send({
+            const subMsg = {
                 proposal_open_contract: 1,
                 contract_id: contractId,
                 subscribe: 1,
                 req_id: getNextReqId()
-            });
+            };
+            console.log(`[DEBUG] Subscribing to contract ${contractId} with:`, subMsg);
+            send(subMsg);
 
-            // ---- Start 25‑second safety timer to unlock if settlement is missed ----
+            // ---- Start 25‑second safety timer ----
             clearTimeout(tradeSafetyTimer);
             tradeSafetyTimer = setTimeout(() => {
                 if (state.tradeInProgress) {
@@ -192,11 +200,21 @@ function handleMessage(msg) {
         return;
     }
 
-    // ---- Contract lifecycle updates (Deriv's official stream) ----
+    // ---- Contract lifecycle updates ----
     if (msg.msg_type === 'proposal_open_contract') {
+        console.log(`[DEBUG] Received proposal_open_contract message:`, msg);
         const contract = msg.proposal_open_contract;
-        if (!state.activeRealTrade || state.activeRealTrade.contractId !== contract.id) return;
-        if (state.activeRealTrade.settled) return;
+        // Convert both contract IDs to strings for safe comparison
+        const activeContractId = state.activeRealTrade ? String(state.activeRealTrade.contractId) : null;
+        const incomingContractId = String(contract.id);
+        if (!state.activeRealTrade || activeContractId !== incomingContractId) {
+            console.log(`[DEBUG] Contract ID mismatch: active=${activeContractId}, incoming=${incomingContractId}`);
+            return;
+        }
+        if (state.activeRealTrade.settled) {
+            console.log('[DEBUG] Contract already settled, ignoring.');
+            return;
+        }
 
         // ---- Log entry price once ----
         if (contract.entry_spot && !state.activeRealTrade.entryLogged) {
@@ -208,18 +226,14 @@ function handleMessage(msg) {
 
         // ---- Detect contract settlement ----
         if (contract.is_sold === 1) {
-            // Clear safety timer
+            console.log(`[DEBUG] Contract ${contract.id} settled.`);
             clearTimeout(tradeSafetyTimer);
 
-            // Mark as settled to prevent double processing
             state.activeRealTrade.settled = true;
-
-            // ---- Compute outcome ----
             const profit = contract.profit || 0;
             const isWin = profit > 0;
             const statusLabel = isWin ? 'WIN' : 'LOSS';
 
-            // ---- Update P&L ----
             state.sessionPnl += profit;
             state.dailyPnl += profit;
             if (isWin) {
@@ -232,7 +246,6 @@ function handleMessage(msg) {
                 }
             }
 
-            // ---- Save to database ----
             const grossPayout = isWin ? (state.activeRealTrade.stake + profit) : 0;
             saveTradeToCloud({
                 contract_id: contract.id,
@@ -249,23 +262,20 @@ function handleMessage(msg) {
                 duration_ticks: null
             });
 
-            // ---- Log final result ----
             addLog(`[Trade Finished] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | ${statusLabel} | Profit/Loss: $${profit.toFixed(2)} | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
 
-            // ---- Reset execution lock and clean up ----
+            // ---- Unlock ----
             state.tradeInProgress = false;
             state.activeRealTrade = null;
             state.pendingSettlement = false;
             state.cooldownTicksLeft = CONFIG.COOLDOWN_TICKS;
 
-            // Recalculate stake
             const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
             state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
-            // ---- Close the subscription stream ----
+            // ---- Close subscription ----
             send({ forget: contract.id, req_id: getNextReqId() });
 
-            // ---- Sync DB and update UI ----
             (async () => {
                 const limitHit = await syncDailyPnlFromDB();
                 if (limitHit && state.lockReason) addLog(state.lockReason);
@@ -277,17 +287,15 @@ function handleMessage(msg) {
 }
 
 // =====================================================================
-//  PROCESS LIVE FEED (no custom tick counter)
+//  PROCESS LIVE FEED
 // =====================================================================
 function processLiveFeed(symbol, price) {
     const metric = engine.feed(symbol, price);
     if (!metric) return;
     state.marketMetrics[symbol] = metric;
 
-    // Cooldown
     if (state.cooldownTicksLeft > 0) state.cooldownTicksLeft--;
 
-    // Strategy execution (skip if locked or trade in progress)
     if (!state.active || state.locked || state.tradeInProgress || state.cooldownTicksLeft > 0) {
         broadcastSSE({ state: getFullState() });
         return;
