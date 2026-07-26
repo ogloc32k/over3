@@ -2,7 +2,6 @@ const sseClients = new Set();
 let logId = 1;
 
 function addLog(msg) {
-    // Lazy require to break circular dependency
     const { state, getFullState } = require('../state/manager');
     const entry = { id: logId++, time: new Date().toISOString(), message: msg };
     state.logs.unshift(entry);
@@ -11,7 +10,6 @@ function addLog(msg) {
 }
 
 function broadcastSSE(payload) {
-    // Lazy require to break circular dependency
     const { state, getFullState } = require('../state/manager');
     if (!payload.state) payload.state = getFullState();
     if (payload.state && !payload.state.marketMetrics) {
