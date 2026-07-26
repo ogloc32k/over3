@@ -1,5 +1,5 @@
 const WebSocket = require('ws');
-const { state, CONFIG, consecutiveLosses, checkStrategy, syncDailyPnlFromDB, getFullState, saveState, checkDailyLimits } = require('../state/manager');
+const { state, CONFIG, checkStrategy, syncDailyPnlFromDB, getFullState, saveState, checkDailyLimits } = require('../state/manager');
 const { addLog, broadcastSSE } = require('../api/sse');
 const { MARKETS, formatMarketPrice } = require('../markets/definitions');
 const { saveTradeToCloud } = require('../database');
@@ -10,9 +10,6 @@ let reqId = 0;
 let keepAliveLoop = null;
 let watchdogTimer = null;
 let settlementTimer = null;
-
-// ---- All mutable variables are declared with 'let' ----
-let consecutiveLosses = 0; // <-- CHANGED FROM const TO let
 
 const engine = new MultiMarketPipeline(Object.keys(MARKETS));
 
@@ -202,10 +199,10 @@ function handleMessage(msg) {
                     state.dailyPnl += profit;
 
                     if (isWin) {
-                        consecutiveLosses = 0; // <-- allowed because it's `let`
+                        state.consecutiveLosses = 0;
                     } else {
-                        consecutiveLosses++;
-                        if (consecutiveLosses >= CONFIG.MAX_CONSECUTIVE_LOSSES) {
+                        state.consecutiveLosses++;
+                        if (state.consecutiveLosses >= CONFIG.MAX_CONSECUTIVE_LOSSES) {
                             state.lossCooldownUntil = Date.now() + CONFIG.LOSS_COOLDOWN_MS;
                             addLog(`⏳ ${CONFIG.MAX_CONSECUTIVE_LOSSES} consecutive losses. Cooldown for ${CONFIG.LOSS_COOLDOWN_MS/60000} minutes.`);
                         }
