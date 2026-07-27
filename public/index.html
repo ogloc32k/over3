@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>QUANTCORE // TERMINAL v6.0</title>
-  <!-- Force no caching for this HTML -->
+  <!-- Force no caching -->
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
@@ -73,7 +73,7 @@
     <!-- MAIN CONTENT -->
     <main class="app-main">
 
-      <!-- FOCUS BAR -->
+      <!-- FOCUS BAR (hidden on Analytics tab) -->
       <div class="focus-bar" id="focusBar">
         <div class="left">
           <span class="name" id="f-name">Volatility 75 Index</span>
@@ -118,40 +118,76 @@
         <div class="log-stream" id="log-stream"></div>
       </div>
 
+      <!-- ====== ANALYTICS TAB ====== -->
       <div class="tab-pages" id="tab-analytics">
-        <div class="analytics-grid">
-          <div class="filter-bar">
-            <label>From</label><input type="date" id="date-start" value="2026-06-01" onchange="applyDateFilter()">
-            <label>To</label><input type="date" id="date-end" value="2026-06-21" onchange="applyDateFilter()">
-            <div class="preset-strip">
-              <button class="btn-preset" id="p-24h" onclick="timeframePreset(this,'24h')">24H</button>
-              <button class="btn-preset active" id="p-session" onclick="timeframePreset(this,'session')">Session</button>
-              <button class="btn-preset" id="p-week" onclick="timeframePreset(this,'week')">1W</button>
-              <button class="btn-preset" id="p-month" onclick="timeframePreset(this,'month')">1M</button>
-              <button class="btn-preset" id="p-year" onclick="timeframePreset(this,'year')">1Y</button>
-              <button class="btn-preset" id="p-clear" onclick="timeframePreset(this,'clear')">✕</button>
+        <div class="analytics-container">
+
+          <!-- FILTER BAR (top row) -->
+          <div class="analytics-filter-bar">
+            <div class="filter-left">
+              <!-- Custom date toggle -->
+              <button class="btn-date-toggle" id="dateToggle" onclick="toggleDatePicker()">📅</button>
+              <div class="date-picker-group" id="datePickerGroup" style="display:none;">
+                <label>From</label><input type="date" id="date-start" onchange="applyDateFilter()">
+                <label>To</label><input type="date" id="date-end" onchange="applyDateFilter()">
+              </div>
+            </div>
+            <div class="filter-right">
+              <div class="preset-strip">
+                <button class="btn-preset" id="p-24h" onclick="timeframePreset(this,'24h')">24H</button>
+                <button class="btn-preset active" id="p-session" onclick="timeframePreset(this,'session')">Session</button>
+                <button class="btn-preset" id="p-week" onclick="timeframePreset(this,'week')">1W</button>
+                <button class="btn-preset" id="p-month" onclick="timeframePreset(this,'month')">1M</button>
+                <button class="btn-preset" id="p-year" onclick="timeframePreset(this,'year')">1Y</button>
+                <button class="btn-preset" id="p-clear" onclick="timeframePreset(this,'clear')">✕</button>
+              </div>
             </div>
           </div>
+
+          <!-- PRIMARY KPI CARDS (4) -->
           <div class="metrics-grid-4">
             <div class="metric-card"><div class="lbl">Net Profit</div><div class="val" id="meta-profit">$0.00</div></div>
             <div class="metric-card"><div class="lbl">Strike Rate</div><div class="val" id="meta-strike">0.0%</div></div>
-            <div class="metric-card"><div class="lbl">Profit Factor</div><div class="val" id="meta-pf" style="color:var(--neon-blue);">0.00</div></div>
+            <div class="metric-card"><div class="lbl">Profit Factor</div><div class="val" id="meta-pf">0.00</div></div>
             <div class="metric-card"><div class="lbl">Max Drawdown</div><div class="val" id="meta-dd">0.0%</div></div>
           </div>
+
+          <!-- SECONDARY METRICS STRIP (4 columns) -->
+          <div class="metrics-secondary">
+            <div class="metric-item">
+              <span class="lbl">Avg Win / Avg Loss</span>
+              <span class="val" id="meta-avg-win-loss">$0.00 / $0.00</span>
+            </div>
+            <div class="metric-item">
+              <span class="lbl">Max Consecutive</span>
+              <span class="val" id="meta-max-consec">W:0 / L:0</span>
+            </div>
+            <div class="metric-item">
+              <span class="lbl">Avg Trade Duration</span>
+              <span class="val" id="meta-avg-duration">0s</span>
+            </div>
+            <div class="metric-item">
+              <span class="lbl">Won / Lost</span>
+              <span class="val" id="meta-won-lost">0 / 0</span>
+            </div>
+          </div>
+
+          <!-- CHARTS (full remaining height) -->
           <div class="charts-grid-2">
             <div class="chart-box">
               <div class="ch-label">Asset Performance</div>
-              <div class="ch-wrap" style="height:100%;max-height:200px;">
-                <canvas id="chart-donut" style="width:100%;height:100%;"></canvas>
+              <div class="ch-wrap">
+                <canvas id="chart-donut"></canvas>
               </div>
             </div>
             <div class="chart-box">
               <div class="ch-label">Equity Curve</div>
-              <div class="ch-wrap" style="height:100%;max-height:200px;">
-                <canvas id="chart-line" style="width:100%;height:100%;"></canvas>
+              <div class="ch-wrap">
+                <canvas id="chart-line"></canvas>
               </div>
             </div>
           </div>
+
         </div>
       </div>
 
@@ -280,7 +316,7 @@
     <button class="tab-item" data-tab="settings" onclick="switchTab('settings')"><span class="icon">⚙️</span><span class="label">Settings</span></button>
   </div>
 
-  <!-- CACHE‑BUSTED SCRIPT – filename with version -->
+  <!-- CACHE‑BUSTED SCRIPT -->
   <script src="js/app.js?v=2"></script>
 </body>
 </html>
