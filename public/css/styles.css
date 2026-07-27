@@ -16,7 +16,6 @@ body {
   transition: background 0.3s, color 0.3s;
 }
 :root {
-  /* Dark theme (default) – softer */
   --bg-terminal: #0b0e14;
   --bg-panel: #131722;
   --bg-card: #1e222d;
@@ -34,7 +33,6 @@ body {
   --tab-height: 60px;
 }
 
-/* Light theme overrides */
 body.light {
   --bg-terminal: #f1f5f9;
   --bg-panel: #ffffff;
@@ -137,7 +135,6 @@ body.light {
 }
 .header-clock span { color: var(--neon-blue); }
 
-/* Theme toggle button */
 .theme-toggle {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
@@ -153,7 +150,7 @@ body.light {
 .theme-toggle:hover { background: var(--bg-surface); color: var(--text-primary); }
 
 /* ============================================================
-   SIDEBAR – WITH FIXED TOGGLE
+   SIDEBAR
    ============================================================ */
 .app-body {
   display: flex;
@@ -183,7 +180,6 @@ body.light {
   overflow: hidden;
 }
 
-/* Sidebar content */
 .sidebar-content {
   opacity: 1;
   transition: opacity 0.2s;
@@ -288,7 +284,6 @@ body.light {
 .sidebar-duration input:focus,
 .sidebar-duration select:focus { border-color: var(--neon-blue); }
 
-/* ---- FIXED SIDEBAR TOGGLE (always visible) ---- */
 .sidebar-toggle-fixed {
   position: fixed;
   top: calc(var(--header-height) + 8px);
@@ -335,7 +330,6 @@ body.light {
   transition: background 0.3s;
 }
 
-/* Focus bar */
 .focus-bar {
   display: flex;
   justify-content: space-between;
@@ -372,7 +366,6 @@ body.light {
 .focus-bar .right .badge.breakdown { background: rgba(239,68,68,0.12); color: var(--red-loss); border: 1px solid var(--red-loss); }
 .focus-bar .right .badge.idle { background: rgba(120,123,134,0.08); color: var(--text-secondary); border: 1px solid var(--border-subtle); }
 
-/* Tabs */
 .tab-pages {
   flex: 1;
   display: none;
@@ -759,7 +752,21 @@ body.light {
   margin-bottom: 2px;
   flex-shrink: 0;
 }
-.chart-box .ch-wrap { flex: 1; position: relative; min-height: 100px; }
+.chart-box .ch-wrap { 
+  flex: 1; 
+  position: relative; 
+  min-height: 100px;
+  height: 100%;
+  max-height: 200px; /* Ensure charts don't overflow */
+}
+
+/* ---- Chart canvas adjustments ---- */
+#chart-donut,
+#chart-line {
+  width: 100% !important;
+  height: 100% !important;
+  max-height: 180px;
+}
 
 .log-stream {
   background: var(--bg-terminal);
@@ -805,7 +812,6 @@ body.light {
 }
 .log-header .clear-btn:active { transform: scale(0.95); }
 
-/* Bottom tab bar (mobile) */
 .tab-bar {
   display: none;
   background: var(--bg-panel);
@@ -894,7 +900,11 @@ body.light {
     font-size: 16px;
     min-height: 36px;
   }
+  /* Chart adjustments on mobile */
+  .chart-box .ch-wrap { max-height: 120px; }
+  #chart-donut, #chart-line { max-height: 120px; }
 }
+
 @media (min-width: 769px) {
   .tab-bar { display: none; }
   .header-tabs { display: flex; }
