@@ -3,7 +3,7 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const { supabase } = require('./database');
-const { loadState, saveState, state, CONFIG, syncDailyPnlFromDB } = require('./state/manager');
+const { loadState, saveState, state, CONFIG, syncDailyPnlFromDB, startMidnightHeartbeat } = require('./state/manager');
 const { connectDeriv } = require('./ws/client');
 const { addLog } = require('./api/sse');
 const apiRoutes = require('./api/routes');
@@ -17,7 +17,7 @@ app.use(express.json());
 app.use('/api', apiRoutes);
 
 // =====================================================================
-//  SCHEDULED RESTART
+//  SCHEDULED RESTART (safety net)
 // =====================================================================
 function scheduleRestart() {
     const now = Date.now();
@@ -27,11 +27,13 @@ function scheduleRestart() {
         nextMidnightUTC.setUTCDate(nextMidnightUTC.getUTCDate() + 1);
     }
     const delay = nextMidnightUTC.getTime() - now;
-    console.log(`⏰ Next restart scheduled at ${nextMidnightUTC.toISOString()} (03:00 EAT)`);
+    console.log(`⏰ Next full restart scheduled at ${nextMidnightUTC.toISOString()} (03:00 EAT)`);
     setTimeout(() => {
-        console.log('🔄 Scheduled restart at 03:00 EAT. Resetting daily state...');
+        console.log('🔄 Scheduled full restart at midnight. Resetting daily state...');
         state.locked = false;
         state.lockReason = '';
+        state.dailyPnl = 0;
+        state.dailyLimitReached = false;
         saveState();
         process.exit(0);
     }, delay);
@@ -68,6 +70,10 @@ setInterval(() => {
 //  STARTUP
 // =====================================================================
 loadState();
+
+// ---- Start the midnight heartbeat (resets daily limits without restart) ----
+startMidnightHeartbeat();
+
 checkDatabaseConnection().then(() => {
     connectDeriv();
     server.listen(PORT, () => console.log(`🚀 System Armed on port ${PORT}`));
