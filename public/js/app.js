@@ -31,7 +31,7 @@ document.addEventListener('DOMContentLoaded', function() {
     toggleFixed.textContent = sidebar.classList.contains('collapsed') ? '▶' : '◀';
 
     // =========================================================================
-    // TAB SWITCHING
+    // TAB SWITCHING (with analytics-active & dashboard-active classes)
     // =========================================================================
     window.switchTab = function(tabId) {
         document.querySelectorAll('.tab-pages').forEach(p => p.classList.remove('active'));
@@ -54,12 +54,13 @@ document.addEventListener('DOMContentLoaded', function() {
             focusBar.style.display = 'flex';
         }
 
-        // Toggle body class for mobile controls hide (analytics-active)
+        // Toggle body classes for mobile controls
         const body = document.body;
+        body.classList.remove('analytics-active', 'dashboard-active');
         if (tabId === 'analytics') {
             body.classList.add('analytics-active');
-        } else {
-            body.classList.remove('analytics-active');
+        } else if (tabId === 'dashboard') {
+            body.classList.add('dashboard-active');
         }
 
         if (tabId === 'analytics') {
@@ -127,6 +128,10 @@ document.addEventListener('DOMContentLoaded', function() {
     window.setFocusMarket = function(sym) {
         currentFocus = sym;
         if (globalState) renderUI(globalState);
+        // Update carousel active chip
+        document.querySelectorAll('.asset-chip').forEach(el => el.classList.remove('active'));
+        const chip = document.querySelector(`.asset-chip[data-symbol="${sym}"]`);
+        if (chip) chip.classList.add('active');
     };
 
     // ---- Mobile asset name shortener ----
@@ -315,7 +320,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // =========================================================================
-    // RENDER UI (unchanged)
+    // RENDER UI (with mobile view)
     // =========================================================================
     function renderUI(state) {
         try {
@@ -386,6 +391,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('f-vol').textContent = 'Vol: —';
             }
 
+            // ---- Desktop table ----
             const tbody = document.getElementById('tableBody');
             tbody.innerHTML = '';
             let bestScore = -Infinity, bestSym = null;
@@ -478,8 +484,112 @@ document.addEventListener('DOMContentLoaded', function() {
                 `;
                 tbody.appendChild(tr);
             }
+
+            // ---- Mobile view ----
+            renderMobileView(state);
+
         } catch(err) {
             console.error('❌ Error in renderUI:', err);
+        }
+    }
+
+    // ---- Mobile Market View ----
+    function renderMobileView(state) {
+        const safeState = state || {};
+        const marketMetrics = safeState.marketMetrics || {};
+        const symbols = Object.keys(MARKETS_CFG);
+
+        // Build carousel chips
+        const carousel = document.getElementById('assetCarousel');
+        if (carousel) {
+            carousel.innerHTML = '';
+            symbols.forEach(sym => {
+                const chip = document.createElement('div');
+                chip.className = 'asset-chip' + (sym === currentFocus ? ' active' : '');
+                chip.dataset.symbol = sym;
+                const shortName = getAssetLabel(MARKETS_CFG[sym], true);
+                chip.textContent = shortName;
+                chip.onclick = () => window.setFocusMarket(sym);
+                carousel.appendChild(chip);
+            });
+        }
+
+        // Update detail card
+        const metric = marketMetrics[currentFocus] || null;
+        if (!metric) {
+            document.getElementById('mobile-asset-name').textContent = MARKETS_CFG[currentFocus] || '—';
+            document.getElementById('mobile-asset-price').textContent = '—';
+            document.getElementById('mobile-support').textContent = '—';
+            document.getElementById('mobile-resistance').textContent = '—';
+            document.getElementById('mobile-breakout').textContent = '—';
+            document.getElementById('mobile-rsi-value').textContent = '—';
+            document.getElementById('mobile-volatility').textContent = '—';
+            document.getElementById('mobile-tick-digits').innerHTML = '<span class="tick-digit">—</span>';
+            document.getElementById('mobile-rsi-gauge').querySelector('.rsi-fill').style.width = '50%';
+            return;
+        }
+
+        const price = metric.price;
+        const formattedPrice = metric.formattedPrice || formatPrice(currentFocus, price);
+        const support = metric.support ? Number(metric.support).toFixed(2) : '—';
+        const resistance = metric.resistance ? Number(metric.resistance).toFixed(2) : '—';
+        const rsi = metric.rsi !== undefined ? Number(metric.rsi).toFixed(1) : '—';
+        const vol = metric.volatility !== undefined ? Number(metric.volatility).toFixed(2) + '%' : '—';
+        const breakout = metric.isBreakout ? '🚀 UP' : (metric.isBreakdown ? '📉 DOWN' : '—');
+        const breakoutClass = metric.isBreakout ? 'breakout' : (metric.isBreakdown ? 'breakdown' : '');
+
+        // Price change
+        const lastPrices = metric.lastPrices || [];
+        let change = 0;
+        let changeClass = '';
+        if (lastPrices.length >= 2) {
+            const prev = lastPrices[lastPrices.length - 2];
+            const curr = lastPrices[lastPrices.length - 1];
+            if (prev !== undefined && curr !== undefined) {
+                change = curr - prev;
+                changeClass = change > 0 ? 'up' : (change < 0 ? 'down' : '');
+            }
+        }
+        const changeDisplay = change !== 0 ? (change > 0 ? '+' : '') + change.toFixed(2) : '—';
+
+        document.getElementById('mobile-asset-name').textContent = MARKETS_CFG[currentFocus] || '—';
+        document.getElementById('mobile-asset-price').textContent = formattedPrice;
+        const changeEl = document.getElementById('mobile-asset-change');
+        changeEl.textContent = changeDisplay;
+        changeEl.className = 'asset-change ' + changeClass;
+
+        document.getElementById('mobile-support').textContent = support;
+        document.getElementById('mobile-resistance').textContent = resistance;
+        const breakoutEl = document.getElementById('mobile-breakout');
+        breakoutEl.textContent = breakout;
+        breakoutEl.className = 'value ' + breakoutClass;
+
+        document.getElementById('mobile-rsi-value').textContent = rsi;
+        const rsiFill = document.getElementById('mobile-rsi-gauge').querySelector('.rsi-fill');
+        const rsiNum = parseFloat(rsi);
+        if (!isNaN(rsiNum)) {
+            rsiFill.style.width = Math.min(100, Math.max(0, rsiNum)) + '%';
+        } else {
+            rsiFill.style.width = '50%';
+        }
+
+        document.getElementById('mobile-volatility').textContent = vol;
+
+        // Tick stream
+        const digitsContainer = document.getElementById('mobile-tick-digits');
+        if (lastPrices.length > 0) {
+            const lastTicks = lastPrices.slice(-10);
+            let html = '';
+            let prev = null;
+            lastTicks.forEach((val, idx) => {
+                const num = Number(val);
+                const cls = (prev !== null) ? (num > prev ? 'up' : (num < prev ? 'down' : '')) : '';
+                html += `<span class="tick-digit ${cls}">${num.toFixed(2)}</span>`;
+                prev = num;
+            });
+            digitsContainer.innerHTML = html;
+        } else {
+            digitsContainer.innerHTML = '<span class="tick-digit">—</span>';
         }
     }
 
@@ -589,7 +699,6 @@ document.addEventListener('DOMContentLoaded', function() {
     let assetBarChart = null;
     let equityChartInstance = null;
 
-    // ---- Custom plugin to display value labels on bars ----
     const barValueLabelPlugin = {
         id: 'barValueLabel',
         afterDraw: function(chart) {
@@ -747,26 +856,21 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!assetBarChart) return;
 
         const isMobile = window.innerWidth < 768;
-        
-        // Build labels (shortened on mobile)
         const labels = contributions.map(a => getAssetLabel(a.name, isMobile));
         const values = contributions.map(a => a.pnl);
         const colors = values.map(v => v >= 0 ? '#10b981' : '#ef4444');
         const borderColors = colors.map(c => c);
 
-        // Calculate dynamic scale limits (15% buffer)
         const maxAbs = values.reduce((max, v) => Math.max(max, Math.abs(v)), 0);
         const buffer = maxAbs * 0.15;
         const suggestedMax = maxAbs + buffer;
         const suggestedMin = -suggestedMax;
 
-        // Update chart data
         assetBarChart.data.labels = labels;
         assetBarChart.data.datasets[0].data = values;
         assetBarChart.data.datasets[0].backgroundColor = colors;
         assetBarChart.data.datasets[0].borderColor = borderColors;
 
-        // Update X‑axis options dynamically
         assetBarChart.options.scales.x = {
             grid: {
                 display: isMobile ? false : true,
@@ -782,7 +886,6 @@ document.addEventListener('DOMContentLoaded', function() {
             suggestedMax: suggestedMax
         };
 
-        // Update Y‑axis width for mobile if needed
         assetBarChart.options.scales.y.afterFit = function(scale) {
             if (window.innerWidth < 768) {
                 scale.width = 70;
@@ -864,7 +967,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function updateMetrics(data) {
-        // ---- Primary metrics ----
         const profitEl = document.getElementById('meta-profit');
         profitEl.textContent = `$${data.totalProfit.toFixed(2)}`;
         profitEl.className = 'val ' + (data.totalProfit >= 0 ? 'positive' : 'negative');
@@ -891,22 +993,18 @@ document.addEventListener('DOMContentLoaded', function() {
         ddEl.textContent = `-${maxDD.toFixed(2)}%`;
         ddEl.className = 'val negative';
 
-        // ---- Secondary metrics ----
         const losses = data.lossCount || 0;
         const avgWin = wins > 0 ? grossProfit / wins : 0;
         const avgLoss = losses > 0 ? grossLoss / losses : 0;
         document.getElementById('meta-avg-win-loss').textContent = `$${avgWin.toFixed(2)} / $${avgLoss.toFixed(2)}`;
 
-        // Placeholder for max consecutive (we'd need raw data)
         document.getElementById('meta-max-consec').textContent = `W:${wins} / L:${losses}`;
 
-        // Placeholder for avg duration
         document.getElementById('meta-avg-duration').textContent = `${total > 0 ? (data.totalDuration || 0) / total : 0}s`;
 
         document.getElementById('meta-won-lost').textContent = `${wins} / ${losses}`;
     }
 
-    // ---- Helper to update date pickers based on preset ----
     function updateDatePickersForPreset(mode) {
         const now = new Date();
         const startEl = document.getElementById('date-start');
