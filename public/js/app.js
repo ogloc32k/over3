@@ -49,7 +49,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (tabId === 'analytics') {
             setTimeout(() => {
                 renderCharts();
-                // Load default view (24h) when analytics tab opens
                 timeframePreset(document.getElementById('p-24h'), '24h');
             }, 100);
         }
@@ -192,7 +191,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // =========================================================================
-    // SSE CONNECTION (with analytics delta handling)
+    // SSE CONNECTION
     // =========================================================================
     const sse = new EventSource('/api/logs');
     sse.onopen = function() { console.log('✅ SSE connected'); };
@@ -445,7 +444,7 @@ document.addEventListener('DOMContentLoaded', function() {
     renderUI({});
 
     // =========================================================================
-    // SETTINGS (unchanged)
+    // SETTINGS
     // =========================================================================
     window.loadConfig = async function() {
         try {
@@ -543,10 +542,9 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     // =========================================================================
-    // ANALYTICS – HORIZONTAL BAR CHART & ENHANCED EQUITY CURVE (string labels)
+    // ANALYTICS – HORIZONTAL BAR CHART & ENHANCED EQUITY CURVE
     // =========================================================================
     let assetBarChart = null;
-    // We'll use a global reference to the equity chart instance to destroy it safely
     let equityChartInstance = null;
 
     // ---- Custom plugin to display value labels on bars ----
@@ -620,7 +618,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     },
                     y: {
                         grid: { display: false },
-                        ticks: { font: { size: 9 } },
+                        ticks: {
+                            font: { size: 9 },
+                            color: '#d1d5db' // brighten asset labels
+                        },
                         afterFit: function(scale) {
                             scale.width = 120;
                         }
@@ -646,7 +647,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     backgroundColor: 'rgba(16,185,129,0.1)',
                     fill: true,
                     tension: 0.3,
-                    pointRadius: 2,
+                    pointRadius: 0,          // hide points for clean line
+                    pointHoverRadius: 5,     // show point on hover
+                    pointHitRadius: 10,      // make hover area larger
                     borderWidth: 2,
                     pointBackgroundColor: '#10b981'
                 }]
@@ -660,7 +663,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         callbacks: {
                             label: function(context) {
                                 const value = context.parsed.y;
-                                return 'Balance: $' + value.toFixed(2);
+                                return 'Balance: ' + (value >= 0 ? '+$' : '-$') + Math.abs(value).toFixed(2);
                             }
                         }
                     }
@@ -672,12 +675,19 @@ document.addEventListener('DOMContentLoaded', function() {
                         ticks: {
                             font: { size: 7 },
                             maxTicksLimit: 20,
-                            autoSkip: true
+                            autoSkip: true,
+                            color: '#9ca3af'
                         }
                     },
                     y: {
                         grid: { color: 'rgba(0,0,0,0.05)' },
-                        ticks: { font: { size: 7 } }
+                        ticks: {
+                            font: { size: 7 },
+                            color: '#9ca3af',
+                            callback: function(value) {
+                                return (value >= 0 ? '+$' : '-$') + Math.abs(value);
+                            }
+                        }
                     }
                 }
             }
@@ -696,6 +706,20 @@ document.addEventListener('DOMContentLoaded', function() {
         assetBarChart.data.datasets[0].backgroundColor = colors;
         assetBarChart.data.datasets[0].borderColor = borderColors;
         assetBarChart.update('none');
+    }
+
+    // ---- Helper to format timestamps ----
+    function formatEquityLabel(timestamp, timeframe) {
+        const date = new Date(timestamp);
+        if (timeframe === '24h' || timeframe === 'hour' || timeframe === 'session') {
+            // Force 24h format: 00:00 to 23:59
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            return hours + ':' + minutes;
+        } else {
+            // For week, month, year -> show MMM DD
+            return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        }
     }
 
     function renderEquityCurve(equityData, startingBalance, timeframe) {
@@ -723,18 +747,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const existing = parent.querySelector('.empty-state');
         if (existing) existing.remove();
 
-        // Determine label format based on timeframe
-        let labelFormat = { hour: '2-digit', minute: '2-digit', hour12: false };
-        // For longer timeframes, we might want to show dates
-        if (timeframe === 'week' || timeframe === 'month' || timeframe === 'year') {
-            labelFormat = { month: 'short', day: 'numeric' };
-        }
-
-        // Format timestamps to string labels
-        const labels = equityData.map(point => {
-            const date = new Date(point.timestamp);
-            return date.toLocaleString([], labelFormat);
-        });
+        // Format labels using our helper to avoid 24:01 issue
+        const labels = equityData.map(point => formatEquityLabel(point.timestamp, timeframe));
         const values = equityData.map(point => point.equity);
 
         // Determine line color based on final equity vs baseline
@@ -744,24 +758,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const lineColor = isAbove ? '#10b981' : '#ef4444';
         const fillColor = isAbove ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
 
-        // Find peak and max drawdown points (optional markers)
-        // We'll use annotations if needed, but for simplicity we can compute
-        let peak = baseline;
-        let maxDrawdown = 0;
-        let peakIndex = 0;
-        let drawdownIndex = 0;
-        values.forEach((val, idx) => {
-            if (val > peak) {
-                peak = val;
-                peakIndex = idx;
-            }
-            const drawdown = peak - val;
-            if (drawdown > maxDrawdown) {
-                maxDrawdown = drawdown;
-                drawdownIndex = idx;
-            }
-        });
-
         // Update chart data
         equityChartInstance.data.labels = labels;
         equityChartInstance.data.datasets[0].data = values;
@@ -769,8 +765,7 @@ document.addEventListener('DOMContentLoaded', function() {
         equityChartInstance.data.datasets[0].backgroundColor = fillColor;
         equityChartInstance.data.datasets[0].pointBackgroundColor = lineColor;
 
-        // Add baseline as a separate dataset (dashed line)
-        // We'll add a dataset with two points: first and last with baseline value
+        // Add baseline as dashed line (separate dataset)
         const baselineData = [baseline, baseline];
         const baselineLabels = [labels[0], labels[labels.length-1]];
         equityChartInstance.data.datasets[1] = {
@@ -784,29 +779,12 @@ document.addEventListener('DOMContentLoaded', function() {
             tension: 0
         };
 
-        // Peak marker
-        equityChartInstance.data.datasets[2] = {
-            label: 'Peak',
-            data: [{ x: peakIndex, y: peak }],
-            pointRadius: 6,
-            pointBackgroundColor: '#10b981',
-            pointBorderColor: '#fff',
-            pointBorderWidth: 2,
-            showLine: false,
-            pointStyle: 'circle'
-        };
-
-        // Max drawdown marker
-        equityChartInstance.data.datasets[3] = {
-            label: 'Max Drawdown',
-            data: [{ x: drawdownIndex, y: values[drawdownIndex] }],
-            pointRadius: 6,
-            pointBackgroundColor: '#ef4444',
-            pointBorderColor: '#fff',
-            pointBorderWidth: 2,
-            showLine: false,
-            pointStyle: 'circle'
-        };
+        // Remove any existing marker datasets (prevent floating circles)
+        // We'll just keep the line and baseline – no extra marker datasets
+        // Remove datasets beyond index 1 (we only keep line + baseline)
+        while (equityChartInstance.data.datasets.length > 2) {
+            equityChartInstance.data.datasets.pop();
+        }
 
         equityChartInstance.update('none');
     }
@@ -843,6 +821,40 @@ document.addEventListener('DOMContentLoaded', function() {
         ddEl.className = 'val negative';
     }
 
+    // ---- Helper to update date pickers based on preset ----
+    function updateDatePickersForPreset(mode) {
+        const now = new Date();
+        const startEl = document.getElementById('date-start');
+        const endEl = document.getElementById('date-end');
+
+        if (!startEl || !endEl) return;
+
+        let startDate, endDate;
+        switch (mode) {
+            case '24h':
+                startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                endDate = now;
+                break;
+            case 'week':
+                startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                endDate = now;
+                break;
+            case 'month':
+                startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+                endDate = now;
+                break;
+            case 'year':
+                startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+                endDate = now;
+                break;
+            default:
+                return;
+        }
+        const formatDate = (d) => d.toISOString().split('T')[0];
+        startEl.value = formatDate(startDate);
+        endEl.value = formatDate(endDate);
+    }
+
     window.timeframePreset = async function(btn, mode) {
         if (btn) {
             document.querySelectorAll('.preset-strip .btn-preset').forEach(b => b.classList.remove('active'));
@@ -858,6 +870,9 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('meta-dd').textContent = '0.0%';
             return;
         }
+
+        // Update date pickers for preset
+        updateDatePickersForPreset(mode);
 
         try {
             const resp = await fetch(`/api/ledger/aggregated?mode=${mode}`);
