@@ -1,405 +1,819 @@
-const WebSocket = require('ws');
-const { state, CONFIG, syncDailyPnlFromDB, getFullState, saveState, checkDailyLimits } = require('../state/manager');
-const { addLog, broadcastSSE } = require('../api/sse');
-const { MARKETS, formatMarketPrice } = require('../markets/definitions');
-const { saveTradeToCloud } = require('../database');
-const MultiMarketPipeline = require('../pipeline/engine');
+// =========================================================================
+// Wait for DOM to be ready
+// =========================================================================
+document.addEventListener('DOMContentLoaded', function() {
 
-let derivWs = null;
-let reqId = 0;
-let keepAliveLoop = null;
-let watchdogTimer = null;
-let settlementTimer = null;
+    // =========================================================================
+    // THEME TOGGLE
+    // =========================================================================
+    const themeToggle = document.getElementById('themeToggle');
+    const currentTheme = localStorage.getItem('theme') || 'dark';
+    document.body.classList.toggle('light', currentTheme === 'light');
+    themeToggle.textContent = currentTheme === 'light' ? '☀️' : '🌙';
 
-// ---- Sniper mode state (per symbol) ----
-const maDiffHistory = {};
-const symbols = Object.keys(MARKETS);
-symbols.forEach(sym => { maDiffHistory[sym] = [0, 0, 0]; }); // last 3 diffs
-
-const engine = new MultiMarketPipeline(symbols);
-
-function send(msg) {
-    if (derivWs && derivWs.readyState === WebSocket.OPEN) {
-        derivWs.send(JSON.stringify(msg));
-    } else {
-        console.warn('[DEBUG] Cannot send: WebSocket not open');
-        addLog(`⚠️ Cannot send: WebSocket not open (readyState=${derivWs ? derivWs.readyState : 'null'})`);
-    }
-}
-
-function getNextReqId() {
-    return ++reqId;
-}
-
-function disconnectDeriv() {
-    clearInterval(keepAliveLoop);
-    clearTimeout(watchdogTimer);
-    clearTimeout(settlementTimer);
-    if (derivWs) { derivWs.removeAllListeners(); try { derivWs.terminate(); } catch(e) {} derivWs = null; }
-}
-
-async function connectDeriv() {
-    disconnectDeriv();
-    const appId = (process.env.DERIV_APP_ID || '').trim();
-    const token = (process.env.DERIV_PAT || '').trim();
-    if (!appId || !token) { addLog('System Configuration Halt: Credentials missing.'); return; }
-
-    try {
-        const accRes = await fetch('https://api.derivws.com/trading/v1/options/accounts', {
-            method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' }
-        });
-        if (!accRes.ok) throw new Error('Authentication Denied.');
-
-        const data = await accRes.json();
-        const accList = Array.isArray(data.data) ? data.data : [data.data];
-        const targetAccount = accList.find(a => a.account_type === state.tradingMode);
-        if (!targetAccount) throw new Error(`Target profile missing: ${state.tradingMode}`);
-
-        state.balance = parseFloat(targetAccount.balance);
-        state.currency = targetAccount.currency || 'USD';
-
-        // Set daily start balance for limits
-        if (state.dailyStartBalance === null) state.dailyStartBalance = state.balance;
-
-        const limitHit = await syncDailyPnlFromDB();
-        if (limitHit && state.lockReason) addLog(state.lockReason);
-        broadcastSSE({ state: getFullState() });
-
-        const otpRes = await fetch(`https://api.derivws.com/trading/v1/options/accounts/${targetAccount.account_id}/otp`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' },
-            body: JSON.stringify({})
-        });
-        if (!otpRes.ok) throw new Error('Security allocation failure.');
-
-        const otpData = await otpRes.json();
-        derivWs = new WebSocket(otpData.data.url);
-
-        derivWs.on('open', () => {
-            addLog(`🌐 Connected. Balance: $${state.balance.toFixed(2)} | Session: $${state.sessionPnl.toFixed(2)}`);
-            send({ balance: 1, subscribe: 1, req_id: getNextReqId() });
-
-            for (const key of symbols) {
-                send({ ticks_history: key, count: 2000, end: 'latest', subscribe: 1, req_id: getNextReqId() });
-            }
-            addLog(`📡 Subscribed to ${symbols.length} markets.`);
-
-            setInterval(() => { broadcastSSE({ state: getFullState() }); }, 3000);
-
-            keepAliveLoop = setInterval(() => {
-                send({ ping: 1 });
-                watchdogTimer = setTimeout(() => { if (derivWs) derivWs.terminate(); }, 3000);
-            }, 15000);
-        });
-
-        derivWs.on('message', raw => {
-            try {
-                const msg = JSON.parse(raw);
-                if (msg.msg_type === 'ping') { clearTimeout(watchdogTimer); return; }
-                handleMessage(msg);
-            } catch(e) {
-                console.error('Message handler error:', e);
-                addLog(`❌ WebSocket message error: ${e.message}`);
-            }
-        });
-
-        derivWs.on('close', () => { disconnectDeriv(); setTimeout(connectDeriv, 2000); });
-        derivWs.on('error', (err) => { console.error('WebSocket error:', err); if (derivWs) derivWs.terminate(); });
-    } catch(e) {
-        addLog(`Network Exception: ${e.message}.`);
-        setTimeout(connectDeriv, 5000);
-    }
-}
-
-function handleMessage(msg) {
-    if (msg.error) {
-        addLog(`API Error: ${msg.error.message}`);
-        state.tradeInProgress = false;
-        state.activeRealTrade = null;
-        state.pendingSettlement = false;
-        clearTimeout(settlementTimer);
-        return;
-    }
-
-    if (msg.msg_type === 'proposal') {
-        if (msg.error) {
-            addLog(`❌ Proposal Error: ${msg.error.message}`);
-            state.tradeInProgress = false;
-            state.activeRealTrade = null;
-            state.pendingSettlement = false;
-            clearTimeout(settlementTimer);
-        } else {
-            send({ buy: msg.proposal.id, price: msg.proposal.ask_price, req_id: getNextReqId() });
-            addLog(`✅ Proposal confirmed: ${msg.proposal.ask_price}. Executing buy...`);
-        }
-        return;
-    }
-
-    if (msg.msg_type === 'balance') {
-        state.balance = parseFloat(msg.balance.balance);
-        if (state.dailyPnl !== undefined) {
-            state.dailyStartBalance = state.balance - state.dailyPnl;
-        }
-        broadcastSSE({ state: getFullState() });
-        return;
-    }
-
-    if (msg.msg_type === 'history') {
-        const symbol = msg.echo_req.ticks_history;
-        const prices = msg.history.prices.map(p => parseFloat(p));
-        prices.forEach(p => engine.feed(symbol, p));
-        addLog(`✅ History synchronized for ${symbol}`);
-        return;
-    }
-
-    if (msg.msg_type === 'tick') {
-        try {
-            const symbol = msg.tick.symbol;
-            const price = parseFloat(msg.tick.quote);
-            processLiveFeed(symbol, price);
-        } catch (err) {
-            addLog(`❌ Tick handler error: ${err.message}`);
-            console.error('Tick error:', err);
-        }
-        return;
-    }
-
-    if (msg.msg_type === 'buy') {
-        if (state.activeRealTrade) {
-            const contractId = msg.buy.contract_id;
-            const entryPrice = msg.buy.buy_price || msg.buy.price || 'Market Price';
-            state.activeRealTrade.contractId = contractId;
-            state.activeRealTrade.entryPrice = entryPrice;
-            state.activeRealTrade.executionTime = Date.now();
-
-            addLog(`💰 Trade Executed: Contract ID ${contractId} at price ${entryPrice}`);
-
-            state.tradeInProgress = true;
-
-            const symbol = state.activeRealTrade.symbol;
-            const duration = state.activeRealTrade.duration || CONFIG.DURATION;
-            const stake = state.activeRealTrade.stake;
-
-            const isOneSecondIndex = symbol.includes('1HZ');
-            const msPerTick = isOneSecondIndex ? 1000 : 2000;
-            const bufferMs = 3000;
-            const settlementDelayMs = (duration * msPerTick) + bufferMs;
-
-            addLog(`⏳ ${symbol} | ${duration} ticks | ${isOneSecondIndex ? '1s' : '2s'} per tick | waiting ${(settlementDelayMs/1000).toFixed(1)}s`);
-
-            clearTimeout(settlementTimer);
-
-            settlementTimer = setTimeout(() => {
-                try {
-                    const postBal = state.balance;
-                    const preBal = state.activeRealTrade.balanceBefore;
-                    const stake = state.activeRealTrade.stake;
-
-                    if (isNaN(postBal) || isNaN(preBal) || isNaN(stake)) {
-                        throw new Error(`Invalid numbers: postBal=${postBal}, preBal=${preBal}, stake=${stake}`);
-                    }
-
-                    const netProfit = postBal - preBal;
-                    const isWin = netProfit > 0;
-                    const symbol = state.activeRealTrade.symbol;
-
-                    state.sessionPnl += netProfit;
-                    state.dailyPnl += netProfit;
-
-                    if (isWin) {
-                        state.consecutiveLosses = 0;
-                    } else {
-                        state.consecutiveLosses++;
-                        if (state.consecutiveLosses >= CONFIG.MAX_CONSECUTIVE_LOSSES) {
-                            state.lossCooldownUntil = Date.now() + CONFIG.LOSS_COOLDOWN_MS;
-                            addLog(`⏳ ${CONFIG.MAX_CONSECUTIVE_LOSSES} consecutive losses. Cooldown for ${CONFIG.LOSS_COOLDOWN_MS/60000} minutes.`);
-                        }
-                    }
-
-                    const grossPayout = isWin ? (stake + netProfit) : 0;
-                    if (state.activeRealTrade) {
-                        saveTradeToCloud({
-                            contract_id: state.activeRealTrade.contractId || null,
-                            asset: MARKETS[state.activeRealTrade.symbol]?.name || state.activeRealTrade.symbol,
-                            contractType: state.activeRealTrade.contractType,
-                            stake: stake,
-                            payout: grossPayout,
-                            isWin: isWin,
-                            barrier: null,
-                            exitTick: null,
-                            entry_price: state.activeRealTrade.entryPrice,
-                            exit_price: null,
-                            duration_seconds: state.activeRealTrade.durationUnit === 's' ? state.activeRealTrade.duration : 0,
-                            duration_ticks: state.activeRealTrade.durationUnit === 't' ? state.activeRealTrade.duration : 0
-                        });
-                    }
-
-                    const outcomeLabel = isWin ? `🟢 WIN (+$${netProfit.toFixed(2)})` : `🔴 LOSS (-$${Math.abs(netProfit).toFixed(2)})`;
-                    addLog(`[Trade Finished] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | ${outcomeLabel} | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
-
-                    // ---- Broadcast analytics delta ----
-                    broadcastSSE({
-                        event: 'analytics_delta',
-                        data: {
-                            asset: symbol,
-                            pnl: netProfit,
-                            newBalance: state.balance,
-                            timestamp: Date.now()
-                        }
-                    });
-
-                } catch (error) {
-                    console.error('[Trade Check Error]', error.message);
-                    addLog(`⚠️ Trade check error: ${error.message}`);
-                } finally {
-                    state.tradeInProgress = false;
-                    state.activeRealTrade = null;
-                    state.pendingSettlement = false;
-                    state.cooldownTicksLeft = CONFIG.COOLDOWN_TICKS;
-
-                    const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
-                    state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
-
-                    (async () => {
-                        const limitHit = await syncDailyPnlFromDB();
-                        if (limitHit && state.lockReason) addLog(state.lockReason);
-                        saveState();
-                        broadcastSSE({ state: getFullState() });
-                    })();
-
-                    settlementTimer = null;
-                    console.log('[System] Trade lock released. Ready for next trade.');
-                }
-            }, settlementDelayMs);
-        }
-        return;
-    }
-}
-
-// =====================================================================
-//  SNIPER ENTRY EVALUATION
-// =====================================================================
-function evaluateSniperEntry(symbol, metric) {
-    if (!metric) return 'IDLE';
-
-    const { rsi, volatility, maDiff } = metric;
-
-    // 1. Master system locks
-    if (state.locked || state.dailyLimitReached) return 'IDLE (LOCKED)';
-    const now = Date.now();
-    if (now - state.lastTradeTimestamp < CONFIG.MIN_TRIGGER_INTERVAL) {
-        return 'IDLE (COOLDOWN)';
-    }
-
-    // 2. Minimum volatility (0.10%)
-    if (volatility < CONFIG.MIN_VOLATILITY_PERCENT) return 'IDLE (LOW VOL)';
-
-    // 3. Update MA Diff history for this symbol
-    if (!maDiffHistory[symbol]) maDiffHistory[symbol] = [0, 0, 0];
-    const history = maDiffHistory[symbol];
-    history.shift();
-    history.push(maDiff);
-
-    // 4. Consecutive expansion rule (3 ticks)
-    const isBullishExpansion = (history[2] > history[1]) && (history[1] > history[0]) && (history[2] >= CONFIG.MA_DIFF_THRESHOLD);
-    const isBearishExpansion = (history[2] < history[1]) && (history[1] < history[0]) && (history[2] <= -CONFIG.MA_DIFF_THRESHOLD);
-
-    // 5. Surgical RSI zones
-    if (isBullishExpansion && rsi >= 60 && rsi <= 67) {
-        state.lastTradeTimestamp = now;
-        return 'CALL';
-    }
-
-    if (isBearishExpansion && rsi >= 33 && rsi <= 40) {
-        state.lastTradeTimestamp = now;
-        return 'PUT';
-    }
-
-    return 'IDLE';
-}
-
-// =====================================================================
-//  PROCESS LIVE FEED (with sniper mode)
-// =====================================================================
-function processLiveFeed(symbol, price) {
-    const metric = engine.feed(symbol, price);
-    if (!metric) return;
-    state.marketMetrics[symbol] = metric;
-
-    // Cooldown ticks (still used for tick-based cooldown)
-    if (state.cooldownTicksLeft > 0) state.cooldownTicksLeft--;
-
-    // Skip if automation off, locked, or trade in progress
-    if (!state.active || state.locked || state.tradeInProgress || state.cooldownTicksLeft > 0) {
-        broadcastSSE({ state: getFullState() });
-        return;
-    }
-
-    // Loss cooldown
-    const now = Date.now();
-    if (now < state.lossCooldownUntil) {
-        broadcastSSE({ state: getFullState() });
-        return;
-    }
-
-    // ---- Sniper evaluation ----
-    const signal = evaluateSniperEntry(symbol, metric);
-    if (signal === 'IDLE' || signal.startsWith('IDLE')) {
-        broadcastSSE({ state: getFullState() });
-        return;
-    }
-
-    // ---- Signal found: execute trade ----
-    const direction = signal;
-    state.tradeInProgress = true;
-    const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
-    state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
-
-    addLog(`🔥 Sniper Signal: ${symbol} | ${direction} | RSI: ${metric.rsi.toFixed(1)} | Vol: ${metric.volatility.toFixed(2)}% | MA Diff: ${metric.maDiff.toFixed(3)}%`);
-
-    const duration = CONFIG.DURATION;
-    const unit = 't'; // always ticks for auto
-
-    state.activeRealTrade = {
-        symbol,
-        stake: state.currentStake,
-        balanceBefore: state.balance,
-        contractType: direction,
-        duration: duration,
-        durationUnit: unit,
-        barrier: null,
-        direction: direction,
-        entryPrice: null,
-        executionTime: Date.now(),
-        settled: false,
-        entryLogged: false,
-        contractId: null
-    };
-
-    state.lastTriggerTime = now;
-    addLog(`📤 Requesting ${direction} proposal for ${symbol} (${duration} ticks)...`);
-    send({
-        proposal: 1,
-        amount: state.currentStake,
-        basis: 'stake',
-        contract_type: direction,
-        currency: state.currency || 'USD',
-        duration: duration,
-        duration_unit: unit,
-        underlying_symbol: symbol,
-        req_id: getNextReqId()
+    themeToggle.addEventListener('click', function toggleTheme() {
+        const isLight = document.body.classList.toggle('light');
+        const theme = isLight ? 'light' : 'dark';
+        localStorage.setItem('theme', theme);
+        themeToggle.textContent = isLight ? '☀️' : '🌙';
     });
 
-    broadcastSSE({ state: getFullState() });
-}
+    // =========================================================================
+    // SIDEBAR TOGGLE
+    // =========================================================================
+    const sidebar = document.getElementById('appSidebar');
+    const toggleFixed = document.getElementById('sidebarToggleFixed');
 
-module.exports = {
-    derivWs,
-    reqId,
-    send,
-    getNextReqId,
-    disconnectDeriv,
-    connectDeriv,
-    engine,
-    handleMessage
-};
+    toggleFixed.addEventListener('click', function toggleSidebar() {
+        sidebar.classList.toggle('collapsed');
+        toggleFixed.textContent = sidebar.classList.contains('collapsed') ? '▶' : '◀';
+    });
+    toggleFixed.textContent = sidebar.classList.contains('collapsed') ? '▶' : '◀';
+
+    // =========================================================================
+    // TAB SWITCHING
+    // =========================================================================
+    window.switchTab = function(tabId) {
+        document.querySelectorAll('.tab-pages').forEach(p => p.classList.remove('active'));
+        const target = document.getElementById('tab-' + tabId);
+        if (target) target.classList.add('active');
+
+        document.querySelectorAll('.header-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+        const headerBtn = document.querySelector(`.header-tabs .tab-btn[data-tab="${tabId}"]`);
+        if (headerBtn) headerBtn.classList.add('active');
+
+        document.querySelectorAll('.tab-bar .tab-item').forEach(b => b.classList.remove('active'));
+        const barBtn = document.querySelector(`.tab-bar .tab-item[data-tab="${tabId}"]`);
+        if (barBtn) barBtn.classList.add('active');
+
+        if (tabId === 'analytics') {
+            setTimeout(() => {
+                renderCharts();
+                // Load default view (24h) when analytics tab opens
+                timeframePreset(document.getElementById('p-24h'), '24h');
+            }, 100);
+        }
+        if (tabId === 'settings') { loadConfig(); }
+        if (tabId === 'logs') { scrollLogsToBottom(); }
+    };
+
+    // =========================================================================
+    // CLOCK UPDATE
+    // =========================================================================
+    function updateClock() {
+        try {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('en-US', { timeZone: 'Africa/Nairobi', hour12: false });
+            document.getElementById('clock-display').textContent = timeStr;
+        } catch(e) { /* ignore */ }
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // =========================================================================
+    // MARKETS & DECIMAL FORMATTING
+    // =========================================================================
+    const MARKETS_CFG = {
+        'R_10': 'Volatility 10 Index',
+        'R_25': 'Volatility 25 Index',
+        'R_50': 'Volatility 50 Index',
+        'R_75': 'Volatility 75 Index',
+        'R_100': 'Volatility 100 Index',
+        '1HZ10V': 'Volatility 10 (1s) Index',
+        '1HZ25V': 'Volatility 25 (1s) Index',
+        '1HZ50V': 'Volatility 50 (1s) Index',
+        '1HZ75V': 'Volatility 75 (1s) Index',
+        '1HZ100V': 'Volatility 100 (1s) Index'
+    };
+
+    const MARKET_DECIMALS = {
+        'R_10': 2, 'R_25': 3, 'R_50': 4, 'R_75': 4, 'R_100': 2,
+        '1HZ10V': 2, '1HZ25V': 2, '1HZ50V': 2, '1HZ75V': 2, '1HZ100V': 2
+    };
+
+    function formatPrice(symbol, raw) {
+        const dec = MARKET_DECIMALS[symbol] || 2;
+        return Number(raw).toFixed(dec);
+    }
+
+    let currentFocus = 'R_75';
+    let serverMode = 'demo';
+    let globalState = null;
+    window.currentMarketPrices = {};
+
+    window.setFocusMarket = function(sym) {
+        currentFocus = sym;
+        if (globalState) renderUI(globalState);
+    };
+
+    // =========================================================================
+    // CONTROL FUNCTIONS
+    // =========================================================================
+    window.sendControl = function(action) {
+        fetch('/api/control', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) alert('Error: ' + data.error);
+            else if (data.message) console.log(data.message);
+        })
+        .catch(err => console.error('Control error:', err));
+    };
+
+    window.swapEnvironment = function() {
+        const targetMode = serverMode === 'demo' ? 'real' : 'demo';
+        fetch('/api/control', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'set_mode', mode: targetMode })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) alert('Error: ' + data.error);
+        })
+        .catch(err => console.error('Swap error:', err));
+    };
+
+    window.fireManual = function(type) {
+        const duration = parseInt(document.getElementById('manual-duration').value) || 7;
+        const unit = document.getElementById('manual-unit').value;
+        const price = window.currentMarketPrices[currentFocus];
+        if (price === undefined || price === null) {
+            alert('No price data available for ' + currentFocus + '. Please wait for ticks.');
+            return;
+        }
+
+        fetch('/api/manual-trade', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                symbol: currentFocus,
+                contractType: type,
+                duration: duration,
+                durationUnit: unit,
+                price: price
+            })
+        })
+        .then(async (response) => {
+            const text = await response.text();
+            if (!response.ok) {
+                let errMsg;
+                try {
+                    const errData = JSON.parse(text);
+                    errMsg = errData.error || 'Server error';
+                } catch (e) {
+                    errMsg = `Server responded with ${response.status}: ${text.slice(0, 100)}`;
+                }
+                throw new Error(errMsg);
+            }
+            const data = JSON.parse(text);
+            if (data.error) {
+                alert('Manual trade failed: ' + data.error);
+            } else {
+                console.log('Manual trade request sent:', data.message);
+            }
+        })
+        .catch(err => {
+            alert('Network error: ' + err.message);
+            console.error('Manual trade fetch error:', err);
+        });
+    };
+
+    window.clearLogs = function() {
+        document.getElementById('log-stream').innerHTML = '';
+    };
+
+    function scrollLogsToBottom() {
+        const el = document.getElementById('log-stream');
+        if (el) el.scrollTop = el.scrollHeight;
+    }
+
+    // =========================================================================
+    // SSE CONNECTION (with analytics delta handling)
+    // =========================================================================
+    const sse = new EventSource('/api/logs');
+    sse.onopen = function() { console.log('✅ SSE connected'); };
+    sse.onerror = function(err) { console.error('❌ SSE error:', err); };
+    sse.onmessage = function(e) {
+        try {
+            const data = JSON.parse(e.data);
+            // Check if it's an analytics delta event
+            if (data.event === 'analytics_delta') {
+                handleAnalyticsDelta(data.data);
+                return;
+            }
+            // Otherwise regular state/logs update
+            if (data.state) {
+                globalState = data.state;
+                if (data.state.marketMetrics) {
+                    for (const sym in data.state.marketMetrics) {
+                        const metric = data.state.marketMetrics[sym];
+                        if (metric && metric.price !== undefined) {
+                            window.currentMarketPrices[sym] = metric.price;
+                        }
+                    }
+                }
+                renderUI(data.state);
+            }
+            if (data.logs && data.logs.length > 0) {
+                const box = document.getElementById('log-stream');
+                data.logs.forEach(log => {
+                    const r = document.createElement('div');
+                    r.className = 'log-entry';
+                    r.innerHTML = `<span class="ts">[${new Date(log.time).toLocaleTimeString()}]</span><span class="msg">${log.message}</span>`;
+                    box.appendChild(r);
+                });
+                while (box.children.length > 200) box.removeChild(box.firstChild);
+                box.scrollTop = box.scrollHeight;
+            }
+        } catch(err) {
+            console.error('❌ Error parsing SSE:', err);
+        }
+    };
+
+    // ---- Analytics delta handler ----
+    let currentAnalyticsData = null;
+
+    function handleAnalyticsDelta(delta) {
+        if (!currentAnalyticsData) return;
+        // Update asset contributions
+        const asset = delta.asset || 'Unknown';
+        const pnl = delta.pnl || 0;
+        const assetMap = {};
+        currentAnalyticsData.assetContributions.forEach(a => { assetMap[a.name] = a.pnl; });
+        assetMap[asset] = (assetMap[asset] || 0) + pnl;
+        currentAnalyticsData.assetContributions = Object.entries(assetMap)
+            .map(([name, pnl]) => ({ name, pnl }))
+            .sort((a, b) => b.pnl - a.pnl);
+
+        // Update equity curve: add new point
+        if (currentAnalyticsData.equityData) {
+            const lastEquity = currentAnalyticsData.equityData.length > 0 ?
+                currentAnalyticsData.equityData[currentAnalyticsData.equityData.length-1].equity : 0;
+            const newEquity = lastEquity + pnl;
+            currentAnalyticsData.equityData.push({
+                timestamp: delta.timestamp || Date.now(),
+                equity: newEquity
+            });
+            // Keep only last 200 points to avoid memory bloat
+            if (currentAnalyticsData.equityData.length > 200) {
+                currentAnalyticsData.equityData = currentAnalyticsData.equityData.slice(-200);
+            }
+        }
+        currentAnalyticsData.totalProfit += pnl;
+        currentAnalyticsData.tradeCount += 1;
+
+        // Re-render charts with new data
+        renderAssetBarChart(currentAnalyticsData.assetContributions);
+        renderEquityCurve(currentAnalyticsData.equityData, currentAnalyticsData.startingBalance || 0);
+        updateMetrics(currentAnalyticsData);
+    }
+
+    // =========================================================================
+    // RENDER UI (unchanged from previous version)
+    // =========================================================================
+    function renderUI(state) {
+        try {
+            const safeState = state || {};
+            const tradingMode = safeState.tradingMode || 'demo';
+            const balance = safeState.balance || null;
+            const sessionPnl = safeState.sessionPnl || 0;
+            const dailyPnl = safeState.dailyPnl || 0;
+            const currentStake = safeState.currentStake || 0.35;
+            const locked = safeState.locked || false;
+            const active = safeState.active || false;
+            const lastTriggerTime = safeState.lastTriggerTime || 0;
+            const tradeInProgress = safeState.tradeInProgress || false;
+            const marketMetrics = safeState.marketMetrics || {};
+
+            serverMode = tradingMode;
+
+            // Header status
+            const header = document.getElementById('header-status');
+            const now = Date.now();
+            if (locked) {
+                if (active) { header.textContent = '● PAUSED'; header.className = 'header-status paused'; }
+                else { header.textContent = '● LOCKED'; header.className = 'header-status off'; }
+            } else if (active) {
+                const remaining = Math.max(0, Math.ceil((lastTriggerTime + 30000 - now) / 1000));
+                let cooldownText = remaining > 0 ? `⏳${remaining}s` : '';
+                let lockText = tradeInProgress ? '🔒' : '';
+                header.innerHTML = `● ARMED ${cooldownText ? `<span class="cooldown">${cooldownText}</span>` : ''} ${lockText ? `<span class="lock">${lockText}</span>` : ''}`;
+                header.className = 'header-status on';
+            } else {
+                header.textContent = '● IDLE';
+                header.className = 'header-status';
+            }
+
+            // Sidebar metrics
+            document.getElementById('m-profile').textContent = tradingMode.toUpperCase();
+            document.getElementById('m-balance').textContent = balance !== null ? `$${Number(balance).toFixed(2)}` : '---';
+            const sessVal = Number(sessionPnl);
+            const sessEl = document.getElementById('m-session');
+            sessEl.textContent = `$${sessVal.toFixed(2)}`;
+            sessEl.className = 'val ' + (sessVal >= 0 ? 'green' : 'red');
+            const dailyVal = Number(dailyPnl);
+            const dailyEl = document.getElementById('m-daily');
+            dailyEl.textContent = `$${dailyVal.toFixed(2)}`;
+            dailyEl.className = 'val ' + (dailyVal >= 0 ? 'green' : 'red');
+            document.getElementById('m-stake').textContent = `$${Number(currentStake).toFixed(2)}`;
+
+            // Focus bar
+            const focusMetric = marketMetrics[currentFocus] || null;
+            document.getElementById('f-name').textContent = MARKETS_CFG[currentFocus] || 'Volatility 75 Index';
+            const priceDisplay = focusMetric
+                ? (focusMetric.formattedPrice || formatPrice(currentFocus, focusMetric.price))
+                : '—';
+            document.getElementById('f-price').textContent = priceDisplay;
+            const srEl = document.getElementById('f-sr');
+            if (focusMetric) {
+                const s = focusMetric.support ? Number(focusMetric.support).toFixed(2) : '—';
+                const r = focusMetric.resistance ? Number(focusMetric.resistance).toFixed(2) : '—';
+                srEl.innerHTML = `<span class="s">S: ${s}</span> <span class="r">R: ${r}</span>`;
+                const badge = document.getElementById('f-breakout-badge');
+                if (focusMetric.isBreakout) { badge.textContent = '🚀 BREAKOUT'; badge.className = 'badge breakout'; }
+                else if (focusMetric.isBreakdown) { badge.textContent = '📉 BREAKDOWN'; badge.className = 'badge breakdown'; }
+                else { badge.textContent = 'IDLE'; badge.className = 'badge idle'; }
+                document.getElementById('f-rsi').textContent = `RSI: ${focusMetric.rsi !== undefined ? Number(focusMetric.rsi).toFixed(1) : '—'}`;
+                document.getElementById('f-vol').textContent = `Vol: ${focusMetric.volatility !== undefined ? Number(focusMetric.volatility).toFixed(2) + '%' : '—'}`;
+            } else {
+                srEl.innerHTML = '<span class="s">S: —</span> <span class="r">R: —</span>';
+                document.getElementById('f-breakout-badge').textContent = 'IDLE';
+                document.getElementById('f-breakout-badge').className = 'badge idle';
+                document.getElementById('f-rsi').textContent = 'RSI: —';
+                document.getElementById('f-vol').textContent = 'Vol: —';
+            }
+
+            // Data table
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = '';
+            let bestScore = -Infinity, bestSym = null;
+            for (const sym in MARKETS_CFG) {
+                const m = marketMetrics[sym] || null;
+                if (m && m.score > bestScore) { bestScore = m.score; bestSym = sym; }
+            }
+            for (const sym in MARKETS_CFG) {
+                const metric = marketMetrics[sym] || null;
+                const isActive = sym === currentFocus;
+                let priceDisplay = '—', step = 0, stepLabel = 'SCAN', stepClass = 'step-0', score = 0;
+                let support = '—', resistance = '—';
+                let breakoutLabel = '⚪ —';
+                let breakoutClass = 'badge-range';
+                let stepBadgeClass = 'badge-step-scan';
+                let rsiVal = '—', rsiClass = '';
+                let fastMA = '—', slowMA = '—', vol = '—', diff = '—', diffClass = '';
+
+                if (metric) {
+                    priceDisplay = metric.formattedPrice || formatPrice(sym, metric.price);
+                    step = metric.step || 0;
+                    score = metric.score || 0;
+
+                    // Breakout evaluation
+                    const price = metric.price;
+                    const sup = metric.support;
+                    const res = metric.resistance;
+                    if (sup !== null && res !== null) {
+                        if (price > res) {
+                            breakoutLabel = '🟢 UP';
+                            breakoutClass = 'badge-up';
+                        } else if (price < sup) {
+                            breakoutLabel = '🔴 DOWN';
+                            breakoutClass = 'badge-down';
+                        } else {
+                            breakoutLabel = '⚪ RANGE';
+                            breakoutClass = 'badge-range';
+                        }
+                    } else {
+                        breakoutLabel = '⚪ —';
+                        breakoutClass = 'badge-range';
+                    }
+
+                    // Step label & class
+                    if (step === 3) {
+                        stepLabel = 'ENTRY';
+                        stepClass = 'step-3';
+                        stepBadgeClass = 'badge-step-entry';
+                    } else if (step === 2) {
+                        stepLabel = 'NEAR';
+                        stepClass = 'step-2';
+                        stepBadgeClass = 'badge-step-trend';
+                    } else if (step === 1) {
+                        stepLabel = 'LEVEL';
+                        stepClass = 'step-1';
+                        stepBadgeClass = 'badge-step-level';
+                    } else {
+                        stepLabel = 'SCAN';
+                        stepClass = 'step-0';
+                        stepBadgeClass = 'badge-step-scan';
+                    }
+
+                    support = metric.support ? Number(metric.support).toFixed(2) : '—';
+                    resistance = metric.resistance ? Number(metric.resistance).toFixed(2) : '—';
+                    rsiVal = metric.rsi !== undefined ? Number(metric.rsi).toFixed(1) : '—';
+                    if (metric.rsi !== undefined && metric.rsi > 70) rsiClass = 'overbought';
+                    else if (metric.rsi !== undefined && metric.rsi < 30) rsiClass = 'oversold';
+                    fastMA = metric.fastMA !== undefined && metric.fastMA !== null ? Number(metric.fastMA).toFixed(2) : '—';
+                    slowMA = metric.slowMA !== undefined && metric.slowMA !== null ? Number(metric.slowMA).toFixed(2) : '—';
+                    vol = metric.volatility !== undefined ? Number(metric.volatility).toFixed(2) + '%' : '—';
+                    if (metric.fastMA !== null && metric.slowMA !== null) {
+                        const d = ((metric.fastMA - metric.slowMA) / metric.price * 100);
+                        diff = d.toFixed(2) + '%';
+                        diffClass = d >= 0 ? 'positive' : 'negative';
+                    } else { diff = '—'; diffClass = ''; }
+                }
+
+                const tr = document.createElement('tr');
+                tr.className = `${isActive ? 'active' : ''} ${stepClass}`;
+                tr.onclick = () => window.setFocusMarket(sym);
+                tr.innerHTML = `
+                    <td class="col-asset">${MARKETS_CFG[sym]}</td>
+                    <td class="col-price">${priceDisplay}</td>
+                    <td class="col-sr"><span class="s">${support}</span> / <span class="r">${resistance}</span></td>
+                    <td class="col-status"><span class="${breakoutClass}">${breakoutLabel}</span></td>
+                    <td class="col-rsi ${rsiClass}">${rsiVal}</td>
+                    <td class="col-ma"><span class="fast">${fastMA}</span></td>
+                    <td class="col-ma"><span class="slow">${slowMA}</span></td>
+                    <td class="col-vol">${vol}</td>
+                    <td class="col-diff ${diffClass}">${diff}</td>
+                    <td class="col-step"><span class="${stepBadgeClass}">${stepLabel}</span></td>
+                `;
+                tbody.appendChild(tr);
+            }
+        } catch(err) {
+            console.error('❌ Error in renderUI:', err);
+        }
+    }
+
+    renderUI({});
+
+    // =========================================================================
+    // SETTINGS (unchanged)
+    // =========================================================================
+    window.loadConfig = async function() {
+        try {
+            const resp = await fetch('/api/config');
+            const config = await resp.json();
+            const map = {
+                'ANALYSIS_WINDOW': 'ANALYSIS_WINDOW',
+                'BOLLINGER_PERIOD': 'BOLLINGER_PERIOD',
+                'BOLLINGER_STD': 'BOLLINGER_STD',
+                'RSI_PERIOD': 'RSI_PERIOD',
+                'OVERSOLD_THRESHOLD': 'OVERSOLD_THRESHOLD',
+                'OVERBOUGHT_THRESHOLD': 'OVERBOUGHT_THRESHOLD',
+                'MIN_VOLATILITY_PERCENT': 'MIN_VOLATILITY_PERCENT',
+                'DURATION_SECONDS': 'DURATION_SECONDS',
+                'MAX_CONSECUTIVE_LOSSES': 'MAX_CONSECUTIVE_LOSSES',
+                'RISK_PERCENT': 'RISK_PERCENT',
+                'TP_PERCENT': 'TP_PERCENT',
+                'SL_PERCENT': 'SL_PERCENT',
+                'MIN_STAKE': 'MIN_STAKE',
+                'COOLDOWN_TICKS': 'COOLDOWN_TICKS'
+            };
+            for (const [id, key] of Object.entries(map)) {
+                const el = document.getElementById('config-' + id);
+                if (el && config[key] !== undefined) el.value = config[key];
+            }
+            const msFields = {
+                'MIN_TRIGGER_INTERVAL': 1000,
+                'LOSS_COOLDOWN_MS': 60000,
+                'SETTLEMENT_TIMEOUT_MS': 1000,
+                'PNL_SYNC_INTERVAL_MS': 1000
+            };
+            for (const [id, divisor] of Object.entries(msFields)) {
+                const secondsId = id.replace('_MS', '_SECONDS');
+                const el = document.getElementById('config-' + secondsId);
+                if (el && config[id] !== undefined) {
+                    el.value = config[id] / divisor;
+                }
+            }
+            document.getElementById('settings-status').textContent = 'Config loaded.';
+        } catch(err) {
+            document.getElementById('settings-status').textContent = 'Error loading config.';
+            console.error(err);
+        }
+    };
+
+    window.saveSettings = async function() {
+        const config = {};
+        const direct = [
+            'ANALYSIS_WINDOW', 'BOLLINGER_PERIOD', 'BOLLINGER_STD', 'RSI_PERIOD',
+            'OVERSOLD_THRESHOLD', 'OVERBOUGHT_THRESHOLD', 'MIN_VOLATILITY_PERCENT',
+            'DURATION_SECONDS', 'MAX_CONSECUTIVE_LOSSES',
+            'RISK_PERCENT', 'TP_PERCENT', 'SL_PERCENT', 'MIN_STAKE',
+            'COOLDOWN_TICKS'
+        ];
+        for (const id of direct) {
+            const el = document.getElementById('config-' + id);
+            if (el) {
+                const val = parseFloat(el.value);
+                if (!isNaN(val)) config[id] = val;
+            }
+        }
+        const secondsToMs = {
+            'MIN_TRIGGER_INTERVAL_SECONDS': 'MIN_TRIGGER_INTERVAL',
+            'LOSS_COOLDOWN_MINUTES': 'LOSS_COOLDOWN_MS',
+            'SETTLEMENT_TIMEOUT_SECONDS': 'SETTLEMENT_TIMEOUT_MS',
+            'PNL_SYNC_INTERVAL_SECONDS': 'PNL_SYNC_INTERVAL_MS'
+        };
+        for (const [secondsId, msId] of Object.entries(secondsToMs)) {
+            const el = document.getElementById('config-' + secondsId);
+            if (el) {
+                const val = parseFloat(el.value);
+                if (!isNaN(val)) {
+                    let multiplier = 1000;
+                    if (secondsId === 'LOSS_COOLDOWN_MINUTES') multiplier = 60000;
+                    config[msId] = val * multiplier;
+                }
+            }
+        }
+        try {
+            const resp = await fetch('/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+            const result = await resp.json();
+            if (result.success) {
+                document.getElementById('settings-status').textContent = '✅ Settings applied!';
+            } else {
+                document.getElementById('settings-status').textContent = '❌ Error: ' + result.error;
+            }
+        } catch(err) {
+            document.getElementById('settings-status').textContent = '❌ Network error.';
+            console.error(err);
+        }
+    };
+
+    // =========================================================================
+    // ANALYTICS – NEW CHARTS
+    // =========================================================================
+    let assetBarChart = null;
+    let equityChart = null;
+
+    function renderCharts() {
+        // Initialize canvas contexts
+        const ctxBar = document.getElementById('chart-donut').getContext('2d');
+        const ctxLine = document.getElementById('chart-line').getContext('2d');
+
+        // ---- Horizontal Bar Chart (Asset Contributions) ----
+        if (assetBarChart) assetBarChart.destroy();
+        assetBarChart = new Chart(ctxBar, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [{
+                    data: [],
+                    backgroundColor: [],
+                    borderColor: [],
+                    borderWidth: 0,
+                    borderRadius: 4,
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.parsed.x;
+                                return (value >= 0 ? '+' : '') + '$' + value.toFixed(2);
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { color: 'rgba(0,0,0,0.05)' },
+                        ticks: {
+                            callback: function(value) {
+                                return (value >= 0 ? '+' : '') + '$' + value.toFixed(2);
+                            }
+                        }
+                    },
+                    y: {
+                        grid: { display: false },
+                        ticks: { font: { size: 9 } }
+                    }
+                }
+            }
+        });
+
+        // ---- Equity Curve ----
+        if (equityChart) equityChart.destroy();
+        equityChart = new Chart(ctxLine, {
+            type: 'line',
+            data: {
+                datasets: [{
+                    label: 'Equity',
+                    data: [],
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16,185,129,0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 2,
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.parsed.y;
+                                return 'Balance: $' + value.toFixed(2);
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            unit: 'minute',
+                            displayFormats: {
+                                minute: 'HH:mm',
+                                hour: 'HH:mm',
+                                day: 'MMM DD',
+                                week: 'MMM DD',
+                                month: 'MMM YYYY'
+                            }
+                        },
+                        grid: { color: 'rgba(0,0,0,0.05)' },
+                        ticks: { font: { size: 7 }, maxTicksLimit: 15 }
+                    },
+                    y: {
+                        grid: { color: 'rgba(0,0,0,0.05)' },
+                        ticks: { font: { size: 7 } }
+                    }
+                }
+            }
+        });
+    }
+
+    // ---- Render Asset Bar Chart ----
+    function renderAssetBarChart(contributions) {
+        if (!assetBarChart) return;
+        const labels = contributions.map(a => a.name);
+        const values = contributions.map(a => a.pnl);
+        const colors = values.map(v => v >= 0 ? '#10b981' : '#ef4444');
+        const borderColors = colors.map(c => c);
+
+        assetBarChart.data.labels = labels;
+        assetBarChart.data.datasets[0].data = values;
+        assetBarChart.data.datasets[0].backgroundColor = colors;
+        assetBarChart.data.datasets[0].borderColor = borderColors;
+        assetBarChart.update('none');
+    }
+
+    // ---- Render Equity Curve with Baseline, Markers, Dynamic Colors ----
+    function renderEquityCurve(equityData, startingBalance) {
+        if (!equityChart || !equityData || equityData.length < 2) return;
+
+        const dataPoints = equityData.map(p => ({ x: p.timestamp, y: p.equity }));
+        const baseline = startingBalance || 0;
+
+        // Determine if current equity is above or below baseline
+        const lastY = dataPoints[dataPoints.length-1]?.y || baseline;
+        const isAbove = lastY >= baseline;
+        const lineColor = isAbove ? '#10b981' : '#ef4444';
+        const fillColor = isAbove ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
+
+        // Find peak and max drawdown
+        let peak = baseline;
+        let maxDrawdown = 0;
+        let peakPoint = null;
+        let drawdownPoint = null;
+        dataPoints.forEach(p => {
+            if (p.y > peak) {
+                peak = p.y;
+                peakPoint = p;
+            }
+            const drawdown = peak - p.y;
+            if (drawdown > maxDrawdown) {
+                maxDrawdown = drawdown;
+                drawdownPoint = p;
+            }
+        });
+
+        // Build dataset with annotations using custom points
+        const dataset = {
+            label: 'Equity',
+            data: dataPoints,
+            borderColor: lineColor,
+            backgroundColor: fillColor,
+            fill: true,
+            tension: 0.3,
+            pointRadius: 2,
+            borderWidth: 2,
+            pointBackgroundColor: lineColor
+        };
+
+        // Add custom markers as separate datasets
+        const markers = [];
+        if (peakPoint) {
+            markers.push({
+                label: 'Peak',
+                data: [{ x: peakPoint.x, y: peakPoint.y }],
+                pointRadius: 6,
+                pointBackgroundColor: '#10b981',
+                pointBorderColor: '#fff',
+                pointBorderWidth: 2,
+                showLine: false,
+                pointStyle: 'circle'
+            });
+        }
+        if (drawdownPoint) {
+            markers.push({
+                label: 'Max Drawdown',
+                data: [{ x: drawdownPoint.x, y: drawdownPoint.y }],
+                pointRadius: 6,
+                pointBackgroundColor: '#ef4444',
+                pointBorderColor: '#fff',
+                pointBorderWidth: 2,
+                showLine: false,
+                pointStyle: 'circle'
+            });
+        }
+
+        // Add baseline as a dashed line using a separate dataset
+        const baselineData = [
+            { x: dataPoints[0].x, y: baseline },
+            { x: dataPoints[dataPoints.length-1].x, y: baseline }
+        ];
+        const baselineDataset = {
+            label: 'Start',
+            data: baselineData,
+            borderColor: 'rgba(100,116,139,0.4)',
+            borderDash: [5, 5],
+            borderWidth: 1,
+            pointRadius: 0,
+            fill: false,
+            tension: 0
+        };
+
+        // Combine datasets
+        equityChart.data.datasets = [dataset, baselineDataset, ...markers];
+        equityChart.update('none');
+    }
+
+    // ---- Update metrics ----
+    function updateMetrics(data) {
+        document.getElementById('meta-profit').textContent = `$${data.totalProfit.toFixed(2)}`;
+        document.getElementById('meta-pf').textContent = 'N/A';
+        document.getElementById('meta-strike').textContent = `${data.tradeCount || 0} trades`;
+        document.getElementById('meta-dd').textContent = '—';
+    }
+
+    // ---- Timeframe preset (fetch aggregated data) ----
+    window.timeframePreset = async function(btn, mode) {
+        if (btn) {
+            document.querySelectorAll('.preset-strip .btn-preset').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }
+        if (mode === 'clear') {
+            // Reset charts
+            renderAssetBarChart([]);
+            renderEquityCurve([], 0);
+            return;
+        }
+
+        try {
+            const resp = await fetch(`/api/ledger/aggregated?mode=${mode}`);
+            const data = await resp.json();
+            currentAnalyticsData = data;
+            // Store starting balance for baseline (use first equity point)
+            const startingBalance = data.equityData.length > 0 ? data.equityData[0].equity : 0;
+            currentAnalyticsData.startingBalance = startingBalance;
+
+            renderAssetBarChart(data.assetContributions);
+            renderEquityCurve(data.equityData, startingBalance);
+            updateMetrics(data);
+
+        } catch(err) {
+            console.error('Analytics error:', err);
+        }
+    };
+
+    // =========================================================================
+    // INIT
+    // =========================================================================
+    document.querySelectorAll('.tab-pages').forEach(p => p.classList.remove('active'));
+    document.getElementById('tab-dashboard').classList.add('active');
+    document.querySelectorAll('.header-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+    const defaultHeaderBtn = document.querySelector('.header-tabs .tab-btn[data-tab="dashboard"]');
+    if (defaultHeaderBtn) defaultHeaderBtn.classList.add('active');
+    document.querySelectorAll('.tab-bar .tab-item').forEach(b => b.classList.remove('active'));
+    const defaultBarBtn = document.querySelector('.tab-bar .tab-item[data-tab="dashboard"]');
+    if (defaultBarBtn) defaultBarBtn.classList.add('active');
+
+    console.log('🚀 QUANTCORE Terminal v6.0 loaded');
+});
