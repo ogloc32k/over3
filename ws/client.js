@@ -201,6 +201,7 @@ function handleMessage(msg) {
 
                     const netProfit = postBal - preBal;
                     const isWin = netProfit > 0;
+                    const symbol = state.activeRealTrade.symbol;
 
                     state.sessionPnl += netProfit;
                     state.dailyPnl += netProfit;
@@ -235,6 +236,17 @@ function handleMessage(msg) {
 
                     const outcomeLabel = isWin ? `🟢 WIN (+$${netProfit.toFixed(2)})` : `🔴 LOSS (-$${Math.abs(netProfit).toFixed(2)})`;
                     addLog(`[Trade Finished] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | ${outcomeLabel} | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
+
+                    // ---- Broadcast analytics delta ----
+                    broadcastSSE({
+                        event: 'analytics_delta',
+                        data: {
+                            asset: symbol,
+                            pnl: netProfit,
+                            newBalance: state.balance,
+                            timestamp: Date.now()
+                        }
+                    });
 
                 } catch (error) {
                     console.error('[Trade Check Error]', error.message);
