@@ -4,8 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>QUANTCORE // TERMINAL v6.0</title>
-  <link rel="stylesheet" href="css/styles.css">
-  <!-- Chart.js loaded in head – available globally -->
+  <!-- Force no caching for this HTML -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <link rel="stylesheet" href="css/styles.css?v=2">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
@@ -121,38 +124,32 @@
             <label>From</label><input type="date" id="date-start" value="2026-06-01" onchange="applyDateFilter()">
             <label>To</label><input type="date" id="date-end" value="2026-06-21" onchange="applyDateFilter()">
             <div class="preset-strip">
-              <button class="btn-preset" id="p-hour" onclick="timeframePreset(this,'hour')">1H</button>
-              <button class="btn-preset active" id="p-session" onclick="timeframePreset(this,'session')">Session</button>
               <button class="btn-preset" id="p-24h" onclick="timeframePreset(this,'24h')">24H</button>
+              <button class="btn-preset active" id="p-session" onclick="timeframePreset(this,'session')">Session</button>
+              <button class="btn-preset" id="p-week" onclick="timeframePreset(this,'week')">1W</button>
               <button class="btn-preset" id="p-month" onclick="timeframePreset(this,'month')">1M</button>
-              <button class="btn-preset" id="p-6m" onclick="timeframePreset(this,'6months')">6M</button>
-              <button class="btn-preset" id="p-1y" onclick="timeframePreset(this,'1year')">1Y</button>
+              <button class="btn-preset" id="p-year" onclick="timeframePreset(this,'year')">1Y</button>
               <button class="btn-preset" id="p-clear" onclick="timeframePreset(this,'clear')">✕</button>
             </div>
           </div>
           <div class="metrics-grid-4">
             <div class="metric-card"><div class="lbl">Net Profit</div><div class="val" id="meta-profit">$0.00</div></div>
-            <div class="metric-card"><div class="lbl">Profit Factor</div><div class="val" id="meta-pf" style="color:var(--neon-blue);">N/A</div></div>
             <div class="metric-card"><div class="lbl">Strike Rate</div><div class="val" id="meta-strike">0.0%</div></div>
+            <div class="metric-card"><div class="lbl">Profit Factor</div><div class="val" id="meta-pf" style="color:var(--neon-blue);">0.00</div></div>
             <div class="metric-card"><div class="lbl">Max Drawdown</div><div class="val" id="meta-dd">0.0%</div></div>
           </div>
           <div class="charts-grid-2">
             <div class="chart-box">
-              <div class="ch-label">Asset Contribution</div>
-              <div class="ch-wrap" style="display:flex; flex-direction:row; align-items:center; gap:8px;">
-                <div style="flex:1; min-width:0; height:100%; position:relative;"><canvas id="chart-donut"></canvas></div>
-                <div style="flex:0 0 auto; display:flex; flex-direction:column; gap:3px; font-size:7px; color:var(--text-secondary);">
-                  <span><span style="display:inline-block; width:10px; height:10px; background:#3b82f6; border-radius:2px; margin-right:4px;"></span>R_10</span>
-                  <span><span style="display:inline-block; width:10px; height:10px; background:#f59e0b; border-radius:2px; margin-right:4px;"></span>R_25</span>
-                  <span><span style="display:inline-block; width:10px; height:10px; background:#787b86; border-radius:2px; margin-right:4px;"></span>R_50</span>
-                  <span><span style="display:inline-block; width:10px; height:10px; background:#10b981; border-radius:2px; margin-right:4px;"></span>R_75</span>
-                  <span><span style="display:inline-block; width:10px; height:10px; background:#ef4444; border-radius:2px; margin-right:4px;"></span>R_100</span>
-                </div>
+              <div class="ch-label">Asset Performance</div>
+              <div class="ch-wrap" style="height:100%;max-height:200px;">
+                <canvas id="chart-donut" style="width:100%;height:100%;"></canvas>
               </div>
             </div>
             <div class="chart-box">
               <div class="ch-label">Equity Curve</div>
-              <div class="ch-wrap"><canvas id="chart-line"></canvas></div>
+              <div class="ch-wrap" style="height:100%;max-height:200px;">
+                <canvas id="chart-line" style="width:100%;height:100%;"></canvas>
+              </div>
             </div>
           </div>
         </div>
@@ -275,7 +272,7 @@
     </main>
   </div>
 
-  <!-- BOTTOM TAB BAR -->
+  <!-- BOTTOM TAB BAR (Mobile) -->
   <div class="tab-bar" id="tabBar">
     <button class="tab-item active" data-tab="dashboard" onclick="switchTab('dashboard')"><span class="icon">📊</span><span class="label">Markets</span></button>
     <button class="tab-item" data-tab="logs" onclick="switchTab('logs')"><span class="icon">📋</span><span class="label">Logs</span></button>
@@ -283,7 +280,7 @@
     <button class="tab-item" data-tab="settings" onclick="switchTab('settings')"><span class="icon">⚙️</span><span class="label">Settings</span></button>
   </div>
 
-  <!-- SCRIPT – loaded last, after all DOM elements -->
-  <script src="js/app.js"></script>
+  <!-- CACHE‑BUSTED SCRIPT – filename with version -->
+  <script src="js/app.js?v=2"></script>
 </body>
 </html>
