@@ -31,7 +31,7 @@ document.addEventListener('DOMContentLoaded', function() {
     toggleFixed.textContent = sidebar.classList.contains('collapsed') ? '▶' : '◀';
 
     // =========================================================================
-    // TAB SWITCHING
+    // TAB SWITCHING (with hidden focusBar on Analytics)
     // =========================================================================
     window.switchTab = function(tabId) {
         document.querySelectorAll('.tab-pages').forEach(p => p.classList.remove('active'));
@@ -46,14 +46,30 @@ document.addEventListener('DOMContentLoaded', function() {
         const barBtn = document.querySelector(`.tab-bar .tab-item[data-tab="${tabId}"]`);
         if (barBtn) barBtn.classList.add('active');
 
+        // Hide live ticker on Analytics tab
+        const focusBar = document.getElementById('focusBar');
+        if (tabId === 'analytics') {
+            focusBar.style.display = 'none';
+        } else {
+            focusBar.style.display = 'flex';
+        }
+
         if (tabId === 'analytics') {
             setTimeout(() => {
                 renderCharts();
-                timeframePreset(document.getElementById('p-24h'), '24h');
+                timeframePreset(document.getElementById('p-session'), 'session');
             }, 100);
         }
         if (tabId === 'settings') { loadConfig(); }
         if (tabId === 'logs') { scrollLogsToBottom(); }
+    };
+
+    // =========================================================================
+    // TOGGLE DATE PICKER
+    // =========================================================================
+    window.toggleDatePicker = function() {
+        const group = document.getElementById('datePickerGroup');
+        group.style.display = group.style.display === 'none' ? 'flex' : 'none';
     };
 
     // =========================================================================
@@ -268,7 +284,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         renderAssetBarChart(currentAnalyticsData.assetContributions);
-        renderEquityCurve(currentAnalyticsData.equityData, currentAnalyticsData.startingBalance || 0, currentAnalyticsData.timeframe || '24h');
+        renderEquityCurve(currentAnalyticsData.equityData, currentAnalyticsData.startingBalance || 0, currentAnalyticsData.timeframe || 'session');
         updateMetrics(currentAnalyticsData);
     }
 
@@ -620,7 +636,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         grid: { display: false },
                         ticks: {
                             font: { size: 9 },
-                            color: '#d1d5db' // brighten asset labels
+                            color: '#d1d5db'
                         },
                         afterFit: function(scale) {
                             scale.width = 120;
@@ -631,7 +647,7 @@ document.addEventListener('DOMContentLoaded', function() {
             plugins: [barValueLabelPlugin]
         });
 
-        // ---- Equity Curve (category scale, no date adapter) ----
+        // ---- Equity Curve ----
         if (equityChartInstance) {
             equityChartInstance.destroy();
             equityChartInstance = null;
@@ -647,9 +663,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     backgroundColor: 'rgba(16,185,129,0.1)',
                     fill: true,
                     tension: 0.3,
-                    pointRadius: 0,          // hide points for clean line
-                    pointHoverRadius: 5,     // show point on hover
-                    pointHitRadius: 10,      // make hover area larger
+                    pointRadius: 0,
+                    pointHoverRadius: 5,
+                    pointHitRadius: 10,
                     borderWidth: 2,
                     pointBackgroundColor: '#10b981'
                 }]
@@ -708,16 +724,13 @@ document.addEventListener('DOMContentLoaded', function() {
         assetBarChart.update('none');
     }
 
-    // ---- Helper to format timestamps ----
     function formatEquityLabel(timestamp, timeframe) {
         const date = new Date(timestamp);
         if (timeframe === '24h' || timeframe === 'hour' || timeframe === 'session') {
-            // Force 24h format: 00:00 to 23:59
             const hours = String(date.getHours()).padStart(2, '0');
             const minutes = String(date.getMinutes()).padStart(2, '0');
             return hours + ':' + minutes;
         } else {
-            // For week, month, year -> show MMM DD
             return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
         }
     }
@@ -725,7 +738,6 @@ document.addEventListener('DOMContentLoaded', function() {
     function renderEquityCurve(equityData, startingBalance, timeframe) {
         if (!equityChartInstance) return;
 
-        // If no data or less than 2 points, show empty state
         if (!equityData || equityData.length < 2) {
             equityChartInstance.data.labels = [];
             equityChartInstance.data.datasets[0].data = [];
@@ -742,30 +754,25 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        // Remove empty state if present
         const parent = document.getElementById('chart-line').parentElement;
         const existing = parent.querySelector('.empty-state');
         if (existing) existing.remove();
 
-        // Format labels using our helper to avoid 24:01 issue
         const labels = equityData.map(point => formatEquityLabel(point.timestamp, timeframe));
         const values = equityData.map(point => point.equity);
 
-        // Determine line color based on final equity vs baseline
         const baseline = startingBalance || 0;
         const lastValue = values.length > 0 ? values[values.length-1] : baseline;
         const isAbove = lastValue >= baseline;
         const lineColor = isAbove ? '#10b981' : '#ef4444';
         const fillColor = isAbove ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
 
-        // Update chart data
         equityChartInstance.data.labels = labels;
         equityChartInstance.data.datasets[0].data = values;
         equityChartInstance.data.datasets[0].borderColor = lineColor;
         equityChartInstance.data.datasets[0].backgroundColor = fillColor;
         equityChartInstance.data.datasets[0].pointBackgroundColor = lineColor;
 
-        // Add baseline as dashed line (separate dataset)
         const baselineData = [baseline, baseline];
         const baselineLabels = [labels[0], labels[labels.length-1]];
         equityChartInstance.data.datasets[1] = {
@@ -779,9 +786,6 @@ document.addEventListener('DOMContentLoaded', function() {
             tension: 0
         };
 
-        // Remove any existing marker datasets (prevent floating circles)
-        // We'll just keep the line and baseline – no extra marker datasets
-        // Remove datasets beyond index 1 (we only keep line + baseline)
         while (equityChartInstance.data.datasets.length > 2) {
             equityChartInstance.data.datasets.pop();
         }
@@ -790,12 +794,11 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function updateMetrics(data) {
-        // ---- Net Profit ----
+        // ---- Primary metrics ----
         const profitEl = document.getElementById('meta-profit');
         profitEl.textContent = `$${data.totalProfit.toFixed(2)}`;
         profitEl.className = 'val ' + (data.totalProfit >= 0 ? 'positive' : 'negative');
 
-        // ---- Strike Rate (Win Rate) ----
         const total = data.tradeCount || 0;
         const wins = data.winCount || 0;
         const strike = total > 0 ? (wins / total) * 100 : 0;
@@ -803,7 +806,6 @@ document.addEventListener('DOMContentLoaded', function() {
         strikeEl.innerHTML = `${strike.toFixed(1)}% <small style="display:block;font-size:8px;color:#787b86;font-weight:400;">${total} trades total</small>`;
         strikeEl.className = 'val';
 
-        // ---- Profit Factor ----
         const grossProfit = data.grossProfit || 0;
         const grossLoss = data.grossLoss || 0;
         let pf;
@@ -814,11 +816,24 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         document.getElementById('meta-pf').textContent = pf;
 
-        // ---- Max Drawdown ----
         const maxDD = data.maxDrawdown || 0;
         const ddEl = document.getElementById('meta-dd');
         ddEl.textContent = `-${maxDD.toFixed(2)}%`;
         ddEl.className = 'val negative';
+
+        // ---- Secondary metrics ----
+        const losses = data.lossCount || 0;
+        const avgWin = wins > 0 ? grossProfit / wins : 0;
+        const avgLoss = losses > 0 ? grossLoss / losses : 0;
+        document.getElementById('meta-avg-win-loss').textContent = `$${avgWin.toFixed(2)} / $${avgLoss.toFixed(2)}`;
+
+        // Placeholder for max consecutive (we'd need raw data)
+        document.getElementById('meta-max-consec').textContent = `W:${wins} / L:${losses}`;
+
+        // Placeholder for avg duration
+        document.getElementById('meta-avg-duration').textContent = `${total > 0 ? (data.totalDuration || 0) / total : 0}s`;
+
+        document.getElementById('meta-won-lost').textContent = `${wins} / ${losses}`;
     }
 
     // ---- Helper to update date pickers based on preset ----
@@ -826,9 +841,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const now = new Date();
         const startEl = document.getElementById('date-start');
         const endEl = document.getElementById('date-end');
-
         if (!startEl || !endEl) return;
-
         let startDate, endDate;
         switch (mode) {
             case '24h':
@@ -863,15 +876,17 @@ document.addEventListener('DOMContentLoaded', function() {
         if (mode === 'clear') {
             renderAssetBarChart([]);
             renderEquityCurve([], 0);
-            // Reset KPI cards
             document.getElementById('meta-profit').textContent = '$0.00';
             document.getElementById('meta-strike').innerHTML = '0.0% <small style="display:block;font-size:8px;color:#787b86;">0 trades total</small>';
             document.getElementById('meta-pf').textContent = '0.00';
             document.getElementById('meta-dd').textContent = '0.0%';
+            document.getElementById('meta-avg-win-loss').textContent = '$0.00 / $0.00';
+            document.getElementById('meta-max-consec').textContent = 'W:0 / L:0';
+            document.getElementById('meta-avg-duration').textContent = '0s';
+            document.getElementById('meta-won-lost').textContent = '0 / 0';
             return;
         }
 
-        // Update date pickers for preset
         updateDatePickersForPreset(mode);
 
         try {
