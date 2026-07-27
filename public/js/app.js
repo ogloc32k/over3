@@ -49,7 +49,8 @@ document.addEventListener('DOMContentLoaded', function() {
         if (tabId === 'analytics') {
             setTimeout(() => {
                 renderCharts();
-                timeframePreset(document.getElementById('p-session'), 'session');
+                // Load default view (24h) when analytics tab opens
+                timeframePreset(document.getElementById('p-24h'), '24h');
             }, 100);
         }
         if (tabId === 'settings') { loadConfig(); }
@@ -191,7 +192,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // =========================================================================
-    // SSE CONNECTION
+    // SSE CONNECTION (with analytics delta handling)
     // =========================================================================
     const sse = new EventSource('/api/logs');
     sse.onopen = function() { console.log('✅ SSE connected'); };
@@ -199,6 +200,12 @@ document.addEventListener('DOMContentLoaded', function() {
     sse.onmessage = function(e) {
         try {
             const data = JSON.parse(e.data);
+            // Check if it's an analytics delta event
+            if (data.event === 'analytics_delta') {
+                handleAnalyticsDelta(data.data);
+                return;
+            }
+            // Otherwise regular state/logs update
             if (data.state) {
                 globalState = data.state;
                 if (data.state.marketMetrics) {
@@ -227,8 +234,46 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
+    // ---- Analytics delta handler ----
+    let currentAnalyticsData = null;
+
+    function handleAnalyticsDelta(delta) {
+        if (!currentAnalyticsData) return;
+        // Update asset contributions
+        const asset = delta.asset || 'Unknown';
+        const pnl = delta.pnl || 0;
+        const assetMap = {};
+        currentAnalyticsData.assetContributions.forEach(a => { assetMap[a.name] = a.pnl; });
+        assetMap[asset] = (assetMap[asset] || 0) + pnl;
+        currentAnalyticsData.assetContributions = Object.entries(assetMap)
+            .map(([name, pnl]) => ({ name, pnl }))
+            .sort((a, b) => b.pnl - a.pnl);
+
+        // Update equity curve: add new point
+        if (currentAnalyticsData.equityData) {
+            const lastEquity = currentAnalyticsData.equityData.length > 0 ?
+                currentAnalyticsData.equityData[currentAnalyticsData.equityData.length-1].equity : 0;
+            const newEquity = lastEquity + pnl;
+            currentAnalyticsData.equityData.push({
+                timestamp: delta.timestamp || Date.now(),
+                equity: newEquity
+            });
+            // Keep only last 200 points to avoid memory bloat
+            if (currentAnalyticsData.equityData.length > 200) {
+                currentAnalyticsData.equityData = currentAnalyticsData.equityData.slice(-200);
+            }
+        }
+        currentAnalyticsData.totalProfit += pnl;
+        currentAnalyticsData.tradeCount += 1;
+
+        // Re-render charts with new data
+        renderAssetBarChart(currentAnalyticsData.assetContributions);
+        renderEquityCurve(currentAnalyticsData.equityData, currentAnalyticsData.startingBalance || 0);
+        updateMetrics(currentAnalyticsData);
+    }
+
     // =========================================================================
-    // RENDER UI
+    // RENDER UI (unchanged from previous version)
     // =========================================================================
     function renderUI(state) {
         try {
@@ -302,7 +347,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('f-vol').textContent = 'Vol: —';
             }
 
-            // ---- Data table (updated Breakout & Step) ----
+            // Data table
             const tbody = document.getElementById('tableBody');
             tbody.innerHTML = '';
             let bestScore = -Infinity, bestSym = null;
@@ -326,7 +371,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     step = metric.step || 0;
                     score = metric.score || 0;
 
-                    // ---- Breakout evaluation ----
+                    // Breakout evaluation
                     const price = metric.price;
                     const sup = metric.support;
                     const res = metric.resistance;
@@ -346,7 +391,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         breakoutClass = 'badge-range';
                     }
 
-                    // ---- Step label & class ----
+                    // Step label & class
                     if (step === 3) {
                         stepLabel = 'ENTRY';
                         stepClass = 'step-3';
@@ -405,7 +450,7 @@ document.addEventListener('DOMContentLoaded', function() {
     renderUI({});
 
     // =========================================================================
-    // SETTINGS
+    // SETTINGS (unchanged)
     // =========================================================================
     window.loadConfig = async function() {
         try {
@@ -503,51 +548,91 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     // =========================================================================
-    // ANALYTICS – TIME-BUCKETED EQUITY CURVE
+    // ANALYTICS – HORIZONTAL BAR CHART & ENHANCED EQUITY CURVE
     // =========================================================================
-    let charts = {};
-    let currentEquityData = [];
+    let assetBarChart = null;
+    let equityChart = null;
 
-    window.renderCharts = function() {
-        if (charts.donut) return;
-        const dark = '#787b86', grid = '#2a2f3d';
-        const ctxDonut = document.getElementById('chart-donut').getContext('2d');
-        charts.donut = new Chart(ctxDonut, {
-            type: 'doughnut',
+    function renderCharts() {
+        const ctxBar = document.getElementById('chart-donut').getContext('2d');
+        const ctxLine = document.getElementById('chart-line').getContext('2d');
+
+        // ---- Horizontal Bar Chart (Asset Contributions) ----
+        if (assetBarChart) assetBarChart.destroy();
+        assetBarChart = new Chart(ctxBar, {
+            type: 'bar',
             data: {
-                labels: ['R_10', 'R_25', 'R_50', 'R_75', 'R_100'],
+                labels: [],
                 datasets: [{
-                    data: [0,0,0,0,0],
-                    backgroundColor: ['#3b82f6','#f59e0b','#787b86','#10b981','#ef4444'],
-                    borderColor: '#131722',
-                    borderWidth: 2
+                    data: [],
+                    backgroundColor: [],
+                    borderColor: [],
+                    borderWidth: 0,
+                    borderRadius: 4,
                 }]
             },
             options: {
+                indexAxis: 'y',
                 responsive: true,
                 maintainAspectRatio: false,
-                cutout: '65%',
-                plugins: { legend: { display: false } }
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.parsed.x;
+                                return (value >= 0 ? '+' : '') + '$' + value.toFixed(2);
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { color: 'rgba(0,0,0,0.05)' },
+                        ticks: {
+                            callback: function(value) {
+                                return (value >= 0 ? '+' : '') + '$' + value.toFixed(2);
+                            }
+                        }
+                    },
+                    y: {
+                        grid: { display: false },
+                        ticks: { font: { size: 9 } }
+                    }
+                }
             }
         });
-        const ctxLine = document.getElementById('chart-line').getContext('2d');
-        charts.line = new Chart(ctxLine, {
+
+        // ---- Equity Curve ----
+        if (equityChart) equityChart.destroy();
+        equityChart = new Chart(ctxLine, {
             type: 'line',
             data: {
                 datasets: [{
                     label: 'Equity',
                     data: [],
                     borderColor: '#10b981',
-                    backgroundColor: 'transparent',
-                    borderWidth: 3,
-                    pointRadius: 2,
+                    backgroundColor: 'rgba(16,185,129,0.1)',
+                    fill: true,
                     tension: 0.3,
-                    fill: false
+                    pointRadius: 2,
+                    borderWidth: 2
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.parsed.y;
+                                return 'Balance: $' + value.toFixed(2);
+                            }
+                        }
+                    }
+                },
                 scales: {
                     x: {
                         type: 'time',
@@ -561,149 +646,121 @@ document.addEventListener('DOMContentLoaded', function() {
                                 month: 'MMM YYYY'
                             }
                         },
-                        grid: { color: grid },
-                        ticks: { color: dark, font: { size: 7 }, maxTicksLimit: 20 },
-                        title: { display: true, text: 'Time', color: dark, font: { size: 7 } }
+                        grid: { color: 'rgba(0,0,0,0.05)' },
+                        ticks: { font: { size: 7 }, maxTicksLimit: 15 }
                     },
                     y: {
-                        grid: { color: grid },
-                        ticks: { color: dark, font: { size: 7 } },
-                        title: { display: true, text: 'Equity ($)', color: dark, font: { size: 7 } }
-                    }
-                },
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                return '$' + context.parsed.y.toFixed(2);
-                            }
-                        }
+                        grid: { color: 'rgba(0,0,0,0.05)' },
+                        ticks: { font: { size: 7 } }
                     }
                 }
             }
         });
-    };
+    }
 
-    function processEquityBuckets(rawData, mode, startTime, endTime) {
-        if (!rawData || rawData.length === 0) {
-            const now = endTime || Date.now();
-            const start = startTime || (now - 24*60*60*1000);
-            return {
-                data: [{x: start, y: 0}, {x: now, y: 0}],
-                bucketSize: 0
-            };
-        }
+    function renderAssetBarChart(contributions) {
+        if (!assetBarChart) return;
+        const labels = contributions.map(a => a.name);
+        const values = contributions.map(a => a.pnl);
+        const colors = values.map(v => v >= 0 ? '#10b981' : '#ef4444');
+        const borderColors = colors.map(c => c);
 
-        const sorted = rawData.slice().sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
-        let cum = 0;
-        const points = sorted.map(t => {
-            cum += (t.profit_loss || 0);
-            return {
-                timestamp: new Date(t.created_at).getTime(),
-                equity: cum
-            };
+        assetBarChart.data.labels = labels;
+        assetBarChart.data.datasets[0].data = values;
+        assetBarChart.data.datasets[0].backgroundColor = colors;
+        assetBarChart.data.datasets[0].borderColor = borderColors;
+        assetBarChart.update('none');
+    }
+
+    function renderEquityCurve(equityData, startingBalance) {
+        if (!equityChart || !equityData || equityData.length < 2) return;
+
+        const dataPoints = equityData.map(p => ({ x: p.timestamp, y: p.equity }));
+        const baseline = startingBalance || 0;
+
+        const lastY = dataPoints[dataPoints.length-1]?.y || baseline;
+        const isAbove = lastY >= baseline;
+        const lineColor = isAbove ? '#10b981' : '#ef4444';
+        const fillColor = isAbove ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
+
+        let peak = baseline;
+        let maxDrawdown = 0;
+        let peakPoint = null;
+        let drawdownPoint = null;
+        dataPoints.forEach(p => {
+            if (p.y > peak) {
+                peak = p.y;
+                peakPoint = p;
+            }
+            const drawdown = peak - p.y;
+            if (drawdown > maxDrawdown) {
+                maxDrawdown = drawdown;
+                drawdownPoint = p;
+            }
         });
 
-        let bucketMs;
-        const now = Date.now();
-        const range = endTime - startTime;
-        switch (mode) {
-            case 'hour':
-                bucketMs = 5 * 60 * 1000;
-                break;
-            case '24h':
-                bucketMs = 15 * 60 * 1000;
-                break;
-            case 'month':
-                bucketMs = 24 * 60 * 60 * 1000;
-                break;
-            case '6months':
-            case '1year':
-                bucketMs = 7 * 24 * 60 * 60 * 1000;
-                break;
-            default:
-                bucketMs = 24 * 60 * 60 * 1000;
-                break;
-        }
-        if (range < 2 * 60 * 60 * 1000) bucketMs = 5 * 60 * 1000;
-        if (range < 30 * 60 * 1000) bucketMs = 60 * 1000;
-
-        const buckets = [];
-        let currentBucketStart = startTime;
-        let idx = 0;
-        let lastEquity = 0;
-
-        while (currentBucketStart < endTime) {
-            const bucketEnd = Math.min(currentBucketStart + bucketMs, endTime);
-            let equityAtEnd = lastEquity;
-            while (idx < points.length && points[idx].timestamp <= bucketEnd) {
-                equityAtEnd = points[idx].equity;
-                idx++;
-            }
-            buckets.push({
-                x: currentBucketStart + bucketMs / 2,
-                y: equityAtEnd
-            });
-            lastEquity = equityAtEnd;
-            currentBucketStart = bucketEnd;
-        }
-
-        if (buckets.length < 2) {
-            const firstEquity = points.length > 0 ? points[0].equity : 0;
-            return {
-                data: [{x: startTime, y: firstEquity}, {x: endTime, y: firstEquity}],
-                bucketSize: bucketMs
-            };
-        }
-
-        const startEquity = points.length > 0 ? points[0].equity : 0;
-        buckets[0].y = startEquity;
-
-        return {
-            data: buckets,
-            bucketSize: bucketMs
+        const dataset = {
+            label: 'Equity',
+            data: dataPoints,
+            borderColor: lineColor,
+            backgroundColor: fillColor,
+            fill: true,
+            tension: 0.3,
+            pointRadius: 2,
+            borderWidth: 2,
+            pointBackgroundColor: lineColor
         };
+
+        const markers = [];
+        if (peakPoint) {
+            markers.push({
+                label: 'Peak',
+                data: [{ x: peakPoint.x, y: peakPoint.y }],
+                pointRadius: 6,
+                pointBackgroundColor: '#10b981',
+                pointBorderColor: '#fff',
+                pointBorderWidth: 2,
+                showLine: false,
+                pointStyle: 'circle'
+            });
+        }
+        if (drawdownPoint) {
+            markers.push({
+                label: 'Max Drawdown',
+                data: [{ x: drawdownPoint.x, y: drawdownPoint.y }],
+                pointRadius: 6,
+                pointBackgroundColor: '#ef4444',
+                pointBorderColor: '#fff',
+                pointBorderWidth: 2,
+                showLine: false,
+                pointStyle: 'circle'
+            });
+        }
+
+        const baselineData = [
+            { x: dataPoints[0].x, y: baseline },
+            { x: dataPoints[dataPoints.length-1].x, y: baseline }
+        ];
+        const baselineDataset = {
+            label: 'Start',
+            data: baselineData,
+            borderColor: 'rgba(100,116,139,0.4)',
+            borderDash: [5, 5],
+            borderWidth: 1,
+            pointRadius: 0,
+            fill: false,
+            tension: 0
+        };
+
+        equityChart.data.datasets = [dataset, baselineDataset, ...markers];
+        equityChart.update('none');
     }
 
-    function computeAssetContribution(rawData) {
-        const assetMap = {};
-        rawData.forEach(t => {
-            const asset = t.asset || 'Unknown';
-            assetMap[asset] = (assetMap[asset] || 0) + (t.profit_loss || 0);
-        });
-        const assetLabels = ['Volatility 10 Index','Volatility 25 Index','Volatility 50 Index','Volatility 75 Index','Volatility 100 Index'];
-        return assetLabels.map(name => assetMap[name] || 0);
-    }
-
-    function updateUI(metrics, chartData) {
-        const profitVal = parseFloat(metrics.profit.replace(/[$,]/g, ''));
-        const profitEl = document.getElementById('meta-profit');
-        profitEl.textContent = metrics.profit;
-        profitEl.className = 'val ' + (profitVal >= 0 ? 'positive' : 'negative');
-
-        document.getElementById('meta-pf').textContent = metrics.pf;
-        document.getElementById('meta-strike').textContent = metrics.strike;
-        const ddVal = parseFloat(metrics.drawdown.replace(/[%,]/g, ''));
-        const ddEl = document.getElementById('meta-dd');
-        ddEl.textContent = metrics.drawdown;
-        ddEl.className = 'val ' + (ddVal > 0 ? 'negative' : '');
-
-        if (charts.donut) {
-            charts.donut.data.datasets[0].data = chartData.assets;
-            charts.donut.update('none');
-        }
-        if (charts.line) {
-            const equityPoints = chartData.equityData || [];
-            if (equityPoints.length > 0) {
-                charts.line.data.datasets[0].data = equityPoints;
-                const last = equityPoints[equityPoints.length-1];
-                const first = equityPoints[0];
-                const color = (last && first && last.y >= first.y) ? '#10b981' : '#ef4444';
-                charts.line.data.datasets[0].borderColor = color;
-                charts.line.update('none');
-            }
-        }
+    function updateMetrics(data) {
+        document.getElementById('meta-profit').textContent = `$${data.totalProfit.toFixed(2)}`;
+        document.getElementById('meta-pf').textContent = 'N/A';
+        document.getElementById('meta-strike').textContent = `${data.tradeCount || 0} trades`;
+        document.getElementById('meta-dd').textContent = '—';
     }
 
     window.timeframePreset = async function(btn, mode) {
@@ -712,126 +769,23 @@ document.addEventListener('DOMContentLoaded', function() {
             btn.classList.add('active');
         }
         if (mode === 'clear') {
-            updateUI({ profit: '$0.00', pf: 'N/A', strike: '0.0%', drawdown: '0.00%' }, { assets: [0,0,0,0,0], equityData: [] });
+            renderAssetBarChart([]);
+            renderEquityCurve([], 0);
             return;
         }
 
         try {
-            const resp = await fetch(`/api/ledger/analytics?mode=${mode}`);
+            const resp = await fetch(`/api/ledger/aggregated?mode=${mode}`);
             const data = await resp.json();
+            currentAnalyticsData = data;
+            const startingBalance = data.equityData.length > 0 ? data.equityData[0].equity : 0;
+            currentAnalyticsData.startingBalance = startingBalance;
 
-            const rawData = data.rawData || [];
-            const totalProfit = parseFloat(data.totalProfit) || 0;
-            const strikeRate = data.strikeRate || '0.0';
-            const profitFactor = data.profitFactor || '0.00';
-            const drawdown = data.drawdown || '0.0';
-
-            const assetData = computeAssetContribution(rawData);
-
-            let equityPoints = [];
-            let startTime, endTime;
-            const now = Date.now();
-
-            switch (mode) {
-                case 'hour':
-                    startTime = now - 60 * 60 * 1000;
-                    endTime = now;
-                    break;
-                case '24h':
-                    startTime = now - 24 * 60 * 60 * 1000;
-                    endTime = now;
-                    break;
-                case 'month':
-                    startTime = now - 30 * 24 * 60 * 60 * 1000;
-                    endTime = now;
-                    break;
-                case '6months':
-                    startTime = now - 180 * 24 * 60 * 60 * 1000;
-                    endTime = now;
-                    break;
-                case '1year':
-                    startTime = now - 365 * 24 * 60 * 60 * 1000;
-                    endTime = now;
-                    break;
-                case 'session':
-                default:
-                    startTime = 0;
-                    endTime = now;
-                    break;
-            }
-
-            if (mode === 'session') {
-                const sorted = rawData.slice().sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
-                let cum = 0;
-                equityPoints = sorted.map(t => {
-                    cum += (t.profit_loss || 0);
-                    return {
-                        x: new Date(t.created_at).getTime(),
-                        y: cum
-                    };
-                });
-                if (equityPoints.length === 0) {
-                    equityPoints = [{x: now - 1000, y: 0}, {x: now, y: 0}];
-                }
-            } else {
-                const bucketed = processEquityBuckets(rawData, mode, startTime, endTime);
-                equityPoints = bucketed.data;
-                if (equityPoints.length < 2) {
-                    const val = equityPoints.length === 1 ? equityPoints[0].y : 0;
-                    equityPoints = [{x: startTime, y: val}, {x: endTime, y: val}];
-                }
-            }
-
-            updateUI({
-                profit: `$${totalProfit.toFixed(2)}`,
-                pf: profitFactor,
-                strike: strikeRate + '%',
-                drawdown: drawdown + '%'
-            }, {
-                assets: assetData,
-                equityData: equityPoints
-            });
-
-            currentEquityData = equityPoints;
-
+            renderAssetBarChart(data.assetContributions);
+            renderEquityCurve(data.equityData, startingBalance);
+            updateMetrics(data);
         } catch(err) {
             console.error('Analytics error:', err);
-        }
-    };
-
-    window.applyDateFilter = async function() {
-        const start = document.getElementById('date-start').value;
-        const end = document.getElementById('date-end').value;
-        try {
-            const resp = await fetch(`/api/ledger/analytics?start=${start}&end=${end}`);
-            const data = await resp.json();
-            const rawData = data.rawData || [];
-            const totalProfit = parseFloat(data.totalProfit) || 0;
-            const strikeRate = data.strikeRate || '0.0';
-            const profitFactor = data.profitFactor || '0.00';
-            const drawdown = data.drawdown || '0.0';
-
-            const assetData = computeAssetContribution(rawData);
-            const startTime = new Date(start).getTime();
-            const endTime = new Date(end).getTime();
-            const bucketed = processEquityBuckets(rawData, 'month', startTime, endTime);
-            const equityPoints = bucketed.data;
-            if (equityPoints.length < 2) {
-                const val = equityPoints.length === 1 ? equityPoints[0].y : 0;
-                equityPoints = [{x: startTime, y: val}, {x: endTime, y: val}];
-            }
-
-            updateUI({
-                profit: `$${totalProfit.toFixed(2)}`,
-                pf: profitFactor,
-                strike: strikeRate + '%',
-                drawdown: drawdown + '%'
-            }, {
-                assets: assetData,
-                equityData: equityPoints
-            });
-        } catch(err) {
-            console.error('Filter error:', err);
         }
     };
 
