@@ -47,15 +47,19 @@ router.get('/ledger/aggregated', async (req, res) => {
                 startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
                 break;
             case 'session':
-                // Session: use state.sessionPnl without DB query
+                // Session: return state data without DB query
                 return res.json({
                     assetContributions: [],
                     equityData: [{ timestamp: Date.now(), equity: state.sessionPnl || 0 }],
                     totalProfit: state.sessionPnl || 0,
-                    tradeCount: 0
+                    tradeCount: 0,
+                    winCount: 0,
+                    lossCount: 0,
+                    grossProfit: 0,
+                    grossLoss: 0,
+                    maxDrawdown: 0
                 });
             default:
-                // Default to 24h
                 startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
         }
 
@@ -67,12 +71,28 @@ router.get('/ledger/aggregated', async (req, res) => {
 
         if (error) throw error;
 
-        // ---- Asset contribution (horizontal bar chart) ----
+        // ---- Asset contribution ----
         const assetMap = {};
+        let totalProfit = 0;
+        let winCount = 0;
+        let lossCount = 0;
+        let grossProfit = 0;
+        let grossLoss = 0;
+
         data.forEach(t => {
+            const pnl = t.profit_loss || 0;
             const asset = t.asset || 'Unknown';
-            assetMap[asset] = (assetMap[asset] || 0) + (t.profit_loss || 0);
+            assetMap[asset] = (assetMap[asset] || 0) + pnl;
+            totalProfit += pnl;
+            if (pnl > 0) {
+                winCount++;
+                grossProfit += pnl;
+            } else if (pnl < 0) {
+                lossCount++;
+                grossLoss += Math.abs(pnl);
+            }
         });
+
         const assetContributions = Object.entries(assetMap)
             .map(([name, pnl]) => ({ name, pnl }))
             .sort((a, b) => b.pnl - a.pnl);
@@ -88,6 +108,8 @@ router.get('/ledger/aggregated', async (req, res) => {
         const endTime = now.getTime();
         let cum = 0;
         let idx = 0;
+        let peak = 0;
+        let maxDrawdown = 0;
 
         while (currentBucketStart < endTime) {
             const bucketEnd = Math.min(currentBucketStart + bucketSize, endTime);
@@ -96,9 +118,14 @@ router.get('/ledger/aggregated', async (req, res) => {
                 equityAtEnd += data[idx].profit_loss || 0;
                 idx++;
             }
+            const equity = equityAtEnd;
+            if (equity > peak) peak = equity;
+            const drawdown = peak - equity;
+            if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+
             buckets.push({
                 timestamp: currentBucketStart + bucketSize / 2,
-                equity: equityAtEnd
+                equity: equity
             });
             cum = equityAtEnd;
             currentBucketStart = bucketEnd;
@@ -111,11 +138,19 @@ router.get('/ledger/aggregated', async (req, res) => {
             buckets.push({ timestamp: endTime, equity: firstEquity });
         }
 
+        // Compute max drawdown percentage relative to peak
+        const maxDrawdownPercent = peak > 0 ? (maxDrawdown / peak) * 100 : 0;
+
         res.json({
             assetContributions,
             equityData: buckets,
-            totalProfit: data.reduce((s, t) => s + (t.profit_loss || 0), 0),
-            tradeCount: data.length
+            totalProfit,
+            tradeCount: data.length,
+            winCount,
+            lossCount,
+            grossProfit,
+            grossLoss,
+            maxDrawdown: maxDrawdownPercent
         });
 
     } catch (err) {
