@@ -31,7 +31,7 @@ document.addEventListener('DOMContentLoaded', function() {
     toggleFixed.textContent = sidebar.classList.contains('collapsed') ? '▶' : '◀';
 
     // =========================================================================
-    // TAB SWITCHING (with hidden focusBar on Analytics)
+    // TAB SWITCHING (with analytics-active class & focusBar hide)
     // =========================================================================
     window.switchTab = function(tabId) {
         document.querySelectorAll('.tab-pages').forEach(p => p.classList.remove('active'));
@@ -52,6 +52,14 @@ document.addEventListener('DOMContentLoaded', function() {
             focusBar.style.display = 'none';
         } else {
             focusBar.style.display = 'flex';
+        }
+
+        // Toggle body class for mobile controls hide (analytics-active)
+        const body = document.body;
+        if (tabId === 'analytics') {
+            body.classList.add('analytics-active');
+        } else {
+            body.classList.remove('analytics-active');
         }
 
         if (tabId === 'analytics') {
@@ -690,7 +698,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         grid: { display: false },
                         ticks: {
                             font: { size: 7 },
-                            maxTicksLimit: 20,
+                            maxTicksLimit: window.innerWidth < 768 ? 5 : 20,
+                            maxRotation: 0,
                             autoSkip: true,
                             color: '#9ca3af'
                         }
