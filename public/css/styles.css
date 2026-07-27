@@ -828,6 +828,7 @@ body.light {
 .chart-box .ch-wrap {
   flex: 1;
   position: relative;
+  overflow: hidden;
   min-height: 100px;
 }
 #chart-donut,
@@ -969,7 +970,7 @@ body.light {
   .sidebar-duration { flex: 1; min-width: 120px; }
   .sidebar-trade-btns { flex: 1; min-width: 120px; }
 
-  /* Touch targets */
+  /* ---- Mobile Touch Targets (44px rule) ---- */
   .btn,
   .btn-preset,
   .tab-item,
@@ -989,7 +990,7 @@ body.light {
   .header-tabs .tab-btn { padding: 8px 14px !important; }
   .tab-item { min-height: 48px !important; }
 
-  /* Data table horizontal scroll */
+  /* ---- Data table horizontal scroll ---- */
   .table-container {
     overflow-x: auto !important;
     -webkit-overflow-scrolling: touch !important;
@@ -1009,33 +1010,69 @@ body.light {
     border-right: 1px solid var(--border-subtle);
   }
 
-  /* Analytics mobile */
+  /* ---- Analytics mobile fixes ---- */
+  .metrics-grid-4 {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 4px !important;
+  }
+  .metrics-grid-4 .metric-card {
+    padding: 6px 8px !important;
+  }
+  .metrics-grid-4 .metric-card .lbl {
+    font-size: 9px !important;
+  }
+  .metrics-grid-4 .metric-card .val {
+    font-size: 14px !important;
+  }
+
   .metrics-secondary {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 4px !important;
   }
-  .filter-right .btn-preset {
-    font-size: 9px;
-    padding: 4px 6px;
-    min-height: 34px;
+  .metrics-secondary .metric-item {
+    padding: 4px 6px !important;
   }
+  .metrics-secondary .metric-item .lbl {
+    font-size: 8px !important;
+  }
+  .metrics-secondary .metric-item .val {
+    font-size: 11px !important;
+  }
+
   .analytics-filter-bar {
-    flex-direction: column;
-    align-items: stretch;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    justify-content: center !important;
+    gap: 4px !important;
+    padding: 6px !important;
   }
   .filter-left,
   .filter-right {
-    width: 100%;
-    justify-content: center;
+    width: auto !important;
+    justify-content: center !important;
   }
-  .date-picker-group input {
-    width: 80px;
-    font-size: 9px;
-  }
-  .charts-grid-2 {
-    grid-template-columns: 1fr;
+  .filter-right .btn-preset {
+    font-size: 9px !important;
+    padding: 4px 6px !important;
+    min-height: 34px !important;
   }
 
-  /* Font sizes for mobile readability */
+  .chart-box .ch-wrap {
+    overflow: hidden !important;
+    position: relative !important;
+    max-height: 140px !important;
+  }
+  #chart-donut,
+  #chart-line {
+    max-height: 140px !important;
+  }
+
+  /* Hide sidebar controls on Analytics tab (mobile) */
+  .analytics-active .sidebar-controls {
+    display: none !important;
+  }
+
+  /* ---- Font sizes for mobile readability ---- */
   .app-brand { font-size: 14px; }
   .header-status { font-size: 12px; }
   .header-clock { font-size: 12px; }
@@ -1055,8 +1092,6 @@ body.light {
   .badge-step-level, .badge-step-trend, .badge-step-spike, .badge-step-entry, .badge-step-scan { font-size: 11px; }
   .metric-card .lbl { font-size: 11px; }
   .metric-card .val { font-size: 15px; }
-  .metrics-secondary .metric-item .lbl { font-size: 9px; }
-  .metrics-secondary .metric-item .val { font-size: 12px; }
   .setting-item label { font-size: 11px; }
   .setting-item input, .setting-item select { font-size: 13px; }
   .settings-actions .btn-save { font-size: 12px; }
