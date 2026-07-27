@@ -31,7 +31,7 @@ document.addEventListener('DOMContentLoaded', function() {
     toggleFixed.textContent = sidebar.classList.contains('collapsed') ? '▶' : '◀';
 
     // =========================================================================
-    // TAB SWITCHING (with analytics-active class & focusBar hide)
+    // TAB SWITCHING
     // =========================================================================
     window.switchTab = function(tabId) {
         document.querySelectorAll('.tab-pages').forEach(p => p.classList.remove('active'));
@@ -128,6 +128,24 @@ document.addEventListener('DOMContentLoaded', function() {
         currentFocus = sym;
         if (globalState) renderUI(globalState);
     };
+
+    // ---- Mobile asset name shortener ----
+    function getAssetLabel(name, isMobile) {
+        if (!isMobile) return name;
+        const shortMap = {
+            'Volatility 10 Index': 'V10',
+            'Volatility 25 Index': 'V25',
+            'Volatility 50 Index': 'V50',
+            'Volatility 75 Index': 'V75',
+            'Volatility 100 Index': 'V100',
+            'Volatility 10 (1s) Index': 'V10 (1s)',
+            'Volatility 25 (1s) Index': 'V25 (1s)',
+            'Volatility 50 (1s) Index': 'V50 (1s)',
+            'Volatility 75 (1s) Index': 'V75 (1s)',
+            'Volatility 100 (1s) Index': 'V100 (1s)'
+        };
+        return shortMap[name] || name;
+    }
 
     // =========================================================================
     // CONTROL FUNCTIONS
@@ -566,7 +584,7 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     // =========================================================================
-    // ANALYTICS – HORIZONTAL BAR CHART & ENHANCED EQUITY CURVE
+    // ANALYTICS – CHARTS
     // =========================================================================
     let assetBarChart = null;
     let equityChartInstance = null;
@@ -599,6 +617,7 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     function renderCharts() {
+        const isMobile = window.innerWidth < 768;
         const ctxBar = document.getElementById('chart-donut').getContext('2d');
         const ctxLine = document.getElementById('chart-line').getContext('2d');
 
@@ -633,8 +652,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 },
                 scales: {
                     x: {
-                        grid: { color: 'rgba(0,0,0,0.05)' },
+                        grid: { display: isMobile ? false : true },
                         ticks: {
+                            display: isMobile ? false : true,
                             callback: function(value) {
                                 return (value >= 0 ? '+' : '') + '$' + value.toFixed(2);
                             }
@@ -643,11 +663,15 @@ document.addEventListener('DOMContentLoaded', function() {
                     y: {
                         grid: { display: false },
                         ticks: {
-                            font: { size: 9 },
+                            font: { size: isMobile ? 8 : 9 },
                             color: '#d1d5db'
                         },
                         afterFit: function(scale) {
-                            scale.width = 120;
+                            if (window.innerWidth < 768) {
+                                scale.width = 70;
+                            } else {
+                                scale.width = 120;
+                            }
                         }
                     }
                 }
@@ -721,15 +745,52 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function renderAssetBarChart(contributions) {
         if (!assetBarChart) return;
-        const labels = contributions.map(a => a.name);
+
+        const isMobile = window.innerWidth < 768;
+        
+        // Build labels (shortened on mobile)
+        const labels = contributions.map(a => getAssetLabel(a.name, isMobile));
         const values = contributions.map(a => a.pnl);
         const colors = values.map(v => v >= 0 ? '#10b981' : '#ef4444');
         const borderColors = colors.map(c => c);
 
+        // Calculate dynamic scale limits (15% buffer)
+        const maxAbs = values.reduce((max, v) => Math.max(max, Math.abs(v)), 0);
+        const buffer = maxAbs * 0.15;
+        const suggestedMax = maxAbs + buffer;
+        const suggestedMin = -suggestedMax;
+
+        // Update chart data
         assetBarChart.data.labels = labels;
         assetBarChart.data.datasets[0].data = values;
         assetBarChart.data.datasets[0].backgroundColor = colors;
         assetBarChart.data.datasets[0].borderColor = borderColors;
+
+        // Update X‑axis options dynamically
+        assetBarChart.options.scales.x = {
+            grid: {
+                display: isMobile ? false : true,
+                color: 'rgba(0,0,0,0.05)'
+            },
+            ticks: {
+                display: isMobile ? false : true,
+                callback: function(value) {
+                    return (value >= 0 ? '+' : '') + '$' + value.toFixed(2);
+                }
+            },
+            suggestedMin: suggestedMin,
+            suggestedMax: suggestedMax
+        };
+
+        // Update Y‑axis width for mobile if needed
+        assetBarChart.options.scales.y.afterFit = function(scale) {
+            if (window.innerWidth < 768) {
+                scale.width = 70;
+            } else {
+                scale.width = 120;
+            }
+        };
+
         assetBarChart.update('none');
     }
 
