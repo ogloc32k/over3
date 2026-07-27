@@ -200,12 +200,10 @@ document.addEventListener('DOMContentLoaded', function() {
     sse.onmessage = function(e) {
         try {
             const data = JSON.parse(e.data);
-            // Check if it's an analytics delta event
             if (data.event === 'analytics_delta') {
                 handleAnalyticsDelta(data.data);
                 return;
             }
-            // Otherwise regular state/logs update
             if (data.state) {
                 globalState = data.state;
                 if (data.state.marketMetrics) {
@@ -239,7 +237,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function handleAnalyticsDelta(delta) {
         if (!currentAnalyticsData) return;
-        // Update asset contributions
         const asset = delta.asset || 'Unknown';
         const pnl = delta.pnl || 0;
         const assetMap = {};
@@ -249,7 +246,6 @@ document.addEventListener('DOMContentLoaded', function() {
             .map(([name, pnl]) => ({ name, pnl }))
             .sort((a, b) => b.pnl - a.pnl);
 
-        // Update equity curve: add new point
         if (currentAnalyticsData.equityData) {
             const lastEquity = currentAnalyticsData.equityData.length > 0 ?
                 currentAnalyticsData.equityData[currentAnalyticsData.equityData.length-1].equity : 0;
@@ -258,22 +254,27 @@ document.addEventListener('DOMContentLoaded', function() {
                 timestamp: delta.timestamp || Date.now(),
                 equity: newEquity
             });
-            // Keep only last 200 points to avoid memory bloat
             if (currentAnalyticsData.equityData.length > 200) {
                 currentAnalyticsData.equityData = currentAnalyticsData.equityData.slice(-200);
             }
         }
         currentAnalyticsData.totalProfit += pnl;
         currentAnalyticsData.tradeCount += 1;
+        if (pnl > 0) {
+            currentAnalyticsData.winCount += 1;
+            currentAnalyticsData.grossProfit += pnl;
+        } else if (pnl < 0) {
+            currentAnalyticsData.lossCount += 1;
+            currentAnalyticsData.grossLoss += Math.abs(pnl);
+        }
 
-        // Re-render charts with new data
         renderAssetBarChart(currentAnalyticsData.assetContributions);
         renderEquityCurve(currentAnalyticsData.equityData, currentAnalyticsData.startingBalance || 0);
         updateMetrics(currentAnalyticsData);
     }
 
     // =========================================================================
-    // RENDER UI (unchanged from previous version)
+    // RENDER UI (unchanged)
     // =========================================================================
     function renderUI(state) {
         try {
@@ -291,7 +292,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
             serverMode = tradingMode;
 
-            // Header status
             const header = document.getElementById('header-status');
             const now = Date.now();
             if (locked) {
@@ -308,7 +308,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 header.className = 'header-status';
             }
 
-            // Sidebar metrics
             document.getElementById('m-profile').textContent = tradingMode.toUpperCase();
             document.getElementById('m-balance').textContent = balance !== null ? `$${Number(balance).toFixed(2)}` : '---';
             const sessVal = Number(sessionPnl);
@@ -321,7 +320,6 @@ document.addEventListener('DOMContentLoaded', function() {
             dailyEl.className = 'val ' + (dailyVal >= 0 ? 'green' : 'red');
             document.getElementById('m-stake').textContent = `$${Number(currentStake).toFixed(2)}`;
 
-            // Focus bar
             const focusMetric = marketMetrics[currentFocus] || null;
             document.getElementById('f-name').textContent = MARKETS_CFG[currentFocus] || 'Volatility 75 Index';
             const priceDisplay = focusMetric
@@ -347,7 +345,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('f-vol').textContent = 'Vol: —';
             }
 
-            // Data table
             const tbody = document.getElementById('tableBody');
             tbody.innerHTML = '';
             let bestScore = -Infinity, bestSym = null;
@@ -371,7 +368,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     step = metric.step || 0;
                     score = metric.score || 0;
 
-                    // Breakout evaluation
                     const price = metric.price;
                     const sup = metric.support;
                     const res = metric.resistance;
@@ -391,7 +387,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         breakoutClass = 'badge-range';
                     }
 
-                    // Step label & class
                     if (step === 3) {
                         stepLabel = 'ENTRY';
                         stepClass = 'step-3';
@@ -553,11 +548,39 @@ document.addEventListener('DOMContentLoaded', function() {
     let assetBarChart = null;
     let equityChart = null;
 
+    // ---- Custom plugin to display value labels on bars ----
+    const barValueLabelPlugin = {
+        id: 'barValueLabel',
+        afterDraw: function(chart) {
+            const ctx = chart.ctx;
+            chart.data.datasets.forEach(function(dataset, i) {
+                const meta = chart.getDatasetMeta(i);
+                if (!meta || !meta.data) return;
+                meta.data.forEach(function(element, index) {
+                    const value = dataset.data[index];
+                    if (value === undefined || value === null) return;
+                    const x = element.x;
+                    const y = element.y;
+                    const text = (value >= 0 ? '+' : '') + '$' + value.toFixed(2);
+                    ctx.save();
+                    ctx.font = '8px Inter, sans-serif';
+                    ctx.textAlign = value >= 0 ? 'left' : 'right';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillStyle = value >= 0 ? '#10b981' : '#ef4444';
+                    // Offset label to the right/left of the bar
+                    const offset = value >= 0 ? 6 : -6;
+                    ctx.fillText(text, x + offset, y);
+                    ctx.restore();
+                });
+            });
+        }
+    };
+
     function renderCharts() {
         const ctxBar = document.getElementById('chart-donut').getContext('2d');
         const ctxLine = document.getElementById('chart-line').getContext('2d');
 
-        // ---- Horizontal Bar Chart (Asset Contributions) ----
+        // ---- Horizontal Bar Chart ----
         if (assetBarChart) assetBarChart.destroy();
         assetBarChart = new Chart(ctxBar, {
             type: 'bar',
@@ -597,10 +620,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     },
                     y: {
                         grid: { display: false },
-                        ticks: { font: { size: 9 } }
+                        ticks: { font: { size: 9 } },
+                        afterFit: function(scale) {
+                            scale.width = 120; // Fixed width for asset names
+                        }
                     }
                 }
-            }
+            },
+            plugins: [barValueLabelPlugin] // Add the plugin
         });
 
         // ---- Equity Curve ----
@@ -673,7 +700,29 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function renderEquityCurve(equityData, startingBalance) {
-        if (!equityChart || !equityData || equityData.length < 2) return;
+        if (!equityChart) return;
+
+        // If no data or less than 2 points, show empty state
+        if (!equityData || equityData.length < 2) {
+            // Clear the chart and show a message
+            equityChart.data.datasets = [];
+            equityChart.update('none');
+            const parent = document.getElementById('chart-line').parentElement;
+            // Remove any existing empty state div
+            const existing = parent.querySelector('.empty-state');
+            if (existing) existing.remove();
+            const empty = document.createElement('div');
+            empty.className = 'empty-state';
+            empty.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#787b86;font-size:12px;';
+            empty.textContent = 'No trade history found for selected date range';
+            parent.appendChild(empty);
+            return;
+        }
+
+        // Remove empty state if present
+        const parent = document.getElementById('chart-line').parentElement;
+        const existing = parent.querySelector('.empty-state');
+        if (existing) existing.remove();
 
         const dataPoints = equityData.map(p => ({ x: p.timestamp, y: p.equity }));
         const baseline = startingBalance || 0;
@@ -683,6 +732,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const lineColor = isAbove ? '#10b981' : '#ef4444';
         const fillColor = isAbove ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
 
+        // Find peak and max drawdown
         let peak = baseline;
         let maxDrawdown = 0;
         let peakPoint = null;
@@ -757,10 +807,35 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function updateMetrics(data) {
-        document.getElementById('meta-profit').textContent = `$${data.totalProfit.toFixed(2)}`;
-        document.getElementById('meta-pf').textContent = 'N/A';
-        document.getElementById('meta-strike').textContent = `${data.tradeCount || 0} trades`;
-        document.getElementById('meta-dd').textContent = '—';
+        // ---- Net Profit ----
+        const profitEl = document.getElementById('meta-profit');
+        profitEl.textContent = `$${data.totalProfit.toFixed(2)}`;
+        profitEl.className = 'val ' + (data.totalProfit >= 0 ? 'positive' : 'negative');
+
+        // ---- Strike Rate (Win Rate) ----
+        const total = data.tradeCount || 0;
+        const wins = data.winCount || 0;
+        const strike = total > 0 ? (wins / total) * 100 : 0;
+        const strikeEl = document.getElementById('meta-strike');
+        strikeEl.innerHTML = `${strike.toFixed(1)}% <small style="display:block;font-size:8px;color:#787b86;font-weight:400;">${total} trades total</small>`;
+        strikeEl.className = 'val';
+
+        // ---- Profit Factor ----
+        const grossProfit = data.grossProfit || 0;
+        const grossLoss = data.grossLoss || 0;
+        let pf;
+        if (grossLoss === 0) {
+            pf = grossProfit > 0 ? '10.0+' : '0.00';
+        } else {
+            pf = (grossProfit / grossLoss).toFixed(2);
+        }
+        document.getElementById('meta-pf').textContent = pf;
+
+        // ---- Max Drawdown ----
+        const maxDD = data.maxDrawdown || 0;
+        const ddEl = document.getElementById('meta-dd');
+        ddEl.textContent = `-${maxDD.toFixed(2)}%`;
+        ddEl.className = 'val negative';
     }
 
     window.timeframePreset = async function(btn, mode) {
@@ -771,6 +846,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (mode === 'clear') {
             renderAssetBarChart([]);
             renderEquityCurve([], 0);
+            // Reset KPI cards
+            document.getElementById('meta-profit').textContent = '$0.00';
+            document.getElementById('meta-strike').innerHTML = '0.0% <small style="display:block;font-size:8px;color:#787b86;">0 trades total</small>';
+            document.getElementById('meta-pf').textContent = '0.00';
+            document.getElementById('meta-dd').textContent = '0.0%';
             return;
         }
 
