@@ -269,7 +269,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         renderAssetBarChart(currentAnalyticsData.assetContributions);
-        renderEquityCurve(currentAnalyticsData.equityData, currentAnalyticsData.startingBalance || 0);
+        renderEquityCurve(currentAnalyticsData.equityData, currentAnalyticsData.startingBalance || 0, currentAnalyticsData.timeframe || '24h');
         updateMetrics(currentAnalyticsData);
     }
 
@@ -543,10 +543,11 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     // =========================================================================
-    // ANALYTICS – HORIZONTAL BAR CHART & ENHANCED EQUITY CURVE
+    // ANALYTICS – HORIZONTAL BAR CHART & ENHANCED EQUITY CURVE (string labels)
     // =========================================================================
     let assetBarChart = null;
-    let equityChart = null;
+    // We'll use a global reference to the equity chart instance to destroy it safely
+    let equityChartInstance = null;
 
     // ---- Custom plugin to display value labels on bars ----
     const barValueLabelPlugin = {
@@ -567,7 +568,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     ctx.textAlign = value >= 0 ? 'left' : 'right';
                     ctx.textBaseline = 'middle';
                     ctx.fillStyle = value >= 0 ? '#10b981' : '#ef4444';
-                    // Offset label to the right/left of the bar
                     const offset = value >= 0 ? 6 : -6;
                     ctx.fillText(text, x + offset, y);
                     ctx.restore();
@@ -622,19 +622,23 @@ document.addEventListener('DOMContentLoaded', function() {
                         grid: { display: false },
                         ticks: { font: { size: 9 } },
                         afterFit: function(scale) {
-                            scale.width = 120; // Fixed width for asset names
+                            scale.width = 120;
                         }
                     }
                 }
             },
-            plugins: [barValueLabelPlugin] // Add the plugin
+            plugins: [barValueLabelPlugin]
         });
 
-        // ---- Equity Curve ----
-        if (equityChart) equityChart.destroy();
-        equityChart = new Chart(ctxLine, {
+        // ---- Equity Curve (category scale, no date adapter) ----
+        if (equityChartInstance) {
+            equityChartInstance.destroy();
+            equityChartInstance = null;
+        }
+        equityChartInstance = new Chart(ctxLine, {
             type: 'line',
             data: {
+                labels: [],
                 datasets: [{
                     label: 'Equity',
                     data: [],
@@ -643,7 +647,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     fill: true,
                     tension: 0.3,
                     pointRadius: 2,
-                    borderWidth: 2
+                    borderWidth: 2,
+                    pointBackgroundColor: '#10b981'
                 }]
             },
             options: {
@@ -662,19 +667,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 },
                 scales: {
                     x: {
-                        type: 'time',
-                        time: {
-                            unit: 'minute',
-                            displayFormats: {
-                                minute: 'HH:mm',
-                                hour: 'HH:mm',
-                                day: 'MMM DD',
-                                week: 'MMM DD',
-                                month: 'MMM YYYY'
-                            }
-                        },
-                        grid: { color: 'rgba(0,0,0,0.05)' },
-                        ticks: { font: { size: 7 }, maxTicksLimit: 15 }
+                        type: 'category',
+                        grid: { display: false },
+                        ticks: {
+                            font: { size: 7 },
+                            maxTicksLimit: 20,
+                            autoSkip: true
+                        }
                     },
                     y: {
                         grid: { color: 'rgba(0,0,0,0.05)' },
@@ -699,23 +698,23 @@ document.addEventListener('DOMContentLoaded', function() {
         assetBarChart.update('none');
     }
 
-    function renderEquityCurve(equityData, startingBalance) {
-        if (!equityChart) return;
+    function renderEquityCurve(equityData, startingBalance, timeframe) {
+        if (!equityChartInstance) return;
 
         // If no data or less than 2 points, show empty state
         if (!equityData || equityData.length < 2) {
-            // Clear the chart and show a message
-            equityChart.data.datasets = [];
-            equityChart.update('none');
+            equityChartInstance.data.labels = [];
+            equityChartInstance.data.datasets[0].data = [];
+            equityChartInstance.update('none');
             const parent = document.getElementById('chart-line').parentElement;
-            // Remove any existing empty state div
             const existing = parent.querySelector('.empty-state');
-            if (existing) existing.remove();
-            const empty = document.createElement('div');
-            empty.className = 'empty-state';
-            empty.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#787b86;font-size:12px;';
-            empty.textContent = 'No trade history found for selected date range';
-            parent.appendChild(empty);
+            if (!existing) {
+                const empty = document.createElement('div');
+                empty.className = 'empty-state';
+                empty.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#787b86;font-size:12px;';
+                empty.textContent = 'No trade history found for selected date range';
+                parent.appendChild(empty);
+            }
             return;
         }
 
@@ -724,74 +723,57 @@ document.addEventListener('DOMContentLoaded', function() {
         const existing = parent.querySelector('.empty-state');
         if (existing) existing.remove();
 
-        const dataPoints = equityData.map(p => ({ x: p.timestamp, y: p.equity }));
-        const baseline = startingBalance || 0;
+        // Determine label format based on timeframe
+        let labelFormat = { hour: '2-digit', minute: '2-digit', hour12: false };
+        // For longer timeframes, we might want to show dates
+        if (timeframe === 'week' || timeframe === 'month' || timeframe === 'year') {
+            labelFormat = { month: 'short', day: 'numeric' };
+        }
 
-        const lastY = dataPoints[dataPoints.length-1]?.y || baseline;
-        const isAbove = lastY >= baseline;
+        // Format timestamps to string labels
+        const labels = equityData.map(point => {
+            const date = new Date(point.timestamp);
+            return date.toLocaleString([], labelFormat);
+        });
+        const values = equityData.map(point => point.equity);
+
+        // Determine line color based on final equity vs baseline
+        const baseline = startingBalance || 0;
+        const lastValue = values.length > 0 ? values[values.length-1] : baseline;
+        const isAbove = lastValue >= baseline;
         const lineColor = isAbove ? '#10b981' : '#ef4444';
         const fillColor = isAbove ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
 
-        // Find peak and max drawdown
+        // Find peak and max drawdown points (optional markers)
+        // We'll use annotations if needed, but for simplicity we can compute
         let peak = baseline;
         let maxDrawdown = 0;
-        let peakPoint = null;
-        let drawdownPoint = null;
-        dataPoints.forEach(p => {
-            if (p.y > peak) {
-                peak = p.y;
-                peakPoint = p;
+        let peakIndex = 0;
+        let drawdownIndex = 0;
+        values.forEach((val, idx) => {
+            if (val > peak) {
+                peak = val;
+                peakIndex = idx;
             }
-            const drawdown = peak - p.y;
+            const drawdown = peak - val;
             if (drawdown > maxDrawdown) {
                 maxDrawdown = drawdown;
-                drawdownPoint = p;
+                drawdownIndex = idx;
             }
         });
 
-        const dataset = {
-            label: 'Equity',
-            data: dataPoints,
-            borderColor: lineColor,
-            backgroundColor: fillColor,
-            fill: true,
-            tension: 0.3,
-            pointRadius: 2,
-            borderWidth: 2,
-            pointBackgroundColor: lineColor
-        };
+        // Update chart data
+        equityChartInstance.data.labels = labels;
+        equityChartInstance.data.datasets[0].data = values;
+        equityChartInstance.data.datasets[0].borderColor = lineColor;
+        equityChartInstance.data.datasets[0].backgroundColor = fillColor;
+        equityChartInstance.data.datasets[0].pointBackgroundColor = lineColor;
 
-        const markers = [];
-        if (peakPoint) {
-            markers.push({
-                label: 'Peak',
-                data: [{ x: peakPoint.x, y: peakPoint.y }],
-                pointRadius: 6,
-                pointBackgroundColor: '#10b981',
-                pointBorderColor: '#fff',
-                pointBorderWidth: 2,
-                showLine: false,
-                pointStyle: 'circle'
-            });
-        }
-        if (drawdownPoint) {
-            markers.push({
-                label: 'Max Drawdown',
-                data: [{ x: drawdownPoint.x, y: drawdownPoint.y }],
-                pointRadius: 6,
-                pointBackgroundColor: '#ef4444',
-                pointBorderColor: '#fff',
-                pointBorderWidth: 2,
-                showLine: false,
-                pointStyle: 'circle'
-            });
-        }
-
-        const baselineData = [
-            { x: dataPoints[0].x, y: baseline },
-            { x: dataPoints[dataPoints.length-1].x, y: baseline }
-        ];
-        const baselineDataset = {
+        // Add baseline as a separate dataset (dashed line)
+        // We'll add a dataset with two points: first and last with baseline value
+        const baselineData = [baseline, baseline];
+        const baselineLabels = [labels[0], labels[labels.length-1]];
+        equityChartInstance.data.datasets[1] = {
             label: 'Start',
             data: baselineData,
             borderColor: 'rgba(100,116,139,0.4)',
@@ -802,8 +784,31 @@ document.addEventListener('DOMContentLoaded', function() {
             tension: 0
         };
 
-        equityChart.data.datasets = [dataset, baselineDataset, ...markers];
-        equityChart.update('none');
+        // Peak marker
+        equityChartInstance.data.datasets[2] = {
+            label: 'Peak',
+            data: [{ x: peakIndex, y: peak }],
+            pointRadius: 6,
+            pointBackgroundColor: '#10b981',
+            pointBorderColor: '#fff',
+            pointBorderWidth: 2,
+            showLine: false,
+            pointStyle: 'circle'
+        };
+
+        // Max drawdown marker
+        equityChartInstance.data.datasets[3] = {
+            label: 'Max Drawdown',
+            data: [{ x: drawdownIndex, y: values[drawdownIndex] }],
+            pointRadius: 6,
+            pointBackgroundColor: '#ef4444',
+            pointBorderColor: '#fff',
+            pointBorderWidth: 2,
+            showLine: false,
+            pointStyle: 'circle'
+        };
+
+        equityChartInstance.update('none');
     }
 
     function updateMetrics(data) {
@@ -858,11 +863,12 @@ document.addEventListener('DOMContentLoaded', function() {
             const resp = await fetch(`/api/ledger/aggregated?mode=${mode}`);
             const data = await resp.json();
             currentAnalyticsData = data;
+            currentAnalyticsData.timeframe = mode;
             const startingBalance = data.equityData.length > 0 ? data.equityData[0].equity : 0;
             currentAnalyticsData.startingBalance = startingBalance;
 
             renderAssetBarChart(data.assetContributions);
-            renderEquityCurve(data.equityData, startingBalance);
+            renderEquityCurve(data.equityData, startingBalance, mode);
             updateMetrics(data);
         } catch(err) {
             console.error('Analytics error:', err);
