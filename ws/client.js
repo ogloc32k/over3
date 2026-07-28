@@ -1,9 +1,13 @@
 const WebSocket = require('ws');
-// Import 'state' as a mutable object reference (avoid importing primitive values as consts)
 const { state, CONFIG, getFullState } = require('../state/manager');
-const { broadcastSSE } = require('../api/sse');   // <-- FIXED: correct path
+const { broadcastSSE } = require('../api/sse');
+const { MARKETS } = require('../markets/definitions');
+const MultiMarketPipeline = require('../pipeline/engine');
 
-// Inner module scope state & timer handles
+// ---- Engine instance (computes indicators) ----
+const engine = new MultiMarketPipeline(Object.keys(MARKETS));
+
+// ---- Module state ----
 let derivWs = null;
 let keepAliveLoop = null;
 let sseBroadcastLoop = null;
@@ -11,61 +15,40 @@ let watchdogTimer = null;
 let settlementTimer = null;
 let pendingTrade = null;
 let reqIdCounter = 1;
-
 const subscribedSymbols = new Set();
 
-/**
- * Generates a unique request ID for WebSocket calls
- */
+// ---- Helpers ----
 function getNextReqId() {
-    return reqIdCounter++;
+    return ++reqIdCounter;
 }
 
-/**
- * Cleanly disconnects WebSocket and wipes all active intervals/timeouts
- * to prevent memory leaks and duplicate broadcasts.
- */
+function sendWS(payload) {
+    if (derivWs && derivWs.readyState === WebSocket.OPEN) {
+        derivWs.send(JSON.stringify(payload));
+    } else {
+        console.warn('[WS] Cannot send: socket not open.');
+    }
+}
+
+// ---- Disconnect & cleanup ----
 function disconnectDeriv() {
     state.isConnected = false;
-
-    if (keepAliveLoop) {
-        clearInterval(keepAliveLoop);
-        keepAliveLoop = null;
-    }
-    if (sseBroadcastLoop) {
-        clearInterval(sseBroadcastLoop);
-        sseBroadcastLoop = null;
-    }
-    if (watchdogTimer) {
-        clearTimeout(watchdogTimer);
-        watchdogTimer = null;
-    }
-    if (settlementTimer) {
-        clearTimeout(settlementTimer);
-        settlementTimer = null;
-    }
-
+    if (keepAliveLoop) clearInterval(keepAliveLoop);
+    if (sseBroadcastLoop) clearInterval(sseBroadcastLoop);
+    if (watchdogTimer) clearTimeout(watchdogTimer);
+    if (settlementTimer) clearTimeout(settlementTimer);
     if (derivWs) {
         derivWs.removeAllListeners();
-        try {
-            derivWs.terminate();
-        } catch (err) {
-            console.error('[WS] Error terminating socket:', err.message);
-        }
+        try { derivWs.terminate(); } catch (_) {}
         derivWs = null;
     }
-
     subscribedSymbols.clear();
-    console.log('[WS] Disconnected & cleaned up resources.');
+    console.log('[WS] Disconnected & cleaned up.');
 }
 
-/**
- * Initializes Deriv WebSocket Connection
- */
+// ---- Connect to Deriv ----
 function connectDeriv() {
-    // Force clean prior connections
     disconnectDeriv();
-
     const wsUrl = `wss://ws.derivws.com/websockets/v3?app_id=${CONFIG.APP_ID}`;
     console.log(`[WS] Connecting to Deriv...`);
     derivWs = new WebSocket(wsUrl);
@@ -73,16 +56,9 @@ function connectDeriv() {
     derivWs.on('open', () => {
         console.log('[WS] Connected. Authorizing...');
         state.isConnected = true;
-
-        // Send Authorization
         sendWS({ authorize: CONFIG.API_TOKEN });
 
-        // Start Ping / Keepalive loop (every 30 seconds)
-        keepAliveLoop = setInterval(() => {
-            sendWS({ ping: 1 });
-        }, 30000);
-
-        // Track single SSE broadcast loop (prevents duplicate intervals on reconnect)
+        keepAliveLoop = setInterval(() => sendWS({ ping: 1 }), 30000);
         sseBroadcastLoop = setInterval(() => {
             broadcastSSE({ state: getFullState() });
         }, 3000);
@@ -91,9 +67,9 @@ function connectDeriv() {
     derivWs.on('message', (raw) => {
         try {
             const data = JSON.parse(raw);
-            handleIncomingMessage(data);
+            handleMessage(data);
         } catch (err) {
-            console.error('[WS] Failed to parse message:', err.message);
+            console.error('[WS] Parse error:', err.message);
         }
     });
 
@@ -102,85 +78,92 @@ function connectDeriv() {
     });
 
     derivWs.on('close', () => {
-        console.warn('[WS] Connection closed. Attempting reconnect in 5s...');
+        console.warn('[WS] Connection closed. Reconnecting in 5s...');
         disconnectDeriv();
         setTimeout(connectDeriv, 5000);
     });
 }
 
-/**
- * Helper to safely send JSON via WebSocket
- */
-function sendWS(payload) {
-    if (derivWs && derivWs.readyState === WebSocket.OPEN) {
-        derivWs.send(JSON.stringify(payload));
-    } else {
-        console.warn('[WS] Cannot send payload - socket not open.');
-    }
+// ---- Reset watchdog ----
+function resetWatchdog() {
+    if (watchdogTimer) clearTimeout(watchdogTimer);
+    watchdogTimer = setTimeout(() => {
+        console.warn('[WS] No response for 60s. Reconnecting...');
+        connectDeriv();
+    }, 60000);
 }
 
-/**
- * Primary Message Handler
- */
-function handleIncomingMessage(data) {
-    const msgType = data.msg_type;
-
-    // Reset connection watchdog timer on any valid response
+// ---- Main message handler ----
+function handleMessage(data) {
     resetWatchdog();
 
-    switch (msgType) {
+    switch (data.msg_type) {
         case 'authorize':
             if (data.error) {
-                console.error('[WS] Authorization failed:', data.error.message);
+                console.error('[WS] Auth failed:', data.error.message);
                 return;
             }
             console.log(`[WS] Authorized as ${data.authorize.email}`);
             state.balance = parseFloat(data.authorize.balance);
             state.currency = data.authorize.currency;
 
-            // Subscribe to real-time account balance updates
+            // Subscribe to balance updates
             sendWS({ balance: 1, subscribe: 1 });
+
+            // ---- Subscribe to tick streams for all markets ----
+            const allSymbols = Object.keys(MARKETS);
+            for (const symbol of allSymbols) {
+                if (!subscribedSymbols.has(symbol)) {
+                    sendWS({ ticks_history: symbol, count: 2000, end: 'latest', subscribe: 1 });
+                    subscribedSymbols.add(symbol);
+                }
+            }
+            console.log(`[WS] Subscribed to ${allSymbols.length} markets.`);
             break;
 
         case 'balance':
             if (data.balance) {
-                const updatedBalance = parseFloat(data.balance.balance);
-                state.balance = updatedBalance;
-
-                // If a trade settlement is awaiting balance verification
+                const newBal = parseFloat(data.balance.balance);
+                state.balance = newBal;
                 if (pendingTrade && pendingTrade.awaitingSettlement) {
-                    verifyTradeSettlement(updatedBalance);
+                    verifyTradeSettlement(newBal);
+                }
+            }
+            break;
+
+        case 'tick':
+            if (data.tick) {
+                const symbol = data.tick.symbol;
+                const price = parseFloat(data.tick.quote);
+                // Feed the engine and update market metrics
+                const metric = engine.feed(symbol, price);
+                if (metric) {
+                    state.marketMetrics[symbol] = metric;
+                    // Broadcast state update on each tick (throttled by interval anyway)
                 }
             }
             break;
 
         case 'proposal':
             if (data.error) {
-                console.error('[WS] Proposal Error:', data.error.message);
+                console.error('[WS] Proposal error:', data.error.message);
                 state.tradeInProgress = false;
                 state.activeRealTrade = null;
                 return;
             }
-
-            // Route manual trades triggered from routes.js
+            // Manual trade flow (from routes)
             if (state.tradeInProgress && state.activeRealTrade && !state.activeRealTrade.contractId) {
                 const proposalId = data.proposal.id;
-                console.log(`[TRADE] Proposal received for manual trade. Executing buy ID: ${proposalId}...`);
-                
-                sendWS({
-                    buy: proposalId,
-                    price: state.activeRealTrade.stake
-                });
+                console.log(`[TRADE] Executing buy for proposal ${proposalId}`);
+                sendWS({ buy: proposalId, price: state.activeRealTrade.stake });
 
-                // Calculate duration seconds for the settlement timer buffer
-                let durationSecs = state.activeRealTrade.duration;
-                if (state.activeRealTrade.durationUnit === 't') durationSecs = state.activeRealTrade.duration * 1.5;
-                if (state.activeRealTrade.durationUnit === 'm') durationSecs = state.activeRealTrade.duration * 60;
-
+                let durSecs = state.activeRealTrade.duration;
+                if (state.activeRealTrade.durationUnit === 't') durSecs *= 1.5;
+                if (state.activeRealTrade.durationUnit === 'm') durSecs *= 60;
                 pendingTrade = {
                     preBalance: state.balance,
                     stake: state.activeRealTrade.stake,
-                    durationSeconds: durationSecs,
+                    durationSeconds: durSecs,
                     awaitingSettlement: false,
                     contractId: null
                 };
@@ -189,17 +172,14 @@ function handleIncomingMessage(data) {
 
         case 'buy':
             if (data.error) {
-                console.error('[TRADE] Purchase Error:', data.error.message);
+                console.error('[TRADE] Buy error:', data.error.message);
                 state.isTrading = false;
                 state.tradeInProgress = false;
                 state.activeRealTrade = null;
                 pendingTrade = null;
                 return;
             }
-
-            console.log(`[TRADE] Executed contract ID: ${data.buy.contract_id}`);
-            
-            // Record pre-trade state for math-based settlement
+            console.log(`[TRADE] Contract ${data.buy.contract_id} executed.`);
             if (pendingTrade) {
                 pendingTrade.contractId = data.buy.contract_id;
                 pendingTrade.buyPrice = parseFloat(data.buy.buy_price);
@@ -207,59 +187,67 @@ function handleIncomingMessage(data) {
             }
             break;
 
-        case 'tick':
-            if (data.tick) {
-                const quote = parseFloat(data.tick.quote);
-                
-                // Safely extract the last digit. 
-                // Note: Consider using data.tick.pip_size to format the string strictly if trailing zeros are ever dropped.
-                const digitString = data.tick.quote.toString();
-                const digit = parseInt(digitString.slice(-1), 10);
-
-                state.lastTick = quote;
-                state.lastDigit = digit;
-                
-                // Rolling history for automated digit analysis
-                if (!state.digitHistory) state.digitHistory = [];
-                state.digitHistory.push(digit);
-                
-                // Keep the last 100 ticks in memory for bot statistical math
-                if (state.digitHistory.length > 100) {
-                    state.digitHistory.shift();
-                }
-            }
-            break;
-
         case 'ping':
-            // Keepalive ACK
+            // ignore
             break;
 
         default:
             if (data.error) {
-                console.error(`[WS] Error (${msgType}):`, data.error.message);
+                console.error(`[WS] Error (${data.msg_type}):`, data.error.message);
             }
             break;
     }
 }
 
-/**
- * Initiates a Trade with Math/Account Tracking (Usually called by Automated Bot)
- */
+// ---- Schedule math-based settlement ----
+function scheduleMathSettlement(durationSeconds) {
+    if (settlementTimer) clearTimeout(settlementTimer);
+    const delayMs = Math.max((durationSeconds + 2.5) * 1000, 3000);
+    settlementTimer = setTimeout(() => {
+        if (pendingTrade) {
+            pendingTrade.awaitingSettlement = true;
+            sendWS({ balance: 1 });
+        }
+    }, delayMs);
+}
+
+// ---- Verify trade settlement via balance diff ----
+function verifyTradeSettlement(currentBalance) {
+    if (!pendingTrade) return;
+    const netProfit = currentBalance - pendingTrade.preBalance;
+
+    if (settlementTimer) {
+        clearTimeout(settlementTimer);
+        settlementTimer = null;
+    }
+
+    const isWin = netProfit > 0;
+    state.consecutiveLosses = isWin ? 0 : (state.consecutiveLosses || 0) + 1;
+    state.totalWins = (state.totalWins || 0) + (isWin ? 1 : 0);
+    state.totalLosses = (state.totalLosses || 0) + (isWin ? 0 : 1);
+    state.totalProfit = (state.totalProfit || 0) + netProfit;
+
+    console.log(`[SETTLEMENT] ${isWin ? 'WIN' : 'LOSS'} | Net: $${netProfit.toFixed(2)}`);
+
+    state.isTrading = false;
+    state.tradeInProgress = false;
+    state.activeRealTrade = null;
+    pendingTrade = null;
+
+    broadcastSSE({ state: getFullState() });
+}
+
+// ---- Execute a trade (called by bot or manual) ----
 function executeTrade({ contractType, amount, symbol, duration, durationUnit, barrier }) {
     if (state.isTrading) {
-        console.warn('[TRADE] Blocked: A trade is already in progress.');
+        console.warn('[TRADE] Already in progress.');
         return false;
     }
 
     state.isTrading = true;
 
-    // Estimate duration in seconds for settlement buffer calculation
     let durationSeconds = duration;
-    if (durationUnit === 't') {
-        durationSeconds = duration * 1.5; // Buffered slightly for tick variance
-    }
-
-    // Capture initial account balance BEFORE trade execution
+    if (durationUnit === 't') durationSeconds = duration * 1.5;
     pendingTrade = {
         preBalance: state.balance,
         stake: parseFloat(amount),
@@ -268,11 +256,7 @@ function executeTrade({ contractType, amount, symbol, duration, durationUnit, ba
         contractId: null
     };
 
-    const barrierLog = barrier !== undefined ? ` | Barrier: ${barrier}` : '';
-    console.log(`[TRADE] Initiating ${contractType}${barrierLog} | Stake: $${amount} | Pre-Balance: $${state.balance}`);
-
-    // Construct parameters payload
-    const parameters = {
+    const params = {
         amount: amount,
         basis: 'stake',
         contract_type: contractType,
@@ -281,98 +265,20 @@ function executeTrade({ contractType, amount, symbol, duration, durationUnit, ba
         duration_unit: durationUnit,
         underlying_symbol: symbol
     };
-
-    // Inject barrier if defined (crucial for digit matches, differs, over, under)
     if (barrier !== undefined && barrier !== null) {
-        parameters.barrier = barrier.toString();
+        params.barrier = barrier.toString();
     }
 
-    // Send Deriv Buy Order directly via parameters
-    sendWS({
-        buy: 1,
-        price: amount,
-        parameters: parameters
-    });
-
+    sendWS({ buy: 1, price: amount, parameters: params });
     return true;
 }
 
-/**
- * Schedules the Math-based Settlement Timer
- */
-function scheduleMathSettlement(durationSeconds) {
-    if (settlementTimer) clearTimeout(settlementTimer);
-
-    // Wait for contract duration + 2.5 second network buffer
-    const delayMs = Math.max((durationSeconds + 2.5) * 1000, 3000);
-
-    settlementTimer = setTimeout(() => {
-        if (pendingTrade) {
-            pendingTrade.awaitingSettlement = true;
-            // Force fetch latest balance to trigger calculation
-            sendWS({ balance: 1 });
-        }
-    }, delayMs);
-}
-
-/**
- * Mathematical Settlement Calculation Logic
- */
-function verifyTradeSettlement(currentBalance) {
-    if (!pendingTrade) return;
-
-    const preBal = pendingTrade.preBalance;
-    const netProfit = currentBalance - preBal;
-
-    // Clear timeout handle
-    if (settlementTimer) {
-        clearTimeout(settlementTimer);
-        settlementTimer = null;
-    }
-
-    // Pure math check: Win if balance strictly increased relative to pre-trade balance
-    const isWin = netProfit > 0;
-
-    if (isWin) {
-        state.consecutiveLosses = 0; 
-        state.totalWins = (state.totalWins || 0) + 1;
-        console.log(`[SETTLEMENT] WIN! Net Profit: +$${netProfit.toFixed(2)} | Balance: $${currentBalance.toFixed(2)}`);
-    } else {
-        state.consecutiveLosses = (state.consecutiveLosses || 0) + 1; 
-        state.totalLosses = (state.totalLosses || 0) + 1;
-        console.log(`[SETTLEMENT] LOSS! Net Loss: -$${pendingTrade.stake.toFixed(2)} | Consecutive Losses: ${state.consecutiveLosses}`);
-    }
-
-    state.totalProfit = (state.totalProfit || 0) + netProfit;
-    state.isTrading = false;
-    
-    // Clear manual trade states if they were set
-    state.tradeInProgress = false;
-    state.activeRealTrade = null;
-
-    // Reset pending trade
-    pendingTrade = null;
-
-    // Immediate SSE state broadcast update
-    broadcastSSE({ state: getFullState() });
-}
-
-/**
- * Watchdog reset to prevent dead WebSocket connections
- */
-function resetWatchdog() {
-    if (watchdogTimer) clearTimeout(watchdogTimer);
-    watchdogTimer = setTimeout(() => {
-        console.warn('[WS] No response from server for 60s. Reconnecting...');
-        connectDeriv();
-    }, 60000);
-}
-
+// ---- Exports ----
 module.exports = {
     connectDeriv,
     disconnectDeriv,
     executeTrade,
     sendWS,
-    send: sendWS, // Alias for routes.js compatibility
-    getNextReqId
+    send: sendWS,
+    getNextReqId,
 };
