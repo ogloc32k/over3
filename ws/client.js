@@ -4,7 +4,7 @@ const { broadcastSSE } = require('../api/sse');
 const { MARKETS } = require('../markets/definitions');
 const MultiMarketPipeline = require('../pipeline/engine');
 
-// ---- Engine instance (computes indicators) ----
+// ---- Engine instance ----
 const engine = new MultiMarketPipeline(Object.keys(MARKETS));
 
 // ---- Module state ----
@@ -49,13 +49,16 @@ function disconnectDeriv() {
 // ---- Connect to Deriv ----
 function connectDeriv() {
     disconnectDeriv();
-    const wsUrl = `wss://ws.derivws.com/websockets/v3?app_id=${CONFIG.APP_ID}`;
-    console.log(`[WS] Connecting to Deriv...`);
+    const appId = CONFIG.APP_ID || 'missing';
+    console.log(`[WS] Connecting to Deriv with App ID: ${appId}`);
+    const wsUrl = `wss://ws.derivws.com/websockets/v3?app_id=${appId}`;
     derivWs = new WebSocket(wsUrl);
 
     derivWs.on('open', () => {
-        console.log('[WS] Connected. Authorizing...');
+        console.log('[WS] Socket open. Authorizing...');
         state.isConnected = true;
+        const token = CONFIG.API_TOKEN || 'missing';
+        console.log(`[WS] Using token: ${token.slice(0, 4)}...${token.slice(-4)}`);
         sendWS({ authorize: CONFIG.API_TOKEN });
 
         keepAliveLoop = setInterval(() => sendWS({ ping: 1 }), 30000);
@@ -67,6 +70,10 @@ function connectDeriv() {
     derivWs.on('message', (raw) => {
         try {
             const data = JSON.parse(raw);
+            // Log all messages for debugging (only if not ping)
+            if (data.msg_type !== 'ping') {
+                console.log(`[WS] Received: ${data.msg_type}`);
+            }
             handleMessage(data);
         } catch (err) {
             console.error('[WS] Parse error:', err.message);
@@ -112,19 +119,21 @@ function handleMessage(data) {
 
             // ---- Subscribe to tick streams for all markets ----
             const allSymbols = Object.keys(MARKETS);
+            console.log(`[WS] Subscribing to ${allSymbols.length} markets...`);
             for (const symbol of allSymbols) {
                 if (!subscribedSymbols.has(symbol)) {
                     sendWS({ ticks_history: symbol, count: 2000, end: 'latest', subscribe: 1 });
                     subscribedSymbols.add(symbol);
                 }
             }
-            console.log(`[WS] Subscribed to ${allSymbols.length} markets.`);
+            console.log(`[WS] Subscribed to ${subscribedSymbols.size} markets.`);
             break;
 
         case 'balance':
             if (data.balance) {
                 const newBal = parseFloat(data.balance.balance);
                 state.balance = newBal;
+                console.log(`[WS] Balance updated: $${newBal.toFixed(2)}`);
                 if (pendingTrade && pendingTrade.awaitingSettlement) {
                     verifyTradeSettlement(newBal);
                 }
@@ -135,12 +144,15 @@ function handleMessage(data) {
             if (data.tick) {
                 const symbol = data.tick.symbol;
                 const price = parseFloat(data.tick.quote);
+                console.log(`[TICK] ${symbol} @ ${price}`);
                 // Feed the engine and update market metrics
                 const metric = engine.feed(symbol, price);
                 if (metric) {
                     state.marketMetrics[symbol] = metric;
-                    // Broadcast state update on each tick (throttled by interval anyway)
+                } else {
+                    console.warn(`[TICK] engine.feed returned null for ${symbol}`);
                 }
+                // Broadcast state update on each tick (throttled by interval anyway)
             }
             break;
 
