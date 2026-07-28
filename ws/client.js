@@ -1,398 +1,304 @@
 const WebSocket = require('ws');
-const { state, CONFIG, consecutiveLosses, checkStrategy, syncDailyPnlFromDB, getFullState, saveState, checkDailyLimits } = require('../state/manager');
-const { addLog, broadcastSSE } = require('../api/sse');
-const { MARKETS, formatMarketPrice } = require('../markets/definitions');
-const { saveTradeToCloud } = require('../database');
-const MultiMarketPipeline = require('../pipeline/engine');
+// Import 'state' as a mutable object reference (avoid importing primitive values as consts)
+const { state, CONFIG, getFullState } = require('../state/manager');
+const { broadcastSSE } = require('../sse/broadcaster');
 
+// Inner module scope state & timer handles
 let derivWs = null;
-let reqId = 0;
 let keepAliveLoop = null;
+let sseBroadcastLoop = null;
 let watchdogTimer = null;
 let settlementTimer = null;
+let pendingTrade = null;
 
-// ---- Deduplication Set ----
 const subscribedSymbols = new Set();
 
-const engine = new MultiMarketPipeline(Object.keys(MARKETS));
-
-// ---- Expose engine globally for Digits tab ----
-if (typeof window !== 'undefined') {
-    window.engine = engine;
-}
-
-// ---- Protected send ----
-function send(msg) {
-    if (derivWs && derivWs.readyState === WebSocket.OPEN) {
-        derivWs.send(JSON.stringify(msg));
-    } else {
-        console.warn(`⚠️ Cannot send: WebSocket not open (readyState=${derivWs ? derivWs.readyState : 'null'})`);
-    }
-}
-
-function getNextReqId() {
-    return ++reqId;
-}
-
+/**
+ * Cleanly disconnects WebSocket and wipes all active intervals/timeouts
+ * to prevent memory leaks and duplicate broadcasts.
+ */
 function disconnectDeriv() {
-    clearInterval(keepAliveLoop);
-    clearTimeout(watchdogTimer);
-    clearTimeout(settlementTimer);
-    if (derivWs) { derivWs.removeAllListeners(); try { derivWs.terminate(); } catch(e) {} derivWs = null; }
-    subscribedSymbols.clear();
-}
+    state.isConnected = false;
 
-async function connectDeriv() {
-    disconnectDeriv();
-    const appId = (process.env.DERIV_APP_ID || '').trim();
-    const token = (process.env.DERIV_PAT || '').trim();
-    if (!appId || !token) { addLog('System Configuration Halt: Credentials missing.'); return; }
-
-    try {
-        const accRes = await fetch('https://api.derivws.com/trading/v1/options/accounts', {
-            method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' }
-        });
-        if (!accRes.ok) throw new Error('Authentication Denied.');
-
-        const data = await accRes.json();
-        const accList = Array.isArray(data.data) ? data.data : [data.data];
-        const targetAccount = accList.find(a => a.account_type === state.tradingMode);
-        if (!targetAccount) throw new Error(`Target profile missing: ${state.tradingMode}`);
-
-        state.balance = parseFloat(targetAccount.balance);
-        state.currency = targetAccount.currency || 'USD';
-
-        if (state.dailyStartBalance === null) state.dailyStartBalance = state.balance;
-
-        const limitHit = await syncDailyPnlFromDB();
-        if (limitHit && state.lockReason) addLog(state.lockReason);
-        broadcastSSE({ state: getFullState() });
-
-        const otpRes = await fetch(`https://api.derivws.com/trading/v1/options/accounts/${targetAccount.account_id}/otp`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}`, 'Deriv-App-ID': appId, 'Content-Type': 'application/json' },
-            body: JSON.stringify({})
-        });
-        if (!otpRes.ok) throw new Error('Security allocation failure.');
-
-        const otpData = await otpRes.json();
-        derivWs = new WebSocket(otpData.data.url);
-
-        derivWs.on('open', () => {
-            addLog(`🌐 Connected. Balance: $${state.balance.toFixed(2)} | Session: $${state.sessionPnl.toFixed(2)}`);
-            send({ balance: 1, subscribe: 1, req_id: getNextReqId() });
-
-            // ---- Subscribe only once per symbol ----
-            const allSymbols = Object.keys(MARKETS);
-            for (const key of allSymbols) {
-                if (!subscribedSymbols.has(key)) {
-                    send({ ticks_history: key, count: 2000, end: 'latest', subscribe: 1, req_id: getNextReqId() });
-                    subscribedSymbols.add(key);
-                }
-            }
-            addLog(`📡 Subscribed to ${allSymbols.length} markets (single stream).`);
-
-            setInterval(() => { broadcastSSE({ state: getFullState() }); }, 3000);
-
-            keepAliveLoop = setInterval(() => {
-                send({ ping: 1 });
-                watchdogTimer = setTimeout(() => { if (derivWs) derivWs.terminate(); }, 3000);
-            }, 15000);
-        });
-
-        derivWs.on('message', raw => {
-            try {
-                const msg = JSON.parse(raw);
-                if (msg.msg_type === 'ping') { clearTimeout(watchdogTimer); return; }
-                handleMessage(msg);
-            } catch(e) {
-                console.error('Message handler error:', e);
-                addLog(`❌ WebSocket message error: ${e.message}`);
-            }
-        });
-
-        derivWs.on('close', () => { disconnectDeriv(); setTimeout(connectDeriv, 2000); });
-        derivWs.on('error', (err) => { console.error('WebSocket error:', err); if (derivWs) derivWs.terminate(); });
-    } catch(e) {
-        addLog(`Network Exception: ${e.message}.`);
-        setTimeout(connectDeriv, 5000);
+    if (keepAliveLoop) {
+        clearInterval(keepAliveLoop);
+        keepAliveLoop = null;
     }
-}
-
-function handleMessage(msg) {
-    if (msg.error) {
-        addLog(`API Error: ${msg.error.message}`);
-        state.tradeInProgress = false;
-        state.activeRealTrade = null;
-        state.pendingSettlement = false;
+    if (sseBroadcastLoop) {
+        clearInterval(sseBroadcastLoop);
+        sseBroadcastLoop = null;
+    }
+    if (watchdogTimer) {
+        clearTimeout(watchdogTimer);
+        watchdogTimer = null;
+    }
+    if (settlementTimer) {
         clearTimeout(settlementTimer);
-        return;
+        settlementTimer = null;
     }
 
-    if (msg.msg_type === 'proposal') {
-        if (msg.error) {
-            addLog(`❌ Proposal Error: ${msg.error.message}`);
-            state.tradeInProgress = false;
-            state.activeRealTrade = null;
-            state.pendingSettlement = false;
-            clearTimeout(settlementTimer);
-        } else {
-            send({ buy: msg.proposal.id, price: msg.proposal.ask_price, req_id: getNextReqId() });
-            addLog(`✅ Proposal confirmed: ${msg.proposal.ask_price}. Executing buy...`);
-        }
-        return;
-    }
-
-    if (msg.msg_type === 'balance') {
-        state.balance = parseFloat(msg.balance.balance);
-        if (state.dailyPnl !== undefined) {
-            state.dailyStartBalance = state.balance - state.dailyPnl;
-        }
-        broadcastSSE({ state: getFullState() });
-        return;
-    }
-
-    if (msg.msg_type === 'history') {
-        const symbol = msg.echo_req.ticks_history;
-        const prices = msg.history.prices.map(p => parseFloat(p));
-        // Pass raw price as string (though history ticks are older)
-        prices.forEach(p => engine.feed(symbol, p, p.toString()));
-        addLog(`✅ History synchronized for ${symbol}`);
-        return;
-    }
-
-    if (msg.msg_type === 'tick') {
+    if (derivWs) {
+        derivWs.removeAllListeners();
         try {
-            const symbol = msg.tick.symbol;
-            const price = parseFloat(msg.tick.quote);
-            const rawPrice = msg.tick.quote; // raw string from Deriv
-            processLiveFeed(symbol, price, rawPrice);
+            derivWs.terminate();
         } catch (err) {
-            addLog(`❌ Tick handler error: ${err.message}`);
-            console.error('Tick error:', err);
+            console.error('[WS] Error terminating socket:', err.message);
         }
-        return;
+        derivWs = null;
     }
 
-    if (msg.msg_type === 'buy') {
-        if (state.activeRealTrade) {
-            const contractId = msg.buy.contract_id;
-            const entryPrice = msg.buy.buy_price || msg.buy.price || 'Market Price';
-            state.activeRealTrade.contractId = contractId;
-            state.activeRealTrade.entryPrice = entryPrice;
-            state.activeRealTrade.executionTime = Date.now();
+    subscribedSymbols.clear();
+    console.log('[WS] Disconnected & cleaned up resources.');
+}
 
-            addLog(`💰 Trade Executed: Contract ID ${contractId} at price ${entryPrice}`);
+/**
+ * Initializes Deriv WebSocket Connection
+ */
+function connectDeriv() {
+    // Force clean prior connections
+    disconnectDeriv();
 
-            state.tradeInProgress = true;
+    const wsUrl = `wss://ws.derivws.com/websockets/v3?app_id=${CONFIG.APP_ID}`;
+    console.log(`[WS] Connecting to Deriv...`);
+    derivWs = new WebSocket(wsUrl);
 
-            const symbol = state.activeRealTrade.symbol;
-            const duration = state.activeRealTrade.duration || CONFIG.DURATION;
-            const stake = state.activeRealTrade.stake;
+    derivWs.on('open', () => {
+        console.log('[WS] Connected. Authorizing...');
+        state.isConnected = true;
 
-            const isOneSecondIndex = symbol.includes('1HZ');
-            const msPerTick = isOneSecondIndex ? 1000 : 2000;
-            const bufferMs = 3000;
-            const settlementDelayMs = (duration * msPerTick) + bufferMs;
+        // Send Authorization
+        sendWS({ authorize: CONFIG.API_TOKEN });
 
-            addLog(`⏳ ${symbol} | ${duration} ticks | ${isOneSecondIndex ? '1s' : '2s'} per tick | waiting ${(settlementDelayMs/1000).toFixed(1)}s`);
+        // Start Ping / Keepalive loop (every 30 seconds)
+        keepAliveLoop = setInterval(() => {
+            sendWS({ ping: 1 });
+        }, 30000);
 
-            clearTimeout(settlementTimer);
+        // Track single SSE broadcast loop (prevents duplicate intervals on reconnect)
+        sseBroadcastLoop = setInterval(() => {
+            broadcastSSE({ state: getFullState() });
+        }, 3000);
+    });
 
-            settlementTimer = setTimeout(() => {
-                try {
-                    const postBal = state.balance;
-                    const preBal = state.activeRealTrade.balanceBefore;
-                    const stake = state.activeRealTrade.stake;
+    derivWs.on('message', (raw) => {
+        try {
+            const data = JSON.parse(raw);
+            handleIncomingMessage(data);
+        } catch (err) {
+            console.error('[WS] Failed to parse message:', err.message);
+        }
+    });
 
-                    if (isNaN(postBal) || isNaN(preBal) || isNaN(stake)) {
-                        throw new Error(`Invalid numbers: postBal=${postBal}, preBal=${preBal}, stake=${stake}`);
-                    }
+    derivWs.on('error', (err) => {
+        console.error('[WS] Socket error:', err.message);
+    });
 
-                    const netProfit = postBal - preBal;
-                    const isWin = netProfit > 0;
-                    const symbol = state.activeRealTrade.symbol;
+    derivWs.on('close', () => {
+        console.warn('[WS] Connection closed. Attempting reconnect in 5s...');
+        disconnectDeriv();
+        setTimeout(connectDeriv, 5000);
+    });
+}
 
-                    state.sessionPnl += netProfit;
-                    state.dailyPnl += netProfit;
+/**
+ * Helper to safely send JSON via WebSocket
+ */
+function sendWS(payload) {
+    if (derivWs && derivWs.readyState === WebSocket.OPEN) {
+        derivWs.send(JSON.stringify(payload));
+    } else {
+        console.warn('[WS] Cannot send payload - socket not open.');
+    }
+}
 
-                    if (isWin) {
-                        consecutiveLosses = 0;
-                    } else {
-                        consecutiveLosses++;
-                        if (consecutiveLosses >= CONFIG.MAX_CONSECUTIVE_LOSSES) {
-                            state.lossCooldownUntil = Date.now() + CONFIG.LOSS_COOLDOWN_MS;
-                            addLog(`⏳ ${CONFIG.MAX_CONSECUTIVE_LOSSES} consecutive losses. Cooldown for ${CONFIG.LOSS_COOLDOWN_MS/60000} minutes.`);
-                        }
-                    }
+/**
+ * Primary Message Handler
+ */
+function handleIncomingMessage(data) {
+    const msgType = data.msg_type;
 
-                    const grossPayout = isWin ? (stake + netProfit) : 0;
-                    if (state.activeRealTrade) {
-                        saveTradeToCloud({
-                            contract_id: state.activeRealTrade.contractId || null,
-                            asset: MARKETS[state.activeRealTrade.symbol]?.name || state.activeRealTrade.symbol,
-                            contractType: state.activeRealTrade.contractType,
-                            stake: stake,
-                            payout: grossPayout,
-                            isWin: isWin,
-                            barrier: null,
-                            exitTick: null,
-                            entry_price: state.activeRealTrade.entryPrice,
-                            exit_price: null,
-                            duration_seconds: state.activeRealTrade.durationUnit === 's' ? state.activeRealTrade.duration : 0,
-                            duration_ticks: state.activeRealTrade.durationUnit === 't' ? state.activeRealTrade.duration : 0
-                        });
-                    }
+    // Reset connection watchdog timer on any valid response
+    resetWatchdog();
 
-                    const outcomeLabel = isWin ? `🟢 WIN (+$${netProfit.toFixed(2)})` : `🔴 LOSS (-$${Math.abs(netProfit).toFixed(2)})`;
-                    addLog(`[Trade Finished] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | ${outcomeLabel} | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
+    switch (msgType) {
+        case 'authorize':
+            if (data.error) {
+                console.error('[WS] Authorization failed:', data.error.message);
+                return;
+            }
+            console.log(`[WS] Authorized as ${data.authorize.email}`);
+            state.balance = parseFloat(data.authorize.balance);
+            state.currency = data.authorize.currency;
 
-                    // Broadcast analytics delta
-                    broadcastSSE({
-                        event: 'analytics_delta',
-                        data: {
-                            asset: symbol,
-                            pnl: netProfit,
-                            newBalance: state.balance,
-                            timestamp: Date.now()
-                        }
-                    });
+            // Subscribe to real-time account balance updates
+            sendWS({ balance: 1, subscribe: 1 });
+            break;
 
-                } catch (error) {
-                    console.error('[Trade Check Error]', error.message);
-                    addLog(`⚠️ Trade check error: ${error.message}`);
-                } finally {
-                    state.tradeInProgress = false;
-                    state.activeRealTrade = null;
-                    state.pendingSettlement = false;
-                    state.cooldownTicksLeft = CONFIG.COOLDOWN_TICKS;
+        case 'balance':
+            if (data.balance) {
+                const updatedBalance = parseFloat(data.balance.balance);
+                state.balance = updatedBalance;
 
-                    const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
-                    state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
-
-                    (async () => {
-                        const limitHit = await syncDailyPnlFromDB();
-                        if (limitHit && state.lockReason) addLog(state.lockReason);
-                        saveState();
-                        broadcastSSE({ state: getFullState() });
-                    })();
-
-                    settlementTimer = null;
-                    console.log('[System] Trade lock released. Ready for next trade.');
+                // If a trade settlement is awaiting balance verification
+                if (pendingTrade && pendingTrade.awaitingSettlement) {
+                    verifyTradeSettlement(updatedBalance);
                 }
-            }, settlementDelayMs);
-        }
-        return;
+            }
+            break;
+
+        case 'buy':
+            if (data.error) {
+                console.error('[TRADE] Purchase Error:', data.error.message);
+                state.isTrading = false;
+                pendingTrade = null;
+                return;
+            }
+
+            console.log(`[TRADE] Executed contract ID: ${data.buy.contract_id}`);
+            
+            // Record pre-trade state for math-based settlement
+            if (pendingTrade) {
+                pendingTrade.contractId = data.buy.contract_id;
+                pendingTrade.buyPrice = parseFloat(data.buy.buy_price);
+                scheduleMathSettlement(pendingTrade.durationSeconds);
+            }
+            break;
+
+        case 'tick':
+            if (data.tick) {
+                state.lastTick = parseFloat(data.tick.quote);
+                state.lastDigit = parseInt(data.tick.quote.toString().slice(-1), 10);
+            }
+            break;
+
+        case 'ping':
+            // Keepalive ACK
+            break;
+
+        default:
+            if (data.error) {
+                console.error(`[WS] Error (${msgType}):`, data.error.message);
+            }
+            break;
     }
 }
 
-// ---- Sniper Entry (unchanged) ----
-const maDiffHistory = {};
-const symbols = Object.keys(MARKETS);
-symbols.forEach(sym => { maDiffHistory[sym] = [0, 0, 0]; });
-
-function evaluateSniperEntry(symbol, metric) {
-    if (!metric) return 'IDLE';
-    const { rsi, volatility, maDiff } = metric;
-    if (state.locked || state.dailyLimitReached) return 'IDLE (LOCKED)';
-    const now = Date.now();
-    if (now - state.lastTradeTimestamp < CONFIG.MIN_TRIGGER_INTERVAL) return 'IDLE (COOLDOWN)';
-    if (volatility < CONFIG.MIN_VOLATILITY_PERCENT) return 'IDLE (LOW VOL)';
-
-    if (!maDiffHistory[symbol]) maDiffHistory[symbol] = [0, 0, 0];
-    const history = maDiffHistory[symbol];
-    history.shift();
-    history.push(maDiff);
-
-    const isBullishExpansion = (history[2] > history[1]) && (history[1] > history[0]) && (history[2] >= CONFIG.MA_DIFF_THRESHOLD);
-    const isBearishExpansion = (history[2] < history[1]) && (history[1] < history[0]) && (history[2] <= -CONFIG.MA_DIFF_THRESHOLD);
-
-    if (isBullishExpansion && rsi >= 60 && rsi <= 67) {
-        state.lastTradeTimestamp = now;
-        return 'CALL';
-    }
-    if (isBearishExpansion && rsi >= 33 && rsi <= 40) {
-        state.lastTradeTimestamp = now;
-        return 'PUT';
-    }
-    return 'IDLE';
-}
-
-// ---- processLiveFeed now accepts rawPrice ----
-function processLiveFeed(symbol, price, rawPrice) {
-    const metric = engine.feed(symbol, price, rawPrice);
-    if (!metric) return;
-    state.marketMetrics[symbol] = metric;
-
-    if (state.cooldownTicksLeft > 0) state.cooldownTicksLeft--;
-
-    if (!state.active || state.locked || state.tradeInProgress || state.cooldownTicksLeft > 0) {
-        broadcastSSE({ state: getFullState() });
-        return;
+/**
+ * Initiates a Trade with Math/Account Tracking
+ */
+function executeTrade({ contractType, amount, symbol, duration, durationUnit }) {
+    if (state.isTrading) {
+        console.warn('[TRADE] Blocked: A trade is already in progress.');
+        return false;
     }
 
-    const now = Date.now();
-    if (now < state.lossCooldownUntil) {
-        broadcastSSE({ state: getFullState() });
-        return;
+    state.isTrading = true;
+
+    // Estimate duration in seconds for settlement buffer calculation
+    let durationSeconds = duration;
+    if (durationUnit === 't') {
+        durationSeconds = duration * 1; // Approx 1s per tick on Synthetic Indices
     }
 
-    const signal = evaluateSniperEntry(symbol, metric);
-    if (signal === 'IDLE' || signal.startsWith('IDLE')) {
-        broadcastSSE({ state: getFullState() });
-        return;
-    }
-
-    const direction = signal;
-    state.tradeInProgress = true;
-    const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
-    state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
-
-    addLog(`🔥 Sniper Signal: ${symbol} | ${direction} | RSI: ${metric.rsi.toFixed(1)} | Vol: ${metric.volatility.toFixed(2)}% | MA Diff: ${metric.maDiff.toFixed(3)}%`);
-
-    const duration = CONFIG.DURATION;
-    const unit = 't';
-
-    state.activeRealTrade = {
-        symbol,
-        stake: state.currentStake,
-        balanceBefore: state.balance,
-        contractType: direction,
-        duration: duration,
-        durationUnit: unit,
-        barrier: null,
-        direction: direction,
-        entryPrice: null,
-        executionTime: Date.now(),
-        settled: false,
-        entryLogged: false,
+    // Capture initial account balance BEFORE trade execution
+    pendingTrade = {
+        preBalance: state.balance,
+        stake: parseFloat(amount),
+        durationSeconds: durationSeconds,
+        awaitingSettlement: false,
         contractId: null
     };
 
-    state.lastTriggerTime = now;
-    addLog(`📤 Requesting ${direction} proposal for ${symbol} (${duration} ticks)...`);
-    send({
-        proposal: 1,
-        amount: state.currentStake,
-        basis: 'stake',
-        contract_type: direction,
-        currency: state.currency || 'USD',
-        duration: duration,
-        duration_unit: unit,
-        underlying_symbol: symbol,
-        req_id: getNextReqId()
+    console.log(`[TRADE] Initiating ${contractType} | Stake: $${amount} | Pre-Balance: $${state.balance}`);
+
+    // Send Deriv Buy Order
+    sendWS({
+        buy: 1,
+        price: amount,
+        parameters: {
+            amount: amount,
+            basis: 'stake',
+            contract_type: contractType,
+            currency: state.currency || 'USD',
+            duration: duration,
+            duration_unit: durationUnit,
+            symbol: symbol
+        }
     });
 
+    return true;
+}
+
+/**
+ * Schedules the Math-based Settlement Timer
+ */
+function scheduleMathSettlement(durationSeconds) {
+    if (settlementTimer) clearTimeout(settlementTimer);
+
+    // Wait for contract duration + 2.5 second network buffer
+    const delayMs = Math.max((durationSeconds + 2.5) * 1000, 3000);
+
+    settlementTimer = setTimeout(() => {
+        if (pendingTrade) {
+            pendingTrade.awaitingSettlement = true;
+            // Force fetch latest balance to trigger calculation
+            sendWS({ balance: 1 });
+        }
+    }, delayMs);
+}
+
+/**
+ * Mathematical Settlement Calculation Logic
+ */
+function verifyTradeSettlement(currentBalance) {
+    if (!pendingTrade) return;
+
+    const preBal = pendingTrade.preBalance;
+    const netProfit = currentBalance - preBal;
+
+    // Clear timeout handle
+    if (settlementTimer) {
+        clearTimeout(settlementTimer);
+        settlementTimer = null;
+    }
+
+    // Pure math check: Win if balance strictly increased relative to pre-trade balance
+    const isWin = netProfit > 0;
+
+    if (isWin) {
+        state.consecutiveLosses = 0; // Fixed: Mutates state property directly
+        state.totalWins = (state.totalWins || 0) + 1;
+        console.log(`[SETTLEMENT] WIN! Net Profit: +$${netProfit.toFixed(2)} | Balance: $${currentBalance.toFixed(2)}`);
+    } else {
+        state.consecutiveLosses = (state.consecutiveLosses || 0) + 1; // Fixed: Mutates state property directly
+        state.totalLosses = (state.totalLosses || 0) + 1;
+        console.log(`[SETTLEMENT] LOSS! Net Loss: -$${pendingTrade.stake.toFixed(2)} | Consecutive Losses: ${state.consecutiveLosses}`);
+    }
+
+    state.totalProfit = (state.totalProfit || 0) + netProfit;
+    state.isTrading = false;
+
+    // Reset pending trade
+    pendingTrade = null;
+
+    // Immediate SSE state broadcast update
     broadcastSSE({ state: getFullState() });
 }
 
+/**
+ * Watchdog reset to prevent dead WebSocket connections
+ */
+function resetWatchdog() {
+    if (watchdogTimer) clearTimeout(watchdogTimer);
+    watchdogTimer = setTimeout(() => {
+        console.warn('[WS] No response from server for 60s. Reconnecting...');
+        connectDeriv();
+    }, 60000);
+}
+
 module.exports = {
-    derivWs,
-    reqId,
-    send,
-    getNextReqId,
-    disconnectDeriv,
     connectDeriv,
-    engine,
-    handleMessage
+    disconnectDeriv,
+    executeTrade,
+    sendWS
 };
