@@ -253,12 +253,28 @@ document.addEventListener('DOMContentLoaded', function() {
     window.globalState = globalState;
     window.serverMode = serverMode;
 
-    // ---- Digits Tab Render ----
+    // ---- Fallback for empty digits table ----
+    function renderEmptyDigitsTable() {
+        const rows = ['row-over', 'row-under', 'row-matches', 'row-differs'];
+        const titles = ['OVER %', 'UNDER %', 'MATCHES %', 'DIFFERS %'];
+        rows.forEach((id, idx) => {
+            const el = document.getElementById(id);
+            if (el) {
+                let html = `<td><strong>${titles[idx]}</strong></td>`;
+                for (let i = 0; i <= 9; i++) {
+                    html += `<td>0%</td>`;
+                }
+                el.innerHTML = html;
+            }
+        });
+    }
+
+    // ---- Digits Tab Render (updated with digitStats) ----
     window.renderDigitsTab = function() {
         try {
             const activeMetric = globalState?.marketMetrics?.[currentFocus] || null;
-            if (!activeMetric) return;
 
+            // Asset selector chips
             const chipsContainer = document.getElementById('digitsAssetChips');
             if (chipsContainer) {
                 chipsContainer.innerHTML = '';
@@ -272,62 +288,59 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
             }
 
+            // ---- Last 10 Digits Stream ----
             const streamContainer = document.getElementById('digitsHistoryBadges');
             if (streamContainer) {
-                const rawPrices = activeMetric.rawPrices || activeMetric.lastPrices.map(p => p.toString());
-                if (rawPrices.length > 0) {
-                    const lastTen = rawPrices.slice(-10);
-                    const digitsHtml = lastTen.map(raw => {
-                        const digit = extractLastDigit(raw, currentFocus);
-                        if (digit === null) return '<span class="stream-digit">?</span>';
-                        return `<span class="stream-digit">${digit}</span>`;
-                    }).join('');
-                    streamContainer.innerHTML = digitsHtml || '<span class="stream-digit">—</span>';
+                if (activeMetric) {
+                    const rawPrices = activeMetric.rawPrices || activeMetric.lastPrices.map(p => p.toString());
+                    if (rawPrices.length > 0) {
+                        const lastTen = rawPrices.slice(-10);
+                        const digitsHtml = lastTen.map(raw => {
+                            const digit = extractLastDigit(raw, currentFocus);
+                            if (digit === null) return '<span class="stream-digit">?</span>';
+                            return `<span class="stream-digit">${digit}</span>`;
+                        }).join('');
+                        streamContainer.innerHTML = digitsHtml || '<span class="stream-digit">—</span>';
+                    } else {
+                        streamContainer.innerHTML = '<span class="stream-digit">—</span>';
+                    }
                 } else {
                     streamContainer.innerHTML = '<span class="stream-digit">—</span>';
                 }
             }
 
-            const matrix = activeMetric.digitMatrix || [];
+            // ---- Digit Matrix Rows (using digitStats) ----
+            const stats = activeMetric?.digitStats || null;
             const rowOver = document.getElementById('row-over');
             const rowUnder = document.getElementById('row-under');
             const rowMatches = document.getElementById('row-matches');
             const rowDiffers = document.getElementById('row-differs');
 
-            if (matrix.length === 0) {
-                if (rowOver) rowOver.innerHTML = '<td><strong>OVER %</strong></td><td colspan="10">—</td>';
-                if (rowUnder) rowUnder.innerHTML = '<td><strong>UNDER %</strong></td><td colspan="10">—</td>';
-                if (rowMatches) rowMatches.innerHTML = '<td><strong>MATCHES %</strong></td><td colspan="10">—</td>';
-                if (rowDiffers) rowDiffers.innerHTML = '<td><strong>DIFFERS %</strong></td><td colspan="10">—</td>';
-                return;
-            }
-
-            const buildRowCells = (dataArray, label) => {
-                let html = `<td><strong>${label}</strong></td>`;
-                for (let d = 0; d <= 9; d++) {
-                    const val = dataArray[d] !== undefined ? dataArray[d] : 0;
-                    const valStr = val.toFixed(1) + '%';
-                    let style = '';
-                    if (label === 'OVER' || label === 'UNDER') {
-                        if (val >= 70) style = 'color: #10b981; font-weight: 700;';
-                        else if (val <= 30) style = 'color: #ef4444; font-weight: 700;';
+            // Helper to build row with fallback
+            const buildRow = (title, dataArray) => {
+                let html = `<td><strong>${title}</strong></td>`;
+                for (let i = 0; i <= 9; i++) {
+                    const valStr = (dataArray && dataArray[i]) ? dataArray[i] : '0%';
+                    const valNum = parseFloat(valStr);
+                    let color = '';
+                    if (title.includes('OVER') || title.includes('UNDER')) {
+                        if (valNum >= 70) color = '#10b981';
+                        else if (valNum <= 30) color = '#ef4444';
                     }
-                    html += `<td style="${style}">${valStr}</td>`;
+                    html += `<td style="color: ${color}; font-weight: ${color ? '700' : 'normal'};">${valStr}</td>`;
                 }
                 return html;
             };
 
-            const over = matrix.map(r => r.over || 0);
-            const under = matrix.map(r => r.under || 0);
-            const matches = matrix.map(r => r.matches || 0);
-            const differs = matrix.map(r => r.differs || 0);
+            if (rowOver) rowOver.innerHTML = buildRow('OVER %', stats?.over);
+            if (rowUnder) rowUnder.innerHTML = buildRow('UNDER %', stats?.under);
+            if (rowMatches) rowMatches.innerHTML = buildRow('MATCHES %', stats?.matches);
+            if (rowDiffers) rowDiffers.innerHTML = buildRow('DIFFERS %', stats?.differs);
 
-            if (rowOver) rowOver.innerHTML = buildRowCells(over, 'OVER');
-            if (rowUnder) rowUnder.innerHTML = buildRowCells(under, 'UNDER');
-            if (rowMatches) rowMatches.innerHTML = buildRowCells(matches, 'MATCHES');
-            if (rowDiffers) rowDiffers.innerHTML = buildRowCells(differs, 'DIFFERS');
         } catch(e) {
             console.error('renderDigitsTab error:', e);
+            // Fallback in case of error
+            renderEmptyDigitsTable();
         }
     };
 
@@ -612,6 +625,8 @@ document.addEventListener('DOMContentLoaded', function() {
             console.error('❌ Error in renderMobileView:', err);
         }
     }
+
+    renderUI({});
 
     // ---- SSE ----
     let sse = null;
