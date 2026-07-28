@@ -71,7 +71,7 @@ setInterval(() => {
 // =====================================================================
 loadState();
 
-// ---- Start the midnight heartbeat (resets daily limits without restart) ----
+// ---- Start the midnight heartbeat ----
 startMidnightHeartbeat();
 
 checkDatabaseConnection().then(() => {
