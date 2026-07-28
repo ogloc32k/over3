@@ -124,6 +124,27 @@ document.addEventListener('DOMContentLoaded', function() {
         '1HZ10V': 2, '1HZ25V': 2, '1HZ50V': 2, '1HZ75V': 2, '1HZ100V': 2
     };
 
+    // ---- Trailing-zero-safe digit extraction ----
+    const SYMBOL_DECIMALS = {
+        'R_10': 2,      '1HZ10V': 2,
+        'R_25': 3,      '1HZ25V': 2,
+        'R_50': 4,      '1HZ50V': 2,
+        'R_75': 4,      '1HZ75V': 2,
+        'R_100': 2,     '1HZ100V': 2
+    };
+
+    function getSymbolDecimals(symbol) {
+        return SYMBOL_DECIMALS[symbol] !== undefined ? SYMBOL_DECIMALS[symbol] : 2;
+    }
+
+    function extractLastDigit(price, symbol) {
+        if (price === null || price === undefined) return null;
+        const decimals = getSymbolDecimals(symbol);
+        const formattedPrice = Number(price).toFixed(decimals);
+        const lastChar = formattedPrice.slice(-1);
+        return parseInt(lastChar, 10);
+    }
+
     function formatPrice(symbol, raw) {
         if (raw === undefined || raw === null) return '—';
         const dec = MARKET_DECIMALS[symbol] || 2;
@@ -184,37 +205,16 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
 
-        // ---- Digit Matrix (0-9) ----
-        const matrix = activeMetric.digitMatrix || [];
-        const tbody = document.getElementById('digitsTableBody');
-        if (tbody) {
-            tbody.innerHTML = '';
-            matrix.forEach(row => {
-                const tr = document.createElement('tr');
-                const overPct = row.over || 0;
-                const underPct = row.under || 0;
-                const matchesPct = row.matches || 0;
-                const differsPct = row.differs || 0;
-                tr.innerHTML = `
-                    <td><strong>${row.digit}</strong></td>
-                    <td class="${overPct > 70 ? 'high' : (overPct < 30 ? 'low' : '')}">${overPct.toFixed(1)}%</td>
-                    <td class="${underPct > 70 ? 'high' : (underPct < 30 ? 'low' : '')}">${underPct.toFixed(1)}%</td>
-                    <td class="${matchesPct > 70 ? 'high' : (matchesPct < 30 ? 'low' : '')}">${matchesPct.toFixed(1)}%</td>
-                    <td class="${differsPct > 70 ? 'high' : (differsPct < 30 ? 'low' : '')}">${differsPct.toFixed(1)}%</td>
-                `;
-                tbody.appendChild(tr);
-            });
-        }
-
-        // ---- Last 10 Digits Stream ----
-        const streamContainer = document.getElementById('digitsStreamDigits');
+        // ---- Last 10 Digits Stream (with trailing-zero fix) ----
+        const streamContainer = document.getElementById('digitsHistoryBadges');
         if (streamContainer) {
             const rawPrices = activeMetric.rawPrices || activeMetric.lastPrices.map(p => p.toString());
             if (rawPrices.length > 0) {
                 const lastTen = rawPrices.slice(-10);
                 const digitsHtml = lastTen.map(raw => {
-                    const str = raw.toString();
-                    const digit = str[str.length - 1] || '?';
+                    // Use the safe extractor
+                    const digit = extractLastDigit(raw, currentFocus);
+                    if (digit === null) return '<span class="stream-digit">?</span>';
                     return `<span class="stream-digit">${digit}</span>`;
                 }).join('');
                 streamContainer.innerHTML = digitsHtml || '<span class="stream-digit">—</span>';
@@ -222,6 +222,50 @@ document.addEventListener('DOMContentLoaded', function() {
                 streamContainer.innerHTML = '<span class="stream-digit">—</span>';
             }
         }
+
+        // ---- Digit Matrix (0-9) ----
+        const matrix = activeMetric.digitMatrix || [];
+        // Build rows for OVER, UNDER, MATCHES, DIFFERS
+        const rowOver = document.getElementById('row-over');
+        const rowUnder = document.getElementById('row-under');
+        const rowMatches = document.getElementById('row-matches');
+        const rowDiffers = document.getElementById('row-differs');
+
+        if (matrix.length === 0) {
+            // If no matrix, clear rows
+            if (rowOver) rowOver.innerHTML = '<td><strong>OVER %</strong></td><td colspan="10">—</td>';
+            if (rowUnder) rowUnder.innerHTML = '<td><strong>UNDER %</strong></td><td colspan="10">—</td>';
+            if (rowMatches) rowMatches.innerHTML = '<td><strong>MATCHES %</strong></td><td colspan="10">—</td>';
+            if (rowDiffers) rowDiffers.innerHTML = '<td><strong>DIFFERS %</strong></td><td colspan="10">—</td>';
+            return;
+        }
+
+        // Helper to build row cells
+        const buildRowCells = (dataArray, label) => {
+            let html = `<td><strong>${label}</strong></td>`;
+            for (let d = 0; d <= 9; d++) {
+                const val = dataArray[d] !== undefined ? dataArray[d] : 0;
+                const valStr = val.toFixed(1) + '%';
+                let style = '';
+                if (label === 'OVER' || label === 'UNDER') {
+                    if (val >= 70) style = 'color: #10b981; font-weight: 700;';
+                    else if (val <= 30) style = 'color: #ef4444; font-weight: 700;';
+                }
+                html += `<td style="${style}">${valStr}</td>`;
+            }
+            return html;
+        };
+
+        // Extract the arrays
+        const over = matrix.map(r => r.over || 0);
+        const under = matrix.map(r => r.under || 0);
+        const matches = matrix.map(r => r.matches || 0);
+        const differs = matrix.map(r => r.differs || 0);
+
+        if (rowOver) rowOver.innerHTML = buildRowCells(over, 'OVER');
+        if (rowUnder) rowUnder.innerHTML = buildRowCells(under, 'UNDER');
+        if (rowMatches) rowMatches.innerHTML = buildRowCells(matches, 'MATCHES');
+        if (rowDiffers) rowDiffers.innerHTML = buildRowCells(differs, 'DIFFERS');
     }
 
     // =========================================================================
