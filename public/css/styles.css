@@ -1,5 +1,5 @@
 /* ============================================================
-   ROOT & RESET – SOFTER PALETTE (FIXED FOR MOBILE)
+   ROOT & RESET – SOFTER PALETTE
    ============================================================ */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
@@ -368,7 +368,7 @@ body.light {
 .tab-pages.active { display: block; }
 
 /* ============================================================
-   TAB VISIBILITY (CRITICAL FIX)
+   TAB VISIBILITY
    ============================================================ */
 .tab-page {
   display: none !important;
@@ -490,7 +490,7 @@ body.light {
 }
 
 /* ============================================================
-   OTHER TABS (Data table, analytics, logs)
+   DASHBOARD TABLE
    ============================================================ */
 .table-container {
   height: 100%;
@@ -889,146 +889,6 @@ body.light {
 }
 
 /* ============================================================
-   DIGITS TAB
-   ============================================================ */
-.digits-container {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 8px 0;
-  height: 100%;
-}
-
-.digits-asset-selector {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.digits-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-.digits-asset-chips {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.digits-chip {
-  padding: 4px 12px;
-  border-radius: 16px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s;
-  white-space: nowrap;
-}
-.digits-chip.active {
-  background: var(--neon-blue);
-  color: #fff;
-  border-color: var(--neon-blue);
-}
-.digits-chip:hover {
-  background: var(--bg-surface);
-}
-
-/* ---- Interactive Digit Buttons (NEW) ---- */
-.digit-btn {
-  font-size: 16px;
-  font-weight: 700;
-  padding: 12px 0;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: 6px;
-  cursor: pointer;
-  color: var(--text-primary);
-  transition: all 0.2s;
-}
-.digit-btn:hover {
-  background: var(--bg-card);
-  border-color: var(--neon-blue);
-}
-.digit-btn.selected {
-  background: var(--neon-blue);
-  color: #fff;
-  border-color: var(--neon-blue);
-}
-
-.digits-stream {
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
-  border-radius: 6px;
-  padding: 8px 12px;
-  margin-bottom: 8px;
-}
-.digits-stream-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  margin-bottom: 6px;
-}
-.digits-stream-digits {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-.stream-digit {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  background: var(--bg-terminal);
-  border: 1px solid var(--border-subtle);
-  border-radius: 6px;
-  font-size: 18px;
-  font-weight: 700;
-  font-family: 'Consolas', monospace;
-  color: var(--text-primary);
-  transition: all 0.15s;
-}
-.stream-digit:hover {
-  background: var(--bg-surface);
-  transform: scale(1.05);
-}
-
-.digits-matrix {
-  flex: 1;
-  overflow-y: auto;
-}
-.digits-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-.digits-table th {
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  font-weight: 600;
-  text-transform: uppercase;
-  font-size: 9px;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--border-subtle);
-  text-align: center;
-}
-.digits-table td {
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--border-subtle);
-  text-align: center;
-  color: var(--text-primary);
-}
-.digits-table td.high { color: #10b981; font-weight: 700; }
-.digits-table td.low { color: #ef4444; font-weight: 700; }
-.digits-table tr:hover { background: var(--bg-surface); }
-
-/* ============================================================
    LOGS
    ============================================================ */
 .log-stream {
@@ -1077,7 +937,7 @@ body.light {
 .log-header .clear-btn:active { transform: scale(0.95); }
 
 /* ============================================================
-   BOTTOM TAB BAR (Mobile) – FIXED
+   BOTTOM TAB BAR (Mobile)
    ============================================================ */
 .tab-bar {
   display: none;
@@ -1148,14 +1008,14 @@ body.analytics-active .app-main {
 }
 
 /* ============================================================
-   RESPONSIVE – MOBILE
+   MOBILE VIEW
    ============================================================ */
 @media (max-width: 768px) {
-  .app-body { 
-    flex-direction: column; 
+  .app-body {
+    flex-direction: column;
     height: calc(100svh - var(--header-height) - var(--tab-height));
   }
-  
+
   .app-sidebar {
     width: 100%;
     border-right: none;
@@ -1174,7 +1034,6 @@ body.analytics-active .app-main {
   .sidebar-duration { flex: 1; min-width: 120px; }
   .sidebar-trade-btns { flex: 1; min-width: 120px; }
 
-  /* Touch targets */
   .btn,
   .btn-preset,
   .nav-tab,
@@ -1186,9 +1045,7 @@ body.analytics-active .app-main {
   .log-header .clear-btn,
   .header-tabs .nav-tab,
   .filter-bar input,
-  .btn-date-toggle,
-  .digits-chip,
-  .digit-btn {
+  .btn-date-toggle {
     min-height: 44px !important;
     min-width: 44px !important;
     padding: 8px 12px !important;
@@ -1196,7 +1053,6 @@ body.analytics-active .app-main {
   .header-tabs .nav-tab { padding: 8px 14px !important; }
   .tab-bar .nav-tab { min-height: 48px !important; }
 
-  /* Data table horizontal scroll */
   .table-container {
     overflow-x: auto !important;
     -webkit-overflow-scrolling: touch !important;
@@ -1216,10 +1072,7 @@ body.analytics-active .app-main {
     border-right: 1px solid var(--border-subtle);
   }
 
-  /* Mobile Dashboard (Markets) */
-  .desktop-table {
-    display: none !important;
-  }
+  .desktop-table { display: none !important; }
   .mobile-market-view {
     display: flex !important;
     flex-direction: column;
@@ -1322,14 +1175,12 @@ body.analytics-active .app-main {
   .tick-digit.up { color: var(--green-profit); background: rgba(16,185,129,0.08); }
   .tick-digit.down { color: var(--red-loss); background: rgba(239,68,68,0.08); }
 
-  /* Hide execution controls on dashboard mobile */
   .dashboard-active .sidebar-trade-btns,
   .dashboard-active .sidebar-duration,
   .dashboard-active .sidebar-controls .row .btn.swap {
     display: none !important;
   }
 
-  /* Analytics mobile fixes */
   .metrics-grid-4 {
     grid-template-columns: repeat(2, 1fr) !important;
     gap: 4px !important;
@@ -1379,23 +1230,14 @@ body.analytics-active .app-main {
   .chart-box .ch-wrap { overflow: hidden !important; position: relative !important; max-height: 140px !important; }
   #chart-donut, #chart-line { max-height: 140px !important; }
 
-  /* Digits mobile */
-  .digits-stats { flex-direction: column; }
-  .digits-table { font-size: 10px; }
-  .digits-table th, .digits-table td { padding: 2px 4px; }
-  .digits-chip { font-size: 10px; padding: 4px 8px; }
-
-  /* Hide sidebar controls on Analytics tab (mobile) */
   .analytics-active .sidebar-controls {
     display: none !important;
   }
 
-  /* ---- FORCE BOTTOM TAB BAR ON MOBILE ---- */
   .tab-bar {
     display: flex !important;
   }
 
-  /* Font sizes for mobile readability */
   .app-brand { font-size: 14px; }
   .header-status { font-size: 12px; }
   .header-clock { font-size: 12px; }
@@ -1430,12 +1272,7 @@ body.analytics-active .app-main {
   .ch-label { font-size: 11px; }
   .empty-state { font-size: 12px; }
   .chart-empty-state { font-size: 12px; }
-  .digits-label { font-size: 11px; }
-  .digits-table th { font-size: 9px; }
-  .digits-table td { font-size: 11px; }
-  .digit-btn { font-size: 14px; padding: 10px 0; }
 
-  .tab-bar { display: flex; }
   .app-main { padding: 6px; }
   .focus-bar { flex-wrap: wrap; }
   .header-tabs { display: none; }
