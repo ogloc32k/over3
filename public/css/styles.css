@@ -81,7 +81,7 @@ body.light {
 .app-brand span { color: var(--neon-blue); }
 .app-brand small { font-size: 8px; font-weight: 400; color: var(--text-secondary); }
 .header-tabs { display: flex; gap: 4px; align-items: center; }
-.header-tabs .tab-btn {
+.header-tabs .nav-tab {
   background: transparent;
   border: 1px solid transparent;
   color: var(--text-secondary);
@@ -94,8 +94,8 @@ body.light {
   cursor: pointer;
   transition: all 0.15s;
 }
-.header-tabs .tab-btn:hover { color: var(--text-primary); background: var(--bg-card); border-color: var(--border-subtle); }
-.header-tabs .tab-btn.active { border-color: var(--neon-blue); color: var(--neon-blue); background: rgba(59,130,246,0.04); }
+.header-tabs .nav-tab:hover { color: var(--text-primary); background: var(--bg-card); border-color: var(--border-subtle); }
+.header-tabs .nav-tab.active { border-color: var(--neon-blue); color: var(--neon-blue); background: rgba(59,130,246,0.04); }
 
 .header-right {
   display: flex;
@@ -359,14 +359,15 @@ body.light {
 .focus-bar .right .badge.breakdown { background: rgba(239,68,68,0.12); color: var(--red-loss); border: 1px solid var(--red-loss); }
 .focus-bar .right .badge.idle { background: rgba(120,123,134,0.08); color: var(--text-secondary); border: 1px solid var(--border-subtle); }
 
-.tab-pages {
-  flex: 1;
-  display: none;
-  overflow-y: auto;
-  padding: 6px 0;
-  position: relative;
+/* ============================================================
+   TAB VISIBILITY (CRITICAL FIX)
+   ============================================================ */
+.tab-page {
+  display: none !important;
 }
-.tab-pages.active { display: block; }
+.tab-page.active {
+  display: block !important;
+}
 
 /* ============================================================
    SETTINGS
@@ -538,11 +539,11 @@ body.light {
 }
 .data-table .col-price,
 .data-table .col-sr,
+.data-table .col-sr-pct,
+.data-table .col-rf-pct,
 .data-table .col-rsi,
 .data-table .col-bb-squeeze,
-.data-table .col-trend,
-.data-table .col-digit,
-.data-table .col-vol {
+.data-table .col-trend {
   text-align: right;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
@@ -559,8 +560,6 @@ body.light {
 .data-table .col-rsi.oversold { color: var(--green-profit); }
 .data-table .col-bb-squeeze { font-size: 12px; color: var(--text-secondary); }
 .data-table .col-trend { font-size: 14px; letter-spacing: 2px; }
-.data-table .col-digit { font-weight: 700; font-size: 14px; }
-.data-table .col-vol { font-size: 12px; color: var(--text-secondary); }
 .data-table .col-step { text-align: center; }
 
 /* ---- Soft badge styles for Breakout & Step ---- */
@@ -929,57 +928,45 @@ body.light {
   background: var(--bg-surface);
 }
 
-.digits-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
+.digits-stream {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 8px 12px;
+  margin-bottom: 8px;
 }
-.stats-item {
-  flex: 1;
-  min-width: 120px;
-}
-.stats-label {
-  font-size: 9px;
+.digits-stream-label {
+  font-size: 11px;
   text-transform: uppercase;
   color: var(--text-secondary);
   font-weight: 600;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
 }
-.stats-bar-container {
+.digits-stream-digits {
   display: flex;
-  height: 18px;
-  border-radius: 4px;
-  overflow: hidden;
-  background: var(--bg-terminal);
-  margin-top: 2px;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
 }
-.stats-bar {
-  display: flex;
+.stream-digit {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 9px;
-  font-weight: 600;
-  transition: width 0.3s;
-}
-.rise-bar { background: #10b981; color: #0b0e14; }
-.fall-bar { background: #ef4444; color: #0b0e14; }
-.stats-value { font-size: 14px; font-weight: 700; color: var(--text-primary); }
-.stats-bar.small-bar {
-  height: 6px;
+  width: 36px;
+  height: 36px;
   background: var(--bg-terminal);
-  border-radius: 3px;
-  overflow: hidden;
-  margin-top: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  font-size: 18px;
+  font-weight: 700;
+  font-family: 'Consolas', monospace;
+  color: var(--text-primary);
+  transition: all 0.15s;
 }
-.stats-bar-fill {
-  height: 100%;
-  background: var(--neon-blue);
-  border-radius: 3px;
-  transition: width 0.3s;
+.stream-digit:hover {
+  background: var(--bg-surface);
+  transform: scale(1.05);
 }
 
 .digits-matrix {
@@ -1074,7 +1061,7 @@ body.light {
   padding-bottom: env(safe-area-inset-bottom, 0);
   transition: background 0.3s, border-color 0.3s;
 }
-.tab-item {
+.tab-bar .nav-tab {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -1095,10 +1082,10 @@ body.light {
   position: relative;
   min-height: 44px;
 }
-.tab-item .icon { font-size: 22px; line-height: 1.2; }
-.tab-item .label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
-.tab-item.active { color: var(--neon-blue); }
-.tab-item.active::after {
+.tab-bar .nav-tab .icon { font-size: 22px; line-height: 1.2; }
+.tab-bar .nav-tab .label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.tab-bar .nav-tab.active { color: var(--neon-blue); }
+.tab-bar .nav-tab.active::after {
   content: '';
   position: absolute;
   top: 0;
@@ -1108,7 +1095,7 @@ body.light {
   background: var(--neon-blue);
   border-radius: 0 0 2px 2px;
 }
-.tab-item:active { transform: scale(0.95); }
+.tab-bar .nav-tab:active { transform: scale(0.95); }
 
 /* ============================================================
    FIX: AUTO-COLLAPSE SIDEBAR ON ANALYTICS
@@ -1150,17 +1137,17 @@ body.analytics-active .app-main {
   .sidebar-duration { flex: 1; min-width: 120px; }
   .sidebar-trade-btns { flex: 1; min-width: 120px; }
 
-  /* ---- Mobile Touch Targets ---- */
+  /* Touch targets */
   .btn,
   .btn-preset,
-  .tab-item,
+  .nav-tab,
   .sidebar-duration input,
   .sidebar-duration select,
   .theme-toggle,
   .sidebar-toggle-fixed,
   .settings-actions .btn-save,
   .log-header .clear-btn,
-  .header-tabs .tab-btn,
+  .header-tabs .nav-tab,
   .filter-bar input,
   .btn-date-toggle,
   .digits-chip {
@@ -1168,10 +1155,10 @@ body.analytics-active .app-main {
     min-width: 44px !important;
     padding: 8px 12px !important;
   }
-  .header-tabs .tab-btn { padding: 8px 14px !important; }
-  .tab-item { min-height: 48px !important; }
+  .header-tabs .nav-tab { padding: 8px 14px !important; }
+  .tab-bar .nav-tab { min-height: 48px !important; }
 
-  /* ---- Data table horizontal scroll ---- */
+  /* Data table horizontal scroll */
   .table-container {
     overflow-x: auto !important;
     -webkit-overflow-scrolling: touch !important;
@@ -1180,7 +1167,7 @@ body.analytics-active .app-main {
     min-width: 650px !important;
     font-size: 12px !important;
   }
-  .col-sr, .col-bb-squeeze, .col-trend, .col-digit, .col-vol {
+  .col-sr, .col-sr-pct, .col-rf-pct, .col-bb-squeeze, .col-trend {
     display: table-cell !important;
   }
   .data-table .col-asset {
@@ -1191,7 +1178,7 @@ body.analytics-active .app-main {
     border-right: 1px solid var(--border-subtle);
   }
 
-  /* ---- Mobile Dashboard (Markets) ---- */
+  /* Mobile Dashboard (Markets) */
   .desktop-table {
     display: none !important;
   }
@@ -1211,9 +1198,7 @@ body.analytics-active .app-main {
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
   }
-  .asset-carousel::-webkit-scrollbar {
-    display: none;
-  }
+  .asset-carousel::-webkit-scrollbar { display: none; }
   .asset-chip {
     flex: 0 0 auto;
     padding: 6px 14px;
@@ -1232,9 +1217,7 @@ body.analytics-active .app-main {
     color: #fff;
     border-color: var(--neon-blue);
   }
-  .asset-chip:active {
-    transform: scale(0.95);
-  }
+  .asset-chip:active { transform: scale(0.95); }
 
   .asset-detail-card {
     background: var(--bg-card);
@@ -1254,23 +1237,9 @@ body.analytics-active .app-main {
     flex-wrap: wrap;
     gap: 4px;
   }
-  .detail-header .asset-name {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-  .detail-header .asset-price {
-    font-size: 20px;
-    font-weight: 700;
-    font-family: 'Consolas', monospace;
-    color: var(--text-primary);
-  }
-  .detail-header .asset-change {
-    font-size: 12px;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 4px;
-  }
+  .detail-header .asset-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+  .detail-header .asset-price { font-size: 20px; font-weight: 700; font-family: 'Consolas', monospace; color: var(--text-primary); }
+  .detail-header .asset-change { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 4px; }
   .detail-header .asset-change.up { color: var(--green-profit); background: rgba(16,185,129,0.12); }
   .detail-header .asset-change.down { color: var(--red-loss); background: rgba(239,68,68,0.12); }
 
@@ -1288,18 +1257,8 @@ body.analytics-active .app-main {
     align-items: center;
     gap: 2px;
   }
-  .level-item .label {
-    font-size: 8px;
-    text-transform: uppercase;
-    color: var(--text-secondary);
-    font-weight: 600;
-  }
-  .level-item .value {
-    font-size: 12px;
-    font-weight: 700;
-    font-family: 'Consolas', monospace;
-    color: var(--text-primary);
-  }
+  .level-item .label { font-size: 8px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600; }
+  .level-item .value { font-size: 12px; font-weight: 700; font-family: 'Consolas', monospace; color: var(--text-primary); }
   .level-item .value.breakout { color: var(--green-profit); }
   .level-item .value.breakdown { color: var(--red-loss); }
 
@@ -1313,59 +1272,15 @@ body.analytics-active .app-main {
     align-items: center;
     gap: 8px;
   }
-  .indicator-item .label {
-    font-size: 10px;
-    text-transform: uppercase;
-    color: var(--text-secondary);
-    font-weight: 600;
-    min-width: 60px;
-  }
-  .indicator-item .value {
-    font-size: 12px;
-    font-weight: 700;
-    font-family: 'Consolas', monospace;
-    color: var(--text-primary);
-    min-width: 40px;
-  }
-  .rsi-gauge {
-    flex: 1;
-    height: 6px;
-    background: var(--bg-terminal);
-    border-radius: 3px;
-    overflow: hidden;
-    position: relative;
-  }
-  .rsi-gauge .rsi-fill {
-    height: 100%;
-    border-radius: 3px;
-    background: linear-gradient(to right, var(--red-loss), var(--orange-warn), var(--green-profit));
-    transition: width 0.3s;
-  }
+  .indicator-item .label { font-size: 10px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600; min-width: 60px; }
+  .indicator-item .value { font-size: 12px; font-weight: 700; font-family: 'Consolas', monospace; color: var(--text-primary); min-width: 40px; }
+  .rsi-gauge { flex: 1; height: 6px; background: var(--bg-terminal); border-radius: 3px; overflow: hidden; position: relative; }
+  .rsi-gauge .rsi-fill { height: 100%; border-radius: 3px; background: linear-gradient(to right, var(--red-loss), var(--orange-warn), var(--green-profit)); transition: width 0.3s; }
 
-  .detail-tick-stream {
-    margin-top: 4px;
-  }
-  .detail-tick-stream .tick-label {
-    font-size: 8px;
-    text-transform: uppercase;
-    color: var(--text-secondary);
-    font-weight: 600;
-    margin-bottom: 4px;
-  }
-  .tick-digits {
-    display: flex;
-    gap: 4px;
-    flex-wrap: wrap;
-  }
-  .tick-digit {
-    font-size: 12px;
-    font-weight: 600;
-    font-family: 'Consolas', monospace;
-    padding: 2px 6px;
-    border-radius: 3px;
-    background: var(--bg-terminal);
-    color: var(--text-secondary);
-  }
+  .detail-tick-stream { margin-top: 4px; }
+  .detail-tick-stream .tick-label { font-size: 8px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600; margin-bottom: 4px; }
+  .tick-digits { display: flex; gap: 4px; flex-wrap: wrap; }
+  .tick-digit { font-size: 12px; font-weight: 600; font-family: 'Consolas', monospace; padding: 2px 6px; border-radius: 3px; background: var(--bg-terminal); color: var(--text-secondary); }
   .tick-digit.up { color: var(--green-profit); background: rgba(16,185,129,0.08); }
   .tick-digit.down { color: var(--red-loss); background: rgba(239,68,68,0.08); }
 
@@ -1376,7 +1291,7 @@ body.analytics-active .app-main {
     display: none !important;
   }
 
-  /* ---- Analytics mobile fixes ---- */
+  /* Analytics mobile fixes */
   .metrics-grid-4 {
     grid-template-columns: repeat(2, 1fr) !important;
     gap: 4px !important;
@@ -1416,49 +1331,28 @@ body.analytics-active .app-main {
     font-size: 11px !important;
     margin-right: auto !important;
   }
-  .filter-left,
-  .filter-right {
-    width: auto !important;
-    justify-content: center !important;
-  }
+  .filter-left, .filter-right { width: auto !important; justify-content: center !important; }
   .filter-right .btn-preset {
     font-size: 9px !important;
     padding: 4px 6px !important;
     min-height: 34px !important;
   }
 
-  .chart-box .ch-wrap {
-    overflow: hidden !important;
-    position: relative !important;
-    max-height: 140px !important;
-  }
-  #chart-donut,
-  #chart-line {
-    max-height: 140px !important;
-  }
+  .chart-box .ch-wrap { overflow: hidden !important; position: relative !important; max-height: 140px !important; }
+  #chart-donut, #chart-line { max-height: 140px !important; }
 
-  /* ---- Digits mobile ---- */
-  .digits-stats {
-    flex-direction: column;
-  }
-  .digits-table {
-    font-size: 10px;
-  }
-  .digits-table th,
-  .digits-table td {
-    padding: 2px 4px;
-  }
-  .digits-chip {
-    font-size: 10px;
-    padding: 4px 8px;
-  }
+  /* Digits mobile */
+  .digits-stats { flex-direction: column; }
+  .digits-table { font-size: 10px; }
+  .digits-table th, .digits-table td { padding: 2px 4px; }
+  .digits-chip { font-size: 10px; padding: 4px 8px; }
 
   /* Hide sidebar controls on Analytics tab (mobile) */
   .analytics-active .sidebar-controls {
     display: none !important;
   }
 
-  /* ---- Font sizes for mobile readability ---- */
+  /* Font sizes for mobile readability */
   .app-brand { font-size: 14px; }
   .header-status { font-size: 12px; }
   .header-clock { font-size: 12px; }
@@ -1467,8 +1361,7 @@ body.analytics-active .app-main {
   .sidebar-controls .btn { font-size: 12px; }
   .sidebar-trade-btns .btn { font-size: 12px; }
   .sidebar-duration label { font-size: 11px; }
-  .sidebar-duration input,
-  .sidebar-duration select { font-size: 13px; }
+  .sidebar-duration input, .sidebar-duration select { font-size: 13px; }
   .focus-bar .left .name { font-size: 14px; }
   .focus-bar .left .price { font-size: 18px; }
   .focus-bar .right { font-size: 12px; }
@@ -1487,7 +1380,7 @@ body.analytics-active .app-main {
   .log-entry .msg { font-size: 12px; }
   .log-header .title { font-size: 12px; }
   .log-header .clear-btn { font-size: 11px; }
-  .tab-item .label { font-size: 10px; }
+  .tab-bar .nav-tab .label { font-size: 10px; }
   .filter-bar label { font-size: 11px; }
   .filter-bar input { font-size: 13px; }
   .btn-preset { font-size: 11px; }
@@ -1522,77 +1415,4 @@ body.analytics-active .app-main {
   .mobile-market-view {
     display: none !important;
   }
-}
-
-/* ---- Digits Stream ---- */
-.digits-stream {
-    background: var(--bg-card);
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
-    padding: 8px 12px;
-    margin-bottom: 8px;
-}
-
-.digits-stream-label {
-    font-size: 11px;
-    text-transform: uppercase;
-    color: var(--text-secondary);
-    font-weight: 600;
-    letter-spacing: 0.5px;
-    margin-bottom: 6px;
-}
-
-.digits-stream-digits {
-    display: flex;
-    gap: 6px;
-    flex-wrap: nowrap; /* Keep on one row */
-    overflow-x: auto; /* Fallback scroll if screen is ultra-narrow */
-    align-items: center;
-}
-
-.stream-digit {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    flex-shrink: 0;
-    background: var(--bg-terminal);
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
-    font-size: 18px;
-    font-weight: 700;
-    font-family: 'Consolas', monospace;
-    color: var(--text-primary);
-    transition: all 0.15s ease-in-out;
-}
-
-.stream-digit:hover {
-    background: var(--bg-surface);
-    transform: scale(1.05);
-}
-
-/* --- High-Value Visual Extensions --- */
-
-/* 1. Highlight the newest incoming digit */
-.stream-digit.latest {
-    border-color: #3b82f6;
-    box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
-    transform: scale(1.08);
-}
-
-/* 2. Optional Color Coding for Even/Odd or Up/Down */
-.stream-digit.even { color: #00E676; } /* Green accent */
-.stream-digit.odd { color: #FF5252; }  /* Red accent */
-
-/* 3. Mobile responsiveness (keeps 10 badges on 1 row) */
-@media (max-width: 480px) {
-    .stream-digit {
-        width: 28px;
-        height: 28px;
-        font-size: 14px;
-    }
-    .digits-stream-digits {
-        gap: 4px;
-    }
 }
