@@ -114,6 +114,7 @@ class MultiMarketPipeline {
                 symbol, price,
                 formattedPrice: formatMarketPrice(symbol, price),
                 risePct: 0, fallPct: 0,
+                srPositionPct: 50,
                 rsi: 50,
                 bbUpper: null, bbLower: null, bbMiddle: null,
                 bandwidth: null,
@@ -124,6 +125,7 @@ class MultiMarketPipeline {
                 lastPrices: buf.slice(-5),
                 tickDirections: [],
                 lastDigit: null,
+                digitMatrix: null,
                 conditions: { breakout: false, rsi: false, bollinger: false, volatility: false, ma: false },
                 maDiff: 0,
                 maDiffExpanding: false,
@@ -149,13 +151,20 @@ class MultiMarketPipeline {
         const rsi = this._rsi(buf, CONFIG.RSI_PERIOD, symbol);
         const sr = this._findSupportResistance(window);
 
-        // ---- Bandwidth (BB SQUEEZE) ----
+        // ---- Bandwidth ----
         let bandwidth = null;
         if (bb.middle !== null && bb.middle !== 0) {
             bandwidth = ((bb.upper - bb.lower) / bb.middle) * 100;
         }
 
-        // ---- MA diff for strategy (internal) ----
+        // ---- S/R Position % ----
+        let srPositionPct = 50;
+        if (sr.support !== null && sr.resistance !== null && sr.resistance !== sr.support) {
+            srPositionPct = ((price - sr.support) / (sr.resistance - sr.support)) * 100;
+            srPositionPct = Math.min(100, Math.max(0, srPositionPct));
+        }
+
+        // ---- MA diff (internal) ----
         let maDiff = 0;
         if (fastMA !== null && slowMA !== null) {
             maDiff = ((fastMA - slowMA) / price) * 100;
@@ -183,7 +192,7 @@ class MultiMarketPipeline {
             }
         }
 
-        // ---- Tick directions (last 5 ticks) ----
+        // ---- Tick directions (last 5) ----
         const lastPrices = buf.slice(-6);
         const tickDirections = [];
         if (lastPrices.length >= 2) {
@@ -199,6 +208,39 @@ class MultiMarketPipeline {
         // ---- Last digit ----
         const priceStr = price.toString();
         const lastDigit = parseInt(priceStr[priceStr.length - 1]) || 0;
+
+        // ---- Digit Matrix (0-9) ----
+        const digitCounts = Array(10).fill(0);
+        window.forEach(p => {
+            const str = p.toString();
+            const d = parseInt(str[str.length - 1]);
+            if (!isNaN(d)) digitCounts[d]++;
+        });
+        const totalTicks = window.length;
+        const digitMatrix = [];
+        for (let d = 0; d <= 9; d++) {
+            const matches = (digitCounts[d] / totalTicks) * 100;
+            const differs = 100 - matches;
+            // Over: count of ticks with last digit > d
+            let overCount = 0, underCount = 0;
+            window.forEach(p => {
+                const str = p.toString();
+                const digit = parseInt(str[str.length - 1]);
+                if (!isNaN(digit)) {
+                    if (digit > d) overCount++;
+                    else if (digit < d) underCount++;
+                }
+            });
+            const overPct = (overCount / totalTicks) * 100;
+            const underPct = (underCount / totalTicks) * 100;
+            digitMatrix.push({
+                digit: d,
+                matches: matches,
+                differs: differs,
+                over: overPct,
+                under: underPct
+            });
+        }
 
         // ---- Breakout conditions ----
         const isBreakout = sr.resistance ? price > sr.resistance * 1.001 : false;
@@ -234,6 +276,7 @@ class MultiMarketPipeline {
             symbol, price,
             formattedPrice: formatMarketPrice(symbol, price),
             risePct, fallPct,
+            srPositionPct,
             rsi,
             bbUpper: bb.upper,
             bbLower: bb.lower,
@@ -247,6 +290,7 @@ class MultiMarketPipeline {
             lastPrices: buf.slice(-5),
             tickDirections: tickDirections,
             lastDigit: lastDigit,
+            digitMatrix: digitMatrix,
             conditions: {
                 breakout: condBreakout || condBreakdown,
                 rsi: condRSI || condRSIPut,
