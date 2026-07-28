@@ -31,7 +31,7 @@ document.addEventListener('DOMContentLoaded', function() {
     toggleFixed.textContent = sidebar.classList.contains('collapsed') ? '▶' : '◀';
 
     // =========================================================================
-    // TAB SWITCHING (with analytics fixes)
+    // TAB SWITCHING
     // =========================================================================
     window.switchTab = function(tabId) {
         document.querySelectorAll('.tab-pages').forEach(p => p.classList.remove('active'));
@@ -46,7 +46,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const barBtn = document.querySelector(`.tab-bar .tab-item[data-tab="${tabId}"]`);
         if (barBtn) barBtn.classList.add('active');
 
-        // Hide live ticker on Analytics tab
         const focusBar = document.getElementById('focusBar');
         if (tabId === 'analytics') {
             focusBar.style.display = 'none';
@@ -54,26 +53,19 @@ document.addEventListener('DOMContentLoaded', function() {
             focusBar.style.display = 'flex';
         }
 
-        // --- FIX 1: Auto-collapse sidebar on Analytics ---
         const body = document.body;
         body.classList.remove('analytics-active', 'dashboard-active');
         if (tabId === 'analytics') {
             body.classList.add('analytics-active');
-            // Force sidebar collapsed on Analytics
             sidebar.classList.add('collapsed');
             toggleFixed.textContent = '▶';
-        } else {
-            // Restore sidebar on other tabs (if user wants it)
-            // But don't force it open – let the toggle control it
-            if (tabId === 'dashboard') {
-                body.classList.add('dashboard-active');
-            }
+        } else if (tabId === 'dashboard') {
+            body.classList.add('dashboard-active');
         }
 
         if (tabId === 'analytics') {
             setTimeout(() => {
                 renderCharts();
-                // Load default view (session) when analytics tab opens
                 timeframePreset(document.getElementById('p-session'), 'session');
             }, 100);
         }
@@ -136,13 +128,11 @@ document.addEventListener('DOMContentLoaded', function() {
     window.setFocusMarket = function(sym) {
         currentFocus = sym;
         if (globalState) renderUI(globalState);
-        // Update carousel active chip
         document.querySelectorAll('.asset-chip').forEach(el => el.classList.remove('active'));
         const chip = document.querySelector(`.asset-chip[data-symbol="${sym}"]`);
         if (chip) chip.classList.add('active');
     };
 
-    // ---- Mobile asset name shortener ----
     function getAssetLabel(name, isMobile) {
         if (!isMobile) return name;
         const shortMap = {
@@ -199,7 +189,6 @@ document.addEventListener('DOMContentLoaded', function() {
             alert('No price data available for ' + currentFocus + '. Please wait for ticks.');
             return;
         }
-
         fetch('/api/manual-trade', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -328,7 +317,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // =========================================================================
-    // RENDER UI (with mobile view)
+    // RENDER UI (with updated table columns)
     // =========================================================================
     function renderUI(state) {
         try {
@@ -399,7 +388,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('f-vol').textContent = 'Vol: —';
             }
 
-            // ---- Desktop table ----
+            // ---- Data table (updated columns) ----
             const tbody = document.getElementById('tableBody');
             tbody.innerHTML = '';
             let bestScore = -Infinity, bestSym = null;
@@ -410,19 +399,22 @@ document.addEventListener('DOMContentLoaded', function() {
             for (const sym in MARKETS_CFG) {
                 const metric = marketMetrics[sym] || null;
                 const isActive = sym === currentFocus;
-                let priceDisplay = '—', step = 0, stepLabel = 'SCAN', stepClass = 'step-0', score = 0;
+                let priceDisplay = '—', step = 0, stepLabel = 'SCAN', stepClass = 'step-0';
                 let support = '—', resistance = '—';
-                let breakoutLabel = '⚪ —';
+                let breakoutLabel = '⚪ RANGE';
                 let breakoutClass = 'badge-range';
-                let stepBadgeClass = 'badge-step-scan';
                 let rsiVal = '—', rsiClass = '';
-                let fastMA = '—', slowMA = '—', vol = '—', diff = '—', diffClass = '';
+                let vol = '—';
+                let squeezeDisplay = '—';
+                let squeezeClass = '';
+                let trendHtml = '';
+                let digit = '—';
 
                 if (metric) {
                     priceDisplay = metric.formattedPrice || formatPrice(sym, metric.price);
                     step = metric.step || 0;
-                    score = metric.score || 0;
 
+                    // Breakout
                     const price = metric.price;
                     const sup = metric.support;
                     const res = metric.resistance;
@@ -433,46 +425,44 @@ document.addEventListener('DOMContentLoaded', function() {
                         } else if (price < sup) {
                             breakoutLabel = '🔴 DOWN';
                             breakoutClass = 'badge-down';
-                        } else {
-                            breakoutLabel = '⚪ RANGE';
-                            breakoutClass = 'badge-range';
                         }
-                    } else {
-                        breakoutLabel = '⚪ —';
-                        breakoutClass = 'badge-range';
                     }
 
-                    if (step === 3) {
-                        stepLabel = 'ENTRY';
-                        stepClass = 'step-3';
-                        stepBadgeClass = 'badge-step-entry';
-                    } else if (step === 2) {
-                        stepLabel = 'NEAR';
-                        stepClass = 'step-2';
-                        stepBadgeClass = 'badge-step-trend';
-                    } else if (step === 1) {
-                        stepLabel = 'LEVEL';
-                        stepClass = 'step-1';
-                        stepBadgeClass = 'badge-step-level';
-                    } else {
-                        stepLabel = 'SCAN';
-                        stepClass = 'step-0';
-                        stepBadgeClass = 'badge-step-scan';
-                    }
+                    // Step label
+                    if (step === 3) { stepLabel = 'ENTRY'; stepClass = 'step-3'; }
+                    else if (step === 2) { stepLabel = 'NEAR'; stepClass = 'step-2'; }
+                    else if (step === 1) { stepLabel = 'LEVEL'; stepClass = 'step-1'; }
+                    else { stepLabel = 'SCAN'; stepClass = 'step-0'; }
 
                     support = metric.support ? Number(metric.support).toFixed(2) : '—';
                     resistance = metric.resistance ? Number(metric.resistance).toFixed(2) : '—';
                     rsiVal = metric.rsi !== undefined ? Number(metric.rsi).toFixed(1) : '—';
                     if (metric.rsi !== undefined && metric.rsi > 70) rsiClass = 'overbought';
                     else if (metric.rsi !== undefined && metric.rsi < 30) rsiClass = 'oversold';
-                    fastMA = metric.fastMA !== undefined && metric.fastMA !== null ? Number(metric.fastMA).toFixed(2) : '—';
-                    slowMA = metric.slowMA !== undefined && metric.slowMA !== null ? Number(metric.slowMA).toFixed(2) : '—';
                     vol = metric.volatility !== undefined ? Number(metric.volatility).toFixed(2) + '%' : '—';
-                    if (metric.fastMA !== null && metric.slowMA !== null) {
-                        const d = ((metric.fastMA - metric.slowMA) / metric.price * 100);
-                        diff = d.toFixed(2) + '%';
-                        diffClass = d >= 0 ? 'positive' : 'negative';
-                    } else { diff = '—'; diffClass = ''; }
+
+                    // ---- BB Squeeze ----
+                    if (metric.bandwidth !== null && metric.bandwidth !== undefined) {
+                        squeezeDisplay = metric.bandwidth.toFixed(2) + '%';
+                        if (metric.bandwidth < 2.0) {
+                            squeezeClass = 'badge-squeeze';
+                        }
+                    }
+
+                    // ---- Micro Trend ----
+                    if (metric.tickDirections && metric.tickDirections.length > 0) {
+                        const dirs = metric.tickDirections.slice(-5);
+                        trendHtml = dirs.map(d => {
+                            if (d > 0) return '<span class="tick-up">▲</span>';
+                            else if (d < 0) return '<span class="tick-down">▼</span>';
+                            else return '<span class="tick-flat">—</span>';
+                        }).join('');
+                    } else {
+                        trendHtml = '—';
+                    }
+
+                    // ---- Last Digit ----
+                    digit = metric.lastDigit !== undefined && metric.lastDigit !== null ? metric.lastDigit : '—';
                 }
 
                 const tr = document.createElement('tr');
@@ -484,11 +474,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td class="col-sr"><span class="s">${support}</span> / <span class="r">${resistance}</span></td>
                     <td class="col-status"><span class="${breakoutClass}">${breakoutLabel}</span></td>
                     <td class="col-rsi ${rsiClass}">${rsiVal}</td>
-                    <td class="col-ma"><span class="fast">${fastMA}</span></td>
-                    <td class="col-ma"><span class="slow">${slowMA}</span></td>
+                    <td class="col-bb-squeeze"><span class="${squeezeClass}">${squeezeDisplay}</span></td>
+                    <td class="col-trend">${trendHtml}</td>
+                    <td class="col-digit">${digit}</td>
                     <td class="col-vol">${vol}</td>
-                    <td class="col-diff ${diffClass}">${diff}</td>
-                    <td class="col-step"><span class="${stepBadgeClass}">${stepLabel}</span></td>
+                    <td class="col-step"><span class="step-badge ${stepClass}">${stepLabel}</span></td>
                 `;
                 tbody.appendChild(tr);
             }
@@ -506,8 +496,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const safeState = state || {};
         const marketMetrics = safeState.marketMetrics || {};
         const symbols = Object.keys(MARKETS_CFG);
-
-        // Build carousel chips
         const carousel = document.getElementById('assetCarousel');
         if (carousel) {
             carousel.innerHTML = '';
@@ -522,7 +510,6 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
 
-        // Update detail card
         const metric = marketMetrics[currentFocus] || null;
         if (!metric) {
             document.getElementById('mobile-asset-name').textContent = MARKETS_CFG[currentFocus] || '—';
@@ -546,7 +533,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const breakout = metric.isBreakout ? '🚀 UP' : (metric.isBreakdown ? '📉 DOWN' : '—');
         const breakoutClass = metric.isBreakout ? 'breakout' : (metric.isBreakdown ? 'breakdown' : '');
 
-        // Price change
         const lastPrices = metric.lastPrices || [];
         let change = 0;
         let changeClass = '';
@@ -583,13 +569,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
         document.getElementById('mobile-volatility').textContent = vol;
 
-        // Tick stream
         const digitsContainer = document.getElementById('mobile-tick-digits');
         if (lastPrices.length > 0) {
             const lastTicks = lastPrices.slice(-10);
             let html = '';
             let prev = null;
-            lastTicks.forEach((val, idx) => {
+            lastTicks.forEach((val) => {
                 const num = Number(val);
                 const cls = (prev !== null) ? (num > prev ? 'up' : (num < prev ? 'down' : '')) : '';
                 html += `<span class="tick-digit ${cls}">${num.toFixed(2)}</span>`;
@@ -702,7 +687,7 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     // =========================================================================
-    // ANALYTICS – CHARTS
+    // ANALYTICS
     // =========================================================================
     let assetBarChart = null;
     let equityChartInstance = null;
@@ -738,20 +723,10 @@ document.addEventListener('DOMContentLoaded', function() {
         const ctxBar = document.getElementById('chart-donut').getContext('2d');
         const ctxLine = document.getElementById('chart-line').getContext('2d');
 
-        // ---- Horizontal Bar Chart ----
         if (assetBarChart) assetBarChart.destroy();
         assetBarChart = new Chart(ctxBar, {
             type: 'bar',
-            data: {
-                labels: [],
-                datasets: [{
-                    data: [],
-                    backgroundColor: [],
-                    borderColor: [],
-                    borderWidth: 0,
-                    borderRadius: 4,
-                }]
-            },
+            data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderColor: [], borderWidth: 0, borderRadius: 4 }] },
             options: {
                 indexAxis: 'y',
                 responsive: true,
@@ -779,16 +754,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     },
                     y: {
                         grid: { display: false },
-                        ticks: {
-                            font: { size: isMobile ? 8 : 9 },
-                            color: '#d1d5db'
-                        },
+                        ticks: { font: { size: isMobile ? 8 : 9 }, color: '#d1d5db' },
                         afterFit: function(scale) {
-                            if (window.innerWidth < 768) {
-                                scale.width = 70;
-                            } else {
-                                scale.width = 120;
-                            }
+                            if (window.innerWidth < 768) scale.width = 70;
+                            else scale.width = 120;
                         }
                     }
                 }
@@ -796,15 +765,10 @@ document.addEventListener('DOMContentLoaded', function() {
             plugins: [barValueLabelPlugin]
         });
 
-        // ---- Equity Curve ----
-        if (equityChartInstance) {
-            equityChartInstance.destroy();
-            equityChartInstance = null;
-        }
+        if (equityChartInstance) { equityChartInstance.destroy(); equityChartInstance = null; }
         equityChartInstance = new Chart(ctxLine, {
             type: 'line',
             data: {
-                labels: [],
                 datasets: [{
                     label: 'Equity',
                     data: [],
@@ -850,7 +814,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         ticks: {
                             font: { size: 7 },
                             color: '#9ca3af',
-                            // --- FIX 5: Currency formatting ---
                             callback: function(value) {
                                 return (value >= 0 ? '+' : '-') + '$' + Math.abs(value).toFixed(2);
                             }
@@ -863,13 +826,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function renderAssetBarChart(contributions) {
         if (!assetBarChart) return;
-
         const isMobile = window.innerWidth < 768;
         const labels = contributions.map(a => getAssetLabel(a.name, isMobile));
         const values = contributions.map(a => a.pnl);
         const colors = values.map(v => v >= 0 ? '#10b981' : '#ef4444');
-        const borderColors = colors.map(c => c);
-
         const maxAbs = values.reduce((max, v) => Math.max(max, Math.abs(v)), 0);
         const buffer = maxAbs * 0.15;
         const suggestedMax = maxAbs + buffer;
@@ -878,13 +838,10 @@ document.addEventListener('DOMContentLoaded', function() {
         assetBarChart.data.labels = labels;
         assetBarChart.data.datasets[0].data = values;
         assetBarChart.data.datasets[0].backgroundColor = colors;
-        assetBarChart.data.datasets[0].borderColor = borderColors;
+        assetBarChart.data.datasets[0].borderColor = colors;
 
         assetBarChart.options.scales.x = {
-            grid: {
-                display: isMobile ? false : true,
-                color: 'rgba(0,0,0,0.05)'
-            },
+            grid: { display: isMobile ? false : true, color: 'rgba(0,0,0,0.05)' },
             ticks: {
                 display: isMobile ? false : true,
                 callback: function(value) {
@@ -894,15 +851,6 @@ document.addEventListener('DOMContentLoaded', function() {
             suggestedMin: suggestedMin,
             suggestedMax: suggestedMax
         };
-
-        assetBarChart.options.scales.y.afterFit = function(scale) {
-            if (window.innerWidth < 768) {
-                scale.width = 70;
-            } else {
-                scale.width = 120;
-            }
-        };
-
         assetBarChart.update('none');
     }
 
@@ -917,11 +865,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // ---- FIX 3: Chart empty state ----
     function showChartEmptyState(containerId, message) {
         const container = document.getElementById(containerId);
         if (!container) return;
-        // Check if empty state already exists
         let empty = container.parentElement.querySelector('.chart-empty-state');
         if (!empty) {
             empty = document.createElement('div');
@@ -945,8 +891,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function renderEquityCurve(equityData, startingBalance, timeframe) {
         if (!equityChartInstance) return;
-
-        // --- FIX 3: Empty state ---
         if (!equityData || equityData.length < 2) {
             showChartEmptyState('chart-line', 'No trade history recorded for this period');
             equityChartInstance.data.labels = [];
@@ -958,7 +902,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const labels = equityData.map(point => formatEquityLabel(point.timestamp, timeframe));
         const values = equityData.map(point => point.equity);
-
         const baseline = startingBalance || 0;
         const lastValue = values.length > 0 ? values[values.length-1] : baseline;
         const isAbove = lastValue >= baseline;
@@ -987,18 +930,14 @@ document.addEventListener('DOMContentLoaded', function() {
         while (equityChartInstance.data.datasets.length > 2) {
             equityChartInstance.data.datasets.pop();
         }
-
         equityChartInstance.update('none');
     }
 
-    // ---- FIX 2: ALL metrics read from API payload ----
     function updateMetrics(data) {
-        // Net Profit
         const profitEl = document.getElementById('meta-profit');
         profitEl.textContent = `$${data.totalProfit.toFixed(2)}`;
         profitEl.className = 'val ' + (data.totalProfit >= 0 ? 'positive' : 'negative');
 
-        // Strike Rate
         const total = data.tradeCount || 0;
         const wins = data.winCount || 0;
         const strike = total > 0 ? (wins / total) * 100 : 0;
@@ -1006,7 +945,6 @@ document.addEventListener('DOMContentLoaded', function() {
         strikeEl.innerHTML = `${strike.toFixed(1)}% <small style="display:block;font-size:8px;color:#787b86;font-weight:400;">${total} trades total</small>`;
         strikeEl.className = 'val';
 
-        // Profit Factor
         const grossProfit = data.grossProfit || 0;
         const grossLoss = data.grossLoss || 0;
         let pf;
@@ -1017,22 +955,18 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         document.getElementById('meta-pf').textContent = pf;
 
-        // Max Drawdown
         const maxDD = data.maxDrawdown || 0;
         const ddEl = document.getElementById('meta-dd');
         ddEl.textContent = `-${maxDD.toFixed(2)}%`;
         ddEl.className = 'val negative';
 
-        // Secondary metrics
         const losses = data.lossCount || 0;
         const avgWin = wins > 0 ? grossProfit / wins : 0;
         const avgLoss = losses > 0 ? grossLoss / losses : 0;
         document.getElementById('meta-avg-win-loss').textContent = `$${avgWin.toFixed(2)} / $${avgLoss.toFixed(2)}`;
 
         document.getElementById('meta-max-consec').textContent = `W:${wins} / L:${losses}`;
-
         document.getElementById('meta-avg-duration').textContent = `${total > 0 ? (data.totalDuration || 0) / total : 0}s`;
-
         document.getElementById('meta-won-lost').textContent = `${wins} / ${losses}`;
     }
 
@@ -1043,24 +977,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!startEl || !endEl) return;
         let startDate, endDate;
         switch (mode) {
-            case '24h':
-                startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-                endDate = now;
-                break;
-            case 'week':
-                startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-                endDate = now;
-                break;
-            case 'month':
-                startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-                endDate = now;
-                break;
-            case 'year':
-                startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
-                endDate = now;
-                break;
-            default:
-                return;
+            case '24h': startDate = new Date(now.getTime() - 24*60*60*1000); endDate = now; break;
+            case 'week': startDate = new Date(now.getTime() - 7*24*60*60*1000); endDate = now; break;
+            case 'month': startDate = new Date(now.getTime() - 30*24*60*60*1000); endDate = now; break;
+            case 'year': startDate = new Date(now.getTime() - 365*24*60*60*1000); endDate = now; break;
+            default: return;
         }
         const formatDate = (d) => d.toISOString().split('T')[0];
         startEl.value = formatDate(startDate);
@@ -1075,7 +996,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (mode === 'clear') {
             renderAssetBarChart([]);
             renderEquityCurve([], 0);
-            // Reset KPI cards
             document.getElementById('meta-profit').textContent = '$0.00';
             document.getElementById('meta-strike').innerHTML = '0.0% <small style="display:block;font-size:8px;color:#787b86;">0 trades total</small>';
             document.getElementById('meta-pf').textContent = '0.00';
