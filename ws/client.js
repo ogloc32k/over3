@@ -16,8 +16,8 @@ const subscribedSymbols = new Set();
 
 const engine = new MultiMarketPipeline(Object.keys(MARKETS));
 
+// ---- Protected send ----
 function send(msg) {
-    // ---- PROTECTED SEND ----
     if (derivWs && derivWs.readyState === WebSocket.OPEN) {
         derivWs.send(JSON.stringify(msg));
     } else {
@@ -34,7 +34,6 @@ function disconnectDeriv() {
     clearTimeout(watchdogTimer);
     clearTimeout(settlementTimer);
     if (derivWs) { derivWs.removeAllListeners(); try { derivWs.terminate(); } catch(e) {} derivWs = null; }
-    // Clear subscription set on disconnect
     subscribedSymbols.clear();
 }
 
@@ -58,7 +57,6 @@ async function connectDeriv() {
         state.balance = parseFloat(targetAccount.balance);
         state.currency = targetAccount.currency || 'USD';
 
-        // Set daily start balance for limits
         if (state.dailyStartBalance === null) state.dailyStartBalance = state.balance;
 
         const limitHit = await syncDailyPnlFromDB();
@@ -152,9 +150,10 @@ function handleMessage(msg) {
     if (msg.msg_type === 'history') {
         const symbol = msg.echo_req.ticks_history;
         const prices = msg.history.prices.map(p => parseFloat(p));
-        prices.forEach(p => engine.feed(symbol, p));
+        // We don't have raw prices for history, but we can store only numbers.
+        // For digits, we'll rely on the raw price from live ticks.
+        prices.forEach(p => engine.feed(symbol, p, p.toString())); // pass raw as string
         addLog(`✅ History synchronized for ${symbol}`);
-        // No extra ticks subscription here – already done in open
         return;
     }
 
@@ -162,7 +161,8 @@ function handleMessage(msg) {
         try {
             const symbol = msg.tick.symbol;
             const price = parseFloat(msg.tick.quote);
-            processLiveFeed(symbol, price);
+            const rawPrice = msg.tick.quote; // raw string from Deriv
+            processLiveFeed(symbol, price, rawPrice);
         } catch (err) {
             addLog(`❌ Tick handler error: ${err.message}`);
             console.error('Tick error:', err);
@@ -314,8 +314,9 @@ function evaluateSniperEntry(symbol, metric) {
     return 'IDLE';
 }
 
-function processLiveFeed(symbol, price) {
-    const metric = engine.feed(symbol, price);
+// ---- processLiveFeed now accepts rawPrice ----
+function processLiveFeed(symbol, price, rawPrice) {
+    const metric = engine.feed(symbol, price, rawPrice);
     if (!metric) return;
     state.marketMetrics[symbol] = metric;
 
