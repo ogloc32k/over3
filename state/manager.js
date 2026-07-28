@@ -5,6 +5,12 @@ const { supabase } = require('../database');
 
 const CONFIG = loadConfig();
 const STATE_FILE = '/var/data/deriv_multimarket_state.json';
+const TIMEZONE = 'Africa/Nairobi';
+
+// Helper: Get ISO Date string (YYYY-MM-DD) in Africa/Nairobi timezone
+function getNairobiDateStr(date = new Date()) {
+    return date.toLocaleDateString("en-CA", { timeZone: TIMEZONE });
+}
 
 const state = {
     active: false,
@@ -26,18 +32,20 @@ const state = {
     lossCooldownUntil: 0,
     pendingSettlement: false,
     consecutiveLosses: 0,
-    // ---- midnight heartbeat state ----
-    currentTradingDay: new Date().getDate(),
+    // ---- Midnight heartbeat tracking ----
+    currentTradingDayStr: getNairobiDateStr(),
     dailyLimitReached: false,
     lastTradeTimestamp: 0
 };
 
+// ---------- Atomic File Persistence ----------
 function saveState() {
     try {
         const dir = path.dirname(STATE_FILE);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(STATE_FILE, JSON.stringify({
-            date: new Date().toLocaleDateString("en-US", { timeZone: "Africa/Nairobi" }),
+
+        const payload = JSON.stringify({
+            dateStr: getNairobiDateStr(),
             tradingMode: state.tradingMode,
             locked: state.locked,
             lockReason: state.lockReason,
@@ -45,17 +53,26 @@ function saveState() {
             sessionPnl: state.sessionPnl,
             dailyPnl: state.dailyPnl,
             dailyLimitReached: state.dailyLimitReached,
-            currentTradingDay: state.currentTradingDay
-        }));
-    } catch(e) {}
+            dailyStartBalance: state.dailyStartBalance
+        }, null, 2);
+
+        // Safe atomic write pattern
+        const tempPath = `${STATE_FILE}.tmp`;
+        fs.writeFileSync(tempPath, payload, 'utf8');
+        fs.renameSync(tempPath, STATE_FILE);
+    } catch (e) {
+        console.error('❌ [State Manager] Failed to save state:', e.message);
+    }
 }
 
 function loadState() {
     try {
         if (fs.existsSync(STATE_FILE)) {
-            const saved = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-            const today = new Date().toLocaleDateString("en-US", { timeZone: "Africa/Nairobi" });
-            if (saved.date === today) {
+            const raw = fs.readFileSync(STATE_FILE, 'utf8');
+            const saved = JSON.parse(raw);
+            const todayStr = getNairobiDateStr();
+
+            if (saved.dateStr === todayStr) {
                 state.tradingMode = saved.tradingMode || 'demo';
                 state.locked = saved.locked || false;
                 state.lockReason = saved.lockReason || '';
@@ -63,17 +80,22 @@ function loadState() {
                 state.sessionPnl = saved.sessionPnl || 0;
                 state.dailyPnl = saved.dailyPnl || 0;
                 state.dailyLimitReached = saved.dailyLimitReached || false;
-                state.currentTradingDay = saved.currentTradingDay || new Date().getDate();
+                state.dailyStartBalance = saved.dailyStartBalance || null;
             } else {
-                state.locked = false; state.lockReason = '';
+                console.log(`[State Manager] New day detected on startup. Resetting daily counters.`);
+                state.locked = false;
+                state.lockReason = '';
                 state.active = saved.sessionActive || false;
                 state.sessionPnl = 0;
                 state.dailyPnl = 0;
                 state.dailyLimitReached = false;
-                state.currentTradingDay = new Date().getDate();
+                state.dailyStartBalance = null;
             }
+            state.currentTradingDayStr = todayStr;
         }
-    } catch(e) {}
+    } catch (e) {
+        console.error('⚠️ [State Manager] Error reading state file (resetting to defaults):', e.message);
+    }
 }
 
 function getFullState() {
@@ -81,86 +103,102 @@ function getFullState() {
     return { ...rest, marketMetrics: state.marketMetrics || {} };
 }
 
-// ---- Midnight Heartbeat ----
+// ---------- Midnight Heartbeat ----------
 function startMidnightHeartbeat() {
     setInterval(() => {
-        const now = new Date();
-        const today = now.getDate();
-        if (today !== state.currentTradingDay) {
-            console.log(`[System] 🕛 Midnight crossed. Resetting daily limits for new session.`);
-            state.currentTradingDay = today;
+        const todayStr = getNairobiDateStr();
+        if (todayStr !== state.currentTradingDayStr) {
+            console.log(`[System] 🕛 Midnight crossed (${TIMEZONE}). Resetting daily limits for new session.`);
+            state.currentTradingDayStr = todayStr;
             state.dailyPnl = 0;
             state.dailyLimitReached = false;
             state.locked = false;
             state.lockReason = '';
-            state.sessionPnl = 0; // optional reset
+            state.sessionPnl = 0;
             state.consecutiveLosses = 0;
             state.lastTradeTimestamp = 0;
+            if (state.balance !== null) {
+                state.dailyStartBalance = state.balance;
+            }
             saveState();
-            // broadcast via SSE will happen in ws/client periodic broadcast
         }
-    }, 60000);
+    }, 30000); // Check every 30 seconds
 }
 
-// ---- Strategy ----
+// ---------- Strategy Check ----------
 function checkStrategy(symbol, metric) {
     if (!metric) return null;
 
-    const { rsi, volatility, maDiff, maDiffExpanding2Tick } = metric;
+    // Aligned with pipeline output property: maDiffExpanding
+    const { rsi, volatility, maDiff, maDiffExpanding } = metric;
 
     if (volatility < CONFIG.MIN_VOLATILITY_PERCENT) return null;
-    if (!maDiffExpanding2Tick) return null;
+    if (!maDiffExpanding) return null;
     if (Math.abs(maDiff) < CONFIG.MA_DIFF_THRESHOLD) return null;
 
-    if (maDiff > 0 && rsi > CONFIG.OVERBOUGHT_THRESHOLD) {
+    // Signal confirmation
+    if (maDiff > 0 && rsi >= 50 && rsi <= (CONFIG.OVERBOUGHT_THRESHOLD || 85)) {
         return { direction: 'CALL', score: volatility * 1.5 };
     }
-    if (maDiff < 0 && rsi < CONFIG.OVERSOLD_THRESHOLD) {
+    if (maDiff < 0 && rsi <= 50 && rsi >= (CONFIG.OVERSOLD_THRESHOLD || 15)) {
         return { direction: 'PUT', score: volatility * 1.5 };
     }
     return null;
 }
 
+// ---------- Database Sync ----------
 async function syncDailyPnlFromDB() {
     try {
-        const now = new Date();
-        const todayStart = new Date(now);
-        todayStart.setUTCHours(0, 0, 0, 0);
+        // Calculate Nairobi midnight in UTC ISO format
+        const nowStr = getNairobiDateStr();
+        const startOfDayNairobi = new Date(`${nowStr}T00:00:00+03:00`);
+
         const { data, error } = await supabase
             .from('trading_ledger')
             .select('profit_loss')
-            .gte('created_at', todayStart.toISOString());
+            .gte('created_at', startOfDayNairobi.toISOString());
+
         if (error) throw error;
+
         const total = data.reduce((sum, row) => sum + (row.profit_loss || 0), 0);
         state.dailyPnl = total;
-        if (state.balance !== null) state.dailyStartBalance = state.balance - state.dailyPnl;
-        const limitHit = checkDailyLimits();
-        return limitHit;
-    } catch (err) { console.error('❌ Failed to sync daily P&L:', err.message); return false; }
+
+        if (state.balance !== null && state.dailyStartBalance === null) {
+            state.dailyStartBalance = state.balance - state.dailyPnl;
+        }
+
+        return checkDailyLimits();
+    } catch (err) {
+        console.error('❌ Failed to sync daily P&L from DB:', err.message);
+        return false;
+    }
 }
 
+// ---------- Risk Limits ----------
 function checkDailyLimits() {
-    if (state.dailyStartBalance === null || state.dailyStartBalance === 0) return false;
-    const tpLimit = state.dailyStartBalance * (CONFIG.TP_PERCENT / 100);
-    const slLimit = state.dailyStartBalance * (CONFIG.SL_PERCENT / 100);
+    // If start balance is missing, attempt fallback to current balance
+    const baseBalance = state.dailyStartBalance || state.balance;
+    if (!baseBalance || baseBalance <= 0) return false;
+
+    const tpLimit = baseBalance * (CONFIG.TP_PERCENT / 100);
+    const slLimit = baseBalance * (CONFIG.SL_PERCENT / 100);
+
     if (state.dailyPnl >= tpLimit) {
         state.locked = true;
         state.dailyLimitReached = true;
-        state.lockReason = `🎯 Daily Target Reached: +$${state.dailyPnl.toFixed(2)} (${CONFIG.TP_PERCENT}% of start). Trading paused. Will resume at midnight.`;
+        state.lockReason = `🎯 Daily Target Reached: +$${state.dailyPnl.toFixed(2)} (${CONFIG.TP_PERCENT}%). Trading paused.`;
+        saveState();
         return true;
     }
+
     if (state.dailyPnl <= -slLimit) {
         state.locked = true;
         state.dailyLimitReached = true;
-        state.lockReason = `🛑 Daily Loss Limit Breached: -$${Math.abs(state.dailyPnl).toFixed(2)} (${CONFIG.SL_PERCENT}% of start). Trading paused. Will resume at midnight.`;
+        state.lockReason = `🛑 Daily Loss Limit Breached: -$${Math.abs(state.dailyPnl).toFixed(2)} (${CONFIG.SL_PERCENT}%). Trading paused.`;
+        saveState();
         return true;
     }
-    if (state.locked && state.dailyPnl < tpLimit && state.dailyPnl > -slLimit) {
-        state.locked = false;
-        state.dailyLimitReached = false;
-        state.lockReason = '';
-        return true;
-    }
+
     return false;
 }
 
