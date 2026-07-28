@@ -5,16 +5,38 @@ const path = require('path');
 const { supabase } = require('./database');
 const { loadState, saveState, state, CONFIG, syncDailyPnlFromDB } = require('./state/manager');
 const { connectDeriv, disconnectDeriv } = require('./ws/client');
+const { addLog, broadcastSSE } = require('./api/sse');
 const apiRoutes = require('./api/routes');
 
 const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 
-// ---------- Middleware & Routes ----------
+// ---------- Middleware ----------
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 app.use('/api', apiRoutes);
+
+// ---------- Scheduled Restart (safety net) ----------
+function scheduleRestart() {
+    const now = Date.now();
+    const nextMidnightUTC = new Date(now);
+    nextMidnightUTC.setUTCHours(0, 0, 0, 0);
+    if (nextMidnightUTC.getTime() < now) {
+        nextMidnightUTC.setUTCDate(nextMidnightUTC.getUTCDate() + 1);
+    }
+    const delay = nextMidnightUTC.getTime() - now;
+    console.log(`⏰ Next full restart scheduled at ${nextMidnightUTC.toISOString()} (03:00 EAT)`);
+    setTimeout(() => {
+        console.log('🔄 Scheduled full restart at midnight. Resetting daily state...');
+        state.locked = false;
+        state.lockReason = '';
+        state.dailyPnl = 0;
+        saveState();
+        process.exit(0);
+    }, delay);
+}
+scheduleRestart();
 
 // ---------- Database Health Check ----------
 async function checkDatabaseConnection() {
@@ -22,9 +44,8 @@ async function checkDatabaseConnection() {
         const { count, error } = await supabase
             .from('trading_ledger')
             .select('id', { count: 'exact', head: true });
-        
         if (error) throw error;
-        console.log(`✅ Supabase Connected (Total Ledger Records: ${count ?? 0})`);
+        console.log(`✅ Supabase Database Connected (Total Records: ${count})`);
         return true;
     } catch (err) {
         console.error(`❌ Database Connection Error: ${err.message}`);
@@ -46,41 +67,32 @@ function startPnlSync() {
     }, CONFIG.PNL_SYNC_INTERVAL_MS || 300000);
 }
 
-// ---------- Graceful Shutdown Handling ----------
+// ---------- Graceful Shutdown ----------
 async function gracefulShutdown(signal) {
     console.log(`\n⚠️  Received ${signal}. Starting graceful shutdown...`);
-    
     if (syncInterval) clearInterval(syncInterval);
-    
-    // 1. Close WebSockets
     try {
         if (typeof disconnectDeriv === 'function') disconnectDeriv();
     } catch (e) {
         console.error('Error closing WebSocket:', e.message);
     }
-
-    // 2. Persist state to disk
     try {
         saveState();
-        console.log('💾 State successfully saved before exit.');
+        console.log('💾 State saved.');
     } catch (e) {
-        console.error('Failed to save state during shutdown:', e.message);
+        console.error('Failed to save state:', e.message);
     }
-
-    // 3. Stop HTTP server & exit
     server.close(() => {
-        console.log('🛑 HTTP Server stopped. Process exiting cleanly.');
+        console.log('🛑 Server stopped.');
         process.exit(0);
     });
-
-    // Hard exit safeguard after 5 seconds if server hangs
     setTimeout(() => process.exit(1), 5000);
 }
 
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason) => {
     console.error('🚨 UNHANDLED REJECTION:', reason);
 });
 
@@ -89,26 +101,33 @@ process.on('uncaughtException', (error) => {
     console.error(error.stack);
 });
 
-// ---------- Boot Sequence ----------
+// ---------- Boot ----------
 async function boot() {
     console.log('⚡ Initializing Trading Engine...');
-    
-    // 1. Load persisted disk state
+
+    // 1. Load persisted state
     loadState();
 
-    // 2. Verify DB before connecting to live broker
+    // 2. Check DB
     const dbOk = await checkDatabaseConnection();
     if (!dbOk) {
-        console.warn('⚠️  Database connection failed during boot. System will start, but cloud persistence may fail.');
+        console.warn('⚠️  Database connection failed. Cloud persistence may fail.');
     }
 
-    // 3. Connect to Deriv WebSocket & start sync timers
+    // 3. Connect to Deriv WebSocket
     console.log('[DEBUG] About to call connectDeriv()...');
-    connectDeriv();
-    console.log('[DEBUG] connectDeriv() returned.');
+    try {
+        connectDeriv();
+        console.log('[DEBUG] connectDeriv() returned successfully.');
+    } catch (err) {
+        console.error('[DEBUG] connectDeriv() threw an error:', err.message);
+        console.error(err.stack);
+    }
+
+    // 4. Start PnL sync
     startPnlSync();
 
-    // 4. Bind HTTP Server
+    // 5. Start HTTP server
     server.listen(PORT, () => {
         console.log(`🚀 System Online & Armed on port ${PORT}`);
     });
