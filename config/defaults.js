@@ -4,6 +4,11 @@ const path = require('path');
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '../data');
 const CONFIG_FILE = path.join(DATA_DIR, 'deriv_config.json');
 
+/**
+ * Core trading parameters (defaults)
+ * NOTE: APP_ID and API_TOKEN are read from environment variables,
+ * not stored in the config file.
+ */
 const DEFAULT_CONFIG = Object.freeze({
     // ---------- Trade Execution ----------
     DURATION: 7,                     // Ticks for auto trading
@@ -31,35 +36,57 @@ const DEFAULT_CONFIG = Object.freeze({
     PNL_SYNC_INTERVAL_MS: 300000
 });
 
+/**
+ * Loads persisted config from disk and merges with defaults,
+ * then injects environment variables for credentials.
+ */
 function loadConfig() {
+    let saved = {};
     try {
         if (fs.existsSync(CONFIG_FILE)) {
             const rawData = fs.readFileSync(CONFIG_FILE, 'utf8');
-            const saved = JSON.parse(rawData);
-            return { ...DEFAULT_CONFIG, ...saved };
+            saved = JSON.parse(rawData);
         }
     } catch (error) {
         console.error(`[CONFIG ERROR] Failed to load config from ${CONFIG_FILE}:`, error.message);
     }
-    return { ...DEFAULT_CONFIG };
+
+    // Merge defaults + saved user config + environment credentials
+    const merged = {
+        ...DEFAULT_CONFIG,
+        ...saved,
+        APP_ID: (process.env.DERIV_APP_ID || '').trim(),
+        API_TOKEN: (process.env.DERIV_PAT || '').trim()
+    };
+
+    return merged;
 }
 
+/**
+ * Saves user-modifiable settings to disk (credentials are NOT saved)
+ */
 function saveConfig(config) {
     try {
         if (!config || typeof config !== 'object') {
             throw new Error('Invalid config object provided');
         }
+        // Remove credentials before saving to disk
+        const { APP_ID, API_TOKEN, ...safeConfig } = config;
+        const merged = { ...DEFAULT_CONFIG, ...safeConfig };
+
         if (!fs.existsSync(DATA_DIR)) {
             fs.mkdirSync(DATA_DIR, { recursive: true });
         }
-        
-        const merged = { ...DEFAULT_CONFIG, ...config };
         fs.writeFileSync(CONFIG_FILE, JSON.stringify(merged, null, 2));
         return merged;
     } catch (error) {
         console.error(`[CONFIG ERROR] Failed to save config to ${CONFIG_FILE}:`, error.message);
-        throw error; // Re-throw so caller (e.g. API route) knows it failed
+        throw error;
     }
 }
 
-module.exports = { DEFAULT_CONFIG, loadConfig, saveConfig };
+module.exports = {
+    DEFAULT_CONFIG,
+    loadConfig,
+    saveConfig
+};
