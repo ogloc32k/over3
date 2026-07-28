@@ -1,7 +1,7 @@
 const WebSocket = require('ws');
 // Import 'state' as a mutable object reference (avoid importing primitive values as consts)
 const { state, CONFIG, getFullState } = require('../state/manager');
-const { broadcastSSE } = require('../sse/broadcaster');
+const { broadcastSSE } = require('../api/sse');   // <-- FIXED: correct path
 
 // Inner module scope state & timer handles
 let derivWs = null;
