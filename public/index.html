@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>QUANTCORE // TERMINAL v6.0</title>
+  <!-- Force no caching -->
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
@@ -12,26 +13,26 @@
 </head>
 <body>
 
-  <!-- HEADER -->
+  <!-- ====== HEADER ====== -->
   <header class="app-header" id="appHeader">
     <div class="left">
       <div class="app-brand">QUANTCORE<span>//</span>TERMINAL <small>v6.0</small></div>
       <div class="header-tabs" id="headerTabs">
-        <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
-        <button class="tab-btn" data-tab="logs">Logs</button>
-        <button class="tab-btn" data-tab="analytics">Analytics</button>
-        <button class="tab-btn" data-tab="digits">Digits</button>
-        <button class="tab-btn" data-tab="settings">Settings</button>
+        <button class="nav-tab active" data-tab="tab-dashboard">DASHBOARD</button>
+        <button class="nav-tab" data-tab="tab-logs">LOGS</button>
+        <button class="nav-tab" data-tab="tab-analytics">ANALYTICS</button>
+        <button class="nav-tab" data-tab="tab-digits">DIGITS</button>
+        <button class="nav-tab" data-tab="tab-settings">SETTINGS</button>
       </div>
     </div>
     <div class="header-right">
       <span class="header-status" id="header-status">● IDLE</span>
       <div class="header-clock"><span id="clock-display">00:00:00</span> EAT</div>
-      <button class="theme-toggle" id="themeToggle">🌙</button>
+      <button class="theme-toggle" id="themeToggle" title="Toggle theme">🌙</button>
     </div>
   </header>
 
-  <!-- BODY -->
+  <!-- ====== BODY ====== -->
   <div class="app-body" id="appBody">
 
     <!-- SIDEBAR -->
@@ -73,7 +74,7 @@
     <!-- MAIN CONTENT -->
     <main class="app-main">
 
-      <!-- FOCUS BAR -->
+      <!-- FOCUS BAR (hidden on Analytics & Digits) -->
       <div class="focus-bar" id="focusBar">
         <div class="left">
           <span class="name" id="f-name">Volatility 75 Index</span>
@@ -87,9 +88,10 @@
         </div>
       </div>
 
-      <!-- TAB PAGES -->
-      <!-- DASHBOARD -->
-      <div class="tab-pages active" id="tab-dashboard">
+      <!-- ====== TAB PAGES ====== -->
+
+      <!-- DASHBOARD TAB -->
+      <div id="tab-dashboard" class="tab-page active">
         <div class="table-container desktop-table">
           <table class="data-table" id="dataTable">
             <thead>
@@ -142,8 +144,8 @@
         </div>
       </div>
 
-      <!-- LOGS -->
-      <div class="tab-pages" id="tab-logs">
+      <!-- LOGS TAB -->
+      <div id="tab-logs" class="tab-page">
         <div class="log-header">
           <span class="title">📋 Live System Audit Log</span>
           <button class="clear-btn" onclick="clearLogs()">🗑️ Clear</button>
@@ -151,8 +153,8 @@
         <div class="log-stream" id="log-stream"></div>
       </div>
 
-      <!-- ANALYTICS -->
-      <div class="tab-pages" id="tab-analytics">
+      <!-- ANALYTICS TAB -->
+      <div id="tab-analytics" class="tab-page">
         <div class="analytics-container">
           <div class="analytics-filter-bar">
             <span class="page-title">Session Analytics</span>
@@ -193,24 +195,19 @@
         </div>
       </div>
 
-      <!-- ====== DIGITS TAB (UPDATED) ====== -->
-      <div class="tab-pages" id="tab-digits">
+      <!-- DIGITS TAB -->
+      <div id="tab-digits" class="tab-page">
         <div class="digits-container">
-          <!-- Asset Selector -->
           <div class="digits-asset-selector">
             <span class="digits-label">Asset:</span>
             <div class="digits-asset-chips" id="digitsAssetChips"></div>
           </div>
-
-          <!-- Last 10 Digits Stream -->
           <div class="digits-stream">
             <div class="digits-stream-label">LAST 10 DIGITS</div>
             <div id="digitsHistoryBadges" class="digits-stream-digits"></div>
           </div>
-
-          <!-- Digit Analysis Matrix Table -->
           <div class="digits-matrix">
-            <table class="digits-table" style="width: 100%; text-align: center;">
+            <table class="digits-table" style="width:100%; text-align:center;">
               <thead>
                 <tr>
                   <th>DIGIT</th>
@@ -228,8 +225,8 @@
         </div>
       </div>
 
-      <!-- SETTINGS -->
-      <div class="tab-pages" id="tab-settings">
+      <!-- SETTINGS TAB -->
+      <div id="tab-settings" class="tab-page">
         <div class="settings-grid">
           <div class="settings-section">
             <h4>📊 Breakout Parameters</h4>
@@ -281,13 +278,14 @@
 
   <!-- BOTTOM TAB BAR (Mobile) -->
   <div class="tab-bar" id="tabBar">
-    <button class="tab-item active" data-tab="dashboard"><span class="icon">📊</span><span class="label">Markets</span></button>
-    <button class="tab-item" data-tab="logs"><span class="icon">📋</span><span class="label">Logs</span></button>
-    <button class="tab-item" data-tab="analytics"><span class="icon">📈</span><span class="label">Analytics</span></button>
-    <button class="tab-item" data-tab="digits"><span class="icon">🔢</span><span class="label">Digits</span></button>
-    <button class="tab-item" data-tab="settings"><span class="icon">⚙️</span><span class="label">Settings</span></button>
+    <button class="nav-tab active" data-tab="tab-dashboard"><span class="icon">📊</span><span class="label">Markets</span></button>
+    <button class="nav-tab" data-tab="tab-logs"><span class="icon">📋</span><span class="label">Logs</span></button>
+    <button class="nav-tab" data-tab="tab-analytics"><span class="icon">📈</span><span class="label">Analytics</span></button>
+    <button class="nav-tab" data-tab="tab-digits"><span class="icon">🔢</span><span class="label">Digits</span></button>
+    <button class="nav-tab" data-tab="tab-settings"><span class="icon">⚙️</span><span class="label">Settings</span></button>
   </div>
 
+  <!-- CACHE‑BUSTED SCRIPT -->
   <script src="js/app.js?v=2"></script>
 </body>
 </html>
