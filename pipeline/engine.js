@@ -7,11 +7,13 @@ const BUFFER_CLEANUP_THRESHOLD = 2200;
 class MultiMarketPipeline {
     constructor(symbols) {
         this.buffers = {};
-        this.rawBuffers = {};       // store raw price strings for last 10 ticks
+        this.rawBuffers = {};
         this.lastPrices = {};
         this.diffHistory = {};
         this.rsiState = {};
-        this.computeDigits = false; // default off (only for Digits tab)
+        this.computeDigits = false;
+        // Cache for digit stats to avoid recomputation
+        this.digitStatsCache = {};
         for (const symbol of symbols) {
             this.buffers[symbol] = [];
             this.rawBuffers[symbol] = [];
@@ -101,15 +103,66 @@ class MultiMarketPipeline {
         return { support: min, resistance: max };
     }
 
-    // ---- feed() now accepts rawPrice ----
+    // ---- Helper: symbol decimals ----
+    _getSymbolDecimals(symbol) {
+        const map = {
+            'R_10': 2, '1HZ10V': 2,
+            'R_25': 3, '1HZ25V': 2,
+            'R_50': 4, '1HZ50V': 2,
+            'R_75': 4, '1HZ75V': 2,
+            'R_100': 2, '1HZ100V': 2
+        };
+        return map[symbol] !== undefined ? map[symbol] : 2;
+    }
+
+    // ---- Safe digit extraction from price (number or string) ----
+    _extractSafeDigit(price, symbol) {
+        if (price === null || price === undefined) return 0;
+        const decimals = this._getSymbolDecimals(symbol);
+        const formatted = Number(price).toFixed(decimals);
+        const lastChar = formatted.slice(-1);
+        const digit = parseInt(lastChar, 10);
+        return isNaN(digit) ? 0 : digit;
+    }
+
+    // ---- Compute digit stats from buffer ----
+    getDigitStats(symbol) {
+        const buf = this.buffers[symbol];
+        if (!buf || buf.length === 0) {
+            return null;
+        }
+        const total = buf.length;
+        const digits = buf.map(price => this._extractSafeDigit(price, symbol));
+
+        const counts = Array(10).fill(0);
+        digits.forEach(d => counts[d]++);
+
+        const matches = counts.map(c => ((c / total) * 100).toFixed(1) + '%');
+        const differs = counts.map(c => (((total - c) / total) * 100).toFixed(1) + '%');
+
+        const over = Array(10).fill(0);
+        const under = Array(10).fill(0);
+        for (let d = 0; d <= 9; d++) {
+            const overCount = digits.filter(val => val > d).length;
+            const underCount = digits.filter(val => val < d).length;
+            over[d] = ((overCount / total) * 100).toFixed(1) + '%';
+            under[d] = ((underCount / total) * 100).toFixed(1) + '%';
+        }
+
+        return { over, under, matches, differs };
+    }
+
+    // ---- feed() ----
     feed(symbol, price, rawPrice) {
         const buf = this.buffers[symbol];
         buf.push(price);
 
         // Store raw price strings (keep last 10)
         const rawBuf = this.rawBuffers[symbol];
-        rawBuf.push(rawPrice);
-        if (rawBuf.length > 10) rawBuf.shift();
+        if (rawPrice !== undefined) {
+            rawBuf.push(rawPrice);
+            if (rawBuf.length > 10) rawBuf.shift();
+        }
 
         if (buf.length > BUFFER_CLEANUP_THRESHOLD) {
             this.buffers[symbol] = buf.slice(-BUFFER_CAPACITY);
@@ -122,7 +175,7 @@ class MultiMarketPipeline {
             const result = {
                 symbol, price,
                 rawPrice: rawPrice,
-                rawPrices: rawBuf.slice(), // copy
+                rawPrices: rawBuf.slice(),
                 formattedPrice: formatMarketPrice(symbol, price),
                 risePct: 0, fallPct: 0,
                 supportPct: 50, resistancePct: 50,
@@ -143,6 +196,11 @@ class MultiMarketPipeline {
                 maDiffTwoTicksAgo: 0,
                 maDiffExpanding2Tick: false
             };
+            // Also attach digitStats if computed
+            if (this.computeDigits) {
+                const stats = this.getDigitStats(symbol);
+                if (stats) result.digitStats = stats;
+            }
             return result;
         }
 
@@ -177,7 +235,7 @@ class MultiMarketPipeline {
             resistancePct = 100 - supportPct;
         }
 
-        // ---- MA diff (internal) ----
+        // ---- MA diff ----
         let maDiff = 0;
         if (fastMA !== null && slowMA !== null) {
             maDiff = ((fastMA - slowMA) / price) * 100;
@@ -223,12 +281,13 @@ class MultiMarketPipeline {
 
         // ---- Digit Matrix (only if enabled) ----
         let digitMatrix = null;
+        let digitStats = null;
         if (this.computeDigits) {
+            // Compute matrix from window (array of numbers)
             const digitCounts = Array(10).fill(0);
             window.forEach(p => {
-                const str = p.toString();
-                const d = parseInt(str[str.length - 1]);
-                if (!isNaN(d)) digitCounts[d]++;
+                const d = this._extractSafeDigit(p, symbol);
+                digitCounts[d]++;
             });
             const totalTicks = window.length;
             digitMatrix = [];
@@ -237,12 +296,9 @@ class MultiMarketPipeline {
                 const differs = 100 - matches;
                 let overCount = 0, underCount = 0;
                 window.forEach(p => {
-                    const str = p.toString();
-                    const digit = parseInt(str[str.length - 1]);
-                    if (!isNaN(digit)) {
-                        if (digit > d) overCount++;
-                        else if (digit < d) underCount++;
-                    }
+                    const digit = this._extractSafeDigit(p, symbol);
+                    if (digit > d) overCount++;
+                    else if (digit < d) underCount++;
                 });
                 const overPct = (overCount / totalTicks) * 100;
                 const underPct = (underCount / totalTicks) * 100;
@@ -254,6 +310,8 @@ class MultiMarketPipeline {
                     under: underPct
                 });
             }
+            // Also get the stats object
+            digitStats = this.getDigitStats(symbol);
         }
 
         // ---- Breakout conditions ----
@@ -288,7 +346,7 @@ class MultiMarketPipeline {
         const result = {
             symbol, price,
             rawPrice: rawPrice,
-            rawPrices: rawBuf.slice(), // copy last 10 raw strings
+            rawPrices: rawBuf.slice(),
             formattedPrice: formatMarketPrice(symbol, price),
             risePct, fallPct,
             supportPct, resistancePct,
@@ -306,6 +364,7 @@ class MultiMarketPipeline {
             tickDirections: tickDirections,
             lastDigit: lastDigit,
             digitMatrix: digitMatrix,
+            digitStats: digitStats,
             conditions: {
                 breakout: condBreakout || condBreakdown,
                 rsi: condRSI || condRSIPut,
