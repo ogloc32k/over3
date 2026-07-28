@@ -279,7 +279,7 @@ function executeTrade({ contractType, amount, symbol, duration, durationUnit, ba
         currency: state.currency || 'USD',
         duration: duration,
         duration_unit: durationUnit,
-        symbol: symbol
+        underlying_symbol: symbol
     };
 
     // Inject barrier if defined (crucial for digit matches, differs, over, under)
