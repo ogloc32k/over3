@@ -1,31 +1,24 @@
 // ============================================================
-// 1. GLOBAL FUNCTIONS (defines switchTab, etc.)
+// GLOBAL FUNCTIONS (defines switchTab, etc.)
 // ============================================================
 window.switchTab = function(tabId) {
     console.log('[switchTab] called with:', tabId);
     if (!tabId) return;
 
-    // 1. Update nav buttons
     document.querySelectorAll('.nav-tab').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.tab === tabId);
     });
 
-    // 2. Update tab pages
     document.querySelectorAll('.tab-page').forEach(page => {
         page.classList.toggle('active', page.id === tabId);
     });
 
-    // 3. Specialised tab actions
     if (tabId === 'tab-analytics') {
         if (typeof renderCharts === 'function') renderCharts();
         if (typeof timeframePreset === 'function') {
             const sessionBtn = document.getElementById('p-session');
             if (sessionBtn) timeframePreset(sessionBtn, 'session');
         }
-    }
-    if (tabId === 'tab-digits') {
-        if (window.engine) window.engine.computeDigits = true;
-        if (typeof renderDigitsTab === 'function') renderDigitsTab();
     }
     if (tabId === 'tab-settings') {
         if (typeof loadConfig === 'function') loadConfig();
@@ -34,13 +27,11 @@ window.switchTab = function(tabId) {
         if (typeof scrollLogsToBottom === 'function') scrollLogsToBottom();
     }
 
-    // Focus bar visibility
     const focusBar = document.getElementById('focusBar');
     if (focusBar) {
-        focusBar.style.display = (tabId === 'tab-analytics' || tabId === 'tab-digits') ? 'none' : 'flex';
+        focusBar.style.display = (tabId === 'tab-analytics') ? 'none' : 'flex';
     }
 
-    // Sidebar collapse on analytics
     const body = document.body;
     body.classList.remove('analytics-active', 'dashboard-active');
     if (tabId === 'tab-analytics') {
@@ -54,7 +45,7 @@ window.switchTab = function(tabId) {
     }
 };
 
-// ---- Other global functions (for inline onclick) ----
+// ---- Other global functions ----
 window.sendControl = function(action) {
     fetch('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) })
         .then(res => res.json())
@@ -85,60 +76,31 @@ window.fireManual = function(type) {
         return;
     }
 
-    // ---- Digit contract barrier validation ----
-    const contractType = document.getElementById('contractTypeSelect')?.value || 'RISE';
-    let barrier = null;
-    if (['DIGITMATCH', 'DIGITDIFF', 'DIGITOVER', 'DIGITUNDER'].includes(contractType)) {
-        const predictionInput = document.getElementById('predictionInput');
-        if (predictionInput) {
-            const digit = parseInt(predictionInput.value);
-            if (isNaN(digit) || digit < 0 || digit > 9) {
-                alert('For digit contracts, please enter a valid digit (0-9) in the prediction field.');
-                return;
-            }
-            barrier = digit.toString();
-        } else {
-            alert('Digit contract requires a prediction digit.');
-            return;
-        }
-    }
-
-    const payload = {
-        symbol: window.currentFocus,
-        contractType: type,
-        duration: duration,
-        durationUnit: unit,
-        price: price
-    };
-    if (barrier !== null) {
-        payload.barrier = barrier;
-    }
-
     fetch('/api/trade/manual', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ symbol: window.currentFocus, contractType: type, duration: duration, durationUnit: unit, price: price })
     })
-        .then(async (response) => {
-            const text = await response.text();
-            if (!response.ok) {
-                let errMsg;
-                try {
-                    const errData = JSON.parse(text);
-                    errMsg = errData.error || 'Server error';
-                } catch (e) {
-                    errMsg = `Server responded with ${response.status}: ${text.slice(0, 100)}`;
-                }
-                throw new Error(errMsg);
+    .then(async (response) => {
+        const text = await response.text();
+        if (!response.ok) {
+            let errMsg;
+            try {
+                const errData = JSON.parse(text);
+                errMsg = errData.error || 'Server error';
+            } catch (e) {
+                errMsg = `Server responded with ${response.status}: ${text.slice(0, 100)}`;
             }
-            const data = JSON.parse(text);
-            if (data.error) alert('Manual trade failed: ' + data.error);
-            else console.log('Manual trade request sent:', data.message);
-        })
-        .catch(err => {
-            alert('Network error: ' + err.message);
-            console.error('Manual trade fetch error:', err);
-        });
+            throw new Error(errMsg);
+        }
+        const data = JSON.parse(text);
+        if (data.error) alert('Manual trade failed: ' + data.error);
+        else console.log('Manual trade request sent:', data.message);
+    })
+    .catch(err => {
+        alert('Network error: ' + err.message);
+        console.error('Manual trade fetch error:', err);
+    });
 };
 
 window.clearLogs = function() {
@@ -158,13 +120,10 @@ window.setFocusMarket = function(sym) {
     document.querySelectorAll('.asset-chip').forEach(el => el.classList.remove('active'));
     const chip = document.querySelector(`.asset-chip[data-symbol="${sym}"]`);
     if (chip) chip.classList.add('active');
-    if (document.getElementById('tab-digits')?.classList.contains('active')) {
-        if (typeof renderDigitsTab === 'function') renderDigitsTab();
-    }
 };
 
 // ============================================================
-// 2. DOM READY – SET UP THE REST
+// DOM READY – SET UP THE REST
 // ============================================================
 document.addEventListener('DOMContentLoaded', function() {
     console.log('DOMContentLoaded fired');
@@ -183,7 +142,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // ---- Theme toggle ----
-    const themeToggle = document.getElementById('themeToggleBtn') || document.getElementById('themeToggle');
+    const themeToggle = document.getElementById('themeToggle');
     if (themeToggle) {
         const currentTheme = localStorage.getItem('theme') || 'dark';
         document.body.classList.toggle('light', currentTheme === 'light');
@@ -210,7 +169,7 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const now = new Date();
             const timeStr = now.toLocaleTimeString('en-US', { timeZone: 'Africa/Nairobi', hour12: false });
-            const clockEl = document.getElementById('liveClock') || document.getElementById('clock-display');
+            const clockEl = document.getElementById('clock-display');
             if (clockEl) clockEl.textContent = timeStr;
         } catch(e) { /* ignore */ }
     }
@@ -234,24 +193,7 @@ document.addEventListener('DOMContentLoaded', function() {
         'R_10': 2, 'R_25': 3, 'R_50': 4, 'R_75': 4, 'R_100': 2,
         '1HZ10V': 2, '1HZ25V': 2, '1HZ50V': 2, '1HZ75V': 2, '1HZ100V': 2
     };
-    const SYMBOL_DECIMALS = {
-        'R_10': 2, '1HZ10V': 2,
-        'R_25': 3, '1HZ25V': 2,
-        'R_50': 4, '1HZ50V': 2,
-        'R_75': 4, '1HZ75V': 2,
-        'R_100': 2, '1HZ100V': 2
-    };
 
-    window.getSymbolDecimals = function(symbol) {
-        return SYMBOL_DECIMALS[symbol] !== undefined ? SYMBOL_DECIMALS[symbol] : 2;
-    };
-    window.extractLastDigit = function(price, symbol) {
-        if (price === null || price === undefined) return null;
-        const decimals = getSymbolDecimals(symbol);
-        const formattedPrice = Number(price).toFixed(decimals);
-        const lastChar = formattedPrice.slice(-1);
-        return parseInt(lastChar, 10);
-    };
     window.formatPrice = function(symbol, raw) {
         if (raw === undefined || raw === null) return '—';
         const dec = MARKET_DECIMALS[symbol] || 2;
@@ -282,135 +224,6 @@ document.addEventListener('DOMContentLoaded', function() {
     window.currentFocus = currentFocus;
     window.globalState = globalState;
     window.serverMode = serverMode;
-
-    // ---- Live digit display update ----
-    function updateLiveDigit() {
-        const metric = globalState?.marketMetrics?.[currentFocus];
-        const digitEl = document.getElementById('liveDigitDisplay');
-        if (digitEl) {
-            if (metric && metric.lastDigit !== null && metric.lastDigit !== undefined) {
-                digitEl.textContent = metric.lastDigit;
-            } else {
-                digitEl.textContent = '-';
-            }
-        }
-        // Also update session profit
-        const profitEl = document.getElementById('sessionProfitDisplay');
-        if (profitEl && globalState) {
-            const pnl = globalState.sessionPnl || 0;
-            profitEl.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
-            profitEl.style.color = pnl >= 0 ? 'var(--green-profit)' : 'var(--red-loss)';
-        }
-    }
-
-    // ---- Digit grid interaction ----
-    document.addEventListener('click', function(e) {
-        const target = e.target.closest('.digit-btn');
-        if (target) {
-            const digit = target.dataset.digit;
-            if (digit !== undefined) {
-                const predictionInput = document.getElementById('predictionInput');
-                if (predictionInput) {
-                    predictionInput.value = digit;
-                    // Highlight selected button
-                    document.querySelectorAll('.digit-btn').forEach(btn => btn.classList.remove('selected'));
-                    target.classList.add('selected');
-                }
-            }
-        }
-    });
-
-    // ---- Fallback for empty digits table ----
-    function renderEmptyDigitsTable() {
-        const rows = ['row-over', 'row-under', 'row-matches', 'row-differs'];
-        const titles = ['OVER %', 'UNDER %', 'MATCHES %', 'DIFFERS %'];
-        rows.forEach((id, idx) => {
-            const el = document.getElementById(id);
-            if (el) {
-                let html = `<td><strong>${titles[idx]}</strong></td>`;
-                for (let i = 0; i <= 9; i++) {
-                    html += `<td>0%</td>`;
-                }
-                el.innerHTML = html;
-            }
-        });
-    }
-
-    // ---- Digits Tab Render ----
-    window.renderDigitsTab = function() {
-        try {
-            const activeMetric = globalState?.marketMetrics?.[currentFocus] || null;
-
-            // Asset selector chips
-            const chipsContainer = document.getElementById('digitsAssetChips');
-            if (chipsContainer) {
-                chipsContainer.innerHTML = '';
-                const symbols = Object.keys(MARKETS_CFG);
-                symbols.forEach(sym => {
-                    const chip = document.createElement('button');
-                    chip.className = 'digits-chip' + (sym === currentFocus ? ' active' : '');
-                    chip.textContent = getAssetLabel(MARKETS_CFG[sym], true);
-                    chip.onclick = () => window.setFocusMarket(sym);
-                    chipsContainer.appendChild(chip);
-                });
-            }
-
-            // ---- Last 10 Digits Stream ----
-            const streamContainer = document.getElementById('digitsHistoryBadges');
-            if (streamContainer) {
-                if (activeMetric) {
-                    const rawPrices = activeMetric.rawPrices || activeMetric.lastPrices.map(p => p.toString());
-                    if (rawPrices.length > 0) {
-                        const lastTen = rawPrices.slice(-10);
-                        const digitsHtml = lastTen.map(raw => {
-                            const digit = extractLastDigit(raw, currentFocus);
-                            if (digit === null) return '<span class="stream-digit">?</span>';
-                            return `<span class="stream-digit">${digit}</span>`;
-                        }).join('');
-                        streamContainer.innerHTML = digitsHtml || '<span class="stream-digit">—</span>';
-                    } else {
-                        streamContainer.innerHTML = '<span class="stream-digit">—</span>';
-                    }
-                } else {
-                    streamContainer.innerHTML = '<span class="stream-digit">—</span>';
-                }
-            }
-
-            // ---- Digit Matrix Rows (using digitStats) ----
-            const stats = activeMetric?.digitStats || null;
-            const rowOver = document.getElementById('row-over');
-            const rowUnder = document.getElementById('row-under');
-            const rowMatches = document.getElementById('row-matches');
-            const rowDiffers = document.getElementById('row-differs');
-
-            const buildRow = (title, dataArray) => {
-                let html = `<td><strong>${title}</strong></td>`;
-                for (let i = 0; i <= 9; i++) {
-                    const valStr = (dataArray && dataArray[i]) ? dataArray[i] : '0%';
-                    const valNum = parseFloat(valStr);
-                    let color = '';
-                    if (title.includes('OVER') || title.includes('UNDER')) {
-                        if (valNum >= 70) color = '#10b981';
-                        else if (valNum <= 30) color = '#ef4444';
-                    }
-                    html += `<td style="color: ${color}; font-weight: ${color ? '700' : 'normal'};">${valStr}</td>`;
-                }
-                return html;
-            };
-
-            if (rowOver) rowOver.innerHTML = buildRow('OVER %', stats?.over);
-            if (rowUnder) rowUnder.innerHTML = buildRow('UNDER %', stats?.under);
-            if (rowMatches) rowMatches.innerHTML = buildRow('MATCHES %', stats?.matches);
-            if (rowDiffers) rowDiffers.innerHTML = buildRow('DIFFERS %', stats?.differs);
-
-            // ---- Live digit update ----
-            updateLiveDigit();
-
-        } catch(e) {
-            console.error('renderDigitsTab error:', e);
-            renderEmptyDigitsTable();
-        }
-    };
 
     // ---- Render UI (throttled) ----
     let lastRenderTime = 0;
@@ -587,9 +400,6 @@ document.addEventListener('DOMContentLoaded', function() {
             // ---- Mobile view ----
             renderMobileView(state);
 
-            // ---- Update live digit and profit ----
-            updateLiveDigit();
-
         } catch(err) {
             console.error('❌ Error in renderUI:', err);
         }
@@ -737,9 +547,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     }
                     if (typeof renderUI === 'function') renderUI(data.state);
-                    if (document.getElementById('tab-digits')?.classList.contains('active')) {
-                        if (typeof renderDigitsTab === 'function') renderDigitsTab();
-                    }
                 }
                 if (data.logs && data.logs.length > 0) {
                     const box = document.getElementById('log-stream');
@@ -1169,43 +976,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
-    // ---- Connection status updater (optional) ----
-    function updateConnectionStatus(status) {
-        const el = document.getElementById('connectionStatus');
-        if (el) {
-            el.className = 'header-status ' + (status === 'online' ? 'on' : 'off');
-            el.innerHTML = status === 'online' ? '<span class="dot"></span> Online' : '<span class="dot"></span> Offline';
-        }
-    }
-
-    // ---- Mode toggle (Easy/Advanced) ----
-    const modeToggleBtn = document.getElementById('modeToggleBtn');
-    if (modeToggleBtn) {
-        let easyMode = true;
-        modeToggleBtn.addEventListener('click', function() {
-            easyMode = !easyMode;
-            this.textContent = easyMode ? '👶 Easy Mode' : '🛠️ Advanced Mode';
-            // Toggle visibility of advanced controls
-            const advancedControls = document.querySelectorAll('.advanced-control');
-            advancedControls.forEach(el => el.style.display = easyMode ? 'none' : 'block');
-            // Show/hide beginner helper
-            const helper = document.getElementById('beginnerHelperText');
-            if (helper) {
-                helper.textContent = easyMode
-                    ? 'Bot is paused. Hit <strong>Start Bot</strong> on the left panel to begin analysis.'
-                    : 'Advanced mode enabled. All controls visible.';
-            }
-        });
-        // Initially hide advanced controls
-        document.querySelectorAll('.advanced-control').forEach(el => el.style.display = 'none');
-    }
-
     // ---- Initialize ----
     connectSSE();
-    // Set initial connection status
-    updateConnectionStatus('offline');
-    // Emit a fake online after some time (or when SSE connects)
-    setTimeout(() => updateConnectionStatus('online'), 1000);
 
     console.log('🚀 QUANTCORE Terminal v6.0 loaded');
 });
