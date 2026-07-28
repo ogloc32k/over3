@@ -670,11 +670,24 @@ body.light {
   padding: 6px 10px;
   flex-shrink: 0;
 }
-.filter-left {
+/* FIX 4: Filter bar alignment */
+.analytics-filter-bar .page-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-right: auto;
+}
+.analytics-filter-bar .filter-left {
   display: flex;
   align-items: center;
   gap: 6px;
 }
+.analytics-filter-bar .filter-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .btn-date-toggle {
   background: var(--bg-terminal);
   border: 1px solid var(--border-subtle);
@@ -716,11 +729,6 @@ body.light {
 }
 .date-picker-group input:focus {
   border-color: var(--neon-blue);
-}
-.filter-right {
-  display: flex;
-  align-items: center;
-  gap: 4px;
 }
 .filter-right .preset-strip {
   display: flex;
@@ -815,6 +823,7 @@ body.light {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  position: relative;
 }
 .chart-box .ch-label {
   font-size: 10px;
@@ -835,6 +844,27 @@ body.light {
 #chart-line {
   width: 100% !important;
   height: 100% !important;
+}
+
+/* FIX 3: Chart empty state overlay */
+.chart-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: center;
+  padding: 20px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 10;
+  background: var(--bg-card);
+  border-radius: 6px;
 }
 
 .empty-state {
@@ -948,6 +978,23 @@ body.light {
 .tab-item:active { transform: scale(0.95); }
 
 /* ============================================================
+   FIX 1: AUTO-COLLAPSE SIDEBAR ON ANALYTICS
+   ============================================================ */
+body.analytics-active .app-sidebar {
+  width: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  overflow: hidden !important;
+  flex: 0 0 0 !important;
+}
+body.analytics-active .sidebar-toggle-fixed {
+  display: none !important;
+}
+body.analytics-active .app-main {
+  padding-left: 8px !important;
+}
+
+/* ============================================================
    RESPONSIVE – MOBILE
    ============================================================ */
 @media (max-width: 768px) {
@@ -1027,7 +1074,7 @@ body.light {
     overflow-x: auto;
     gap: 6px;
     padding: 4px 0;
-    scrollbar-width: none; /* Firefox */
+    scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
   }
   .asset-carousel::-webkit-scrollbar {
@@ -1231,6 +1278,10 @@ body.light {
     gap: 4px !important;
     padding: 6px !important;
   }
+  .analytics-filter-bar .page-title {
+    font-size: 11px !important;
+    margin-right: auto !important;
+  }
   .filter-left,
   .filter-right {
     width: auto !important;
@@ -1291,6 +1342,7 @@ body.light {
   .btn-preset { font-size: 11px; }
   .ch-label { font-size: 11px; }
   .empty-state { font-size: 12px; }
+  .chart-empty-state { font-size: 12px; }
 
   .tab-bar { display: flex; }
   .app-main { padding: 6px; }
