@@ -25,11 +25,11 @@
         QUANTCORE<span>//</span>TERMINAL <small>v6.0</small>
       </div>
       <nav class="header-tabs">
-        <button class="nav-tab active" data-tab="tab-dashboard">Dashboard</button>
-        <button class="nav-tab" data-tab="tab-analytics">Analytics</button>
-        <button class="nav-tab" data-tab="tab-digits">Digits</button>
-        <button class="nav-tab" data-tab="tab-logs">Logs</button>
-        <button class="nav-tab" data-tab="tab-settings">Settings</button>
+        <button class="nav-tab active" data-target="tab-dashboard">Dashboard</button>
+        <button class="nav-tab" data-target="tab-analytics">Analytics</button>
+        <button class="nav-tab" data-target="tab-digits">Digits</button>
+        <button class="nav-tab" data-target="tab-logs">Logs</button>
+        <button class="nav-tab" data-target="tab-settings">Settings</button>
       </nav>
     </div>
     <div class="header-right">
@@ -71,6 +71,8 @@
               <option value="DIGITDIFF">Digit Differs</option>
               <option value="DIGITOVER">Digit Over</option>
               <option value="DIGITUNDER">Digit Under</option>
+              <option value="DIGITEVEN">Digit Even</option>
+              <option value="DIGITODD">Digit Odd</option>
               <option value="RISE">Rise</option>
               <option value="FALL">Fall</option>
             </select>
@@ -128,7 +130,7 @@
           </div>
 
           <!-- Interactive Clickable Digit Grid for Beginners -->
-          <div style="margin-top: 10px;">
+          <div style="margin-top: 10px;" id="digitGridContainer">
             <label style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px; display: block;">Tap a Target Digit to Quick-Select:</label>
             <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;" id="digitSelectorGrid">
               <button class="btn digit-btn" data-digit="0">0</button>
@@ -286,23 +288,23 @@
      BOTTOM TAB BAR (MOBILE VIEW)
      ============================================================ -->
   <nav class="tab-bar">
-    <button class="nav-tab active" data-tab="tab-dashboard">
+    <button class="nav-tab active" data-target="tab-dashboard">
       <span class="icon">🏠</span>
       <span>Dashboard</span>
     </button>
-    <button class="nav-tab" data-tab="tab-analytics">
+    <button class="nav-tab" data-target="tab-analytics">
       <span class="icon">📈</span>
       <span>Analytics</span>
     </button>
-    <button class="nav-tab" data-tab="tab-digits">
+    <button class="nav-tab" data-target="tab-digits">
       <span class="icon">🔢</span>
       <span>Digits</span>
     </button>
-    <button class="nav-tab" data-tab="tab-logs">
+    <button class="nav-tab" data-target="tab-logs">
       <span class="icon">📋</span>
       <span>Logs</span>
     </button>
-    <button class="nav-tab" data-tab="tab-settings">
+    <button class="nav-tab" data-target="tab-settings">
       <span class="icon">⚙️</span>
       <span>Settings</span>
     </button>
