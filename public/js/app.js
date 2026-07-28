@@ -1,983 +1,245 @@
 // ============================================================
-// GLOBAL FUNCTIONS (defines switchTab, etc.)
+// GLOBAL STATE & HELPER FUNCTIONS
 // ============================================================
-window.switchTab = function(tabId) {
-    console.log('[switchTab] called with:', tabId);
-    if (!tabId) return;
+let globalState = null;
+let currentFocus = 'R_75';
+let serverMode = 'demo';
 
-    document.querySelectorAll('.nav-tab').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.tab === tabId);
-    });
-
-    document.querySelectorAll('.tab-page').forEach(page => {
-        page.classList.toggle('active', page.id === tabId);
-    });
-
-    if (tabId === 'tab-analytics') {
-        if (typeof renderCharts === 'function') renderCharts();
-        if (typeof timeframePreset === 'function') {
-            const sessionBtn = document.getElementById('p-session');
-            if (sessionBtn) timeframePreset(sessionBtn, 'session');
-        }
-    }
-    if (tabId === 'tab-settings') {
-        if (typeof loadConfig === 'function') loadConfig();
-    }
-    if (tabId === 'tab-logs') {
-        if (typeof scrollLogsToBottom === 'function') scrollLogsToBottom();
-    }
-
-    const focusBar = document.getElementById('focusBar');
-    if (focusBar) {
-        focusBar.style.display = (tabId === 'tab-analytics') ? 'none' : 'flex';
-    }
-
-    const body = document.body;
-    body.classList.remove('analytics-active', 'dashboard-active');
-    if (tabId === 'tab-analytics') {
-        body.classList.add('analytics-active');
-        const sidebar = document.getElementById('appSidebar');
-        if (sidebar) sidebar.classList.add('collapsed');
-        const toggle = document.getElementById('sidebarToggleFixed');
-        if (toggle) toggle.textContent = '▶';
-    } else if (tabId === 'tab-dashboard') {
-        body.classList.add('dashboard-active');
-    }
+// Market definitions
+const MARKETS_CFG = {
+  'R_10': 'Volatility 10 Index',
+  'R_25': 'Volatility 25 Index',
+  'R_50': 'Volatility 50 Index',
+  'R_75': 'Volatility 75 Index',
+  'R_100': 'Volatility 100 Index',
+  '1HZ10V': 'Volatility 10 (1s) Index',
+  '1HZ25V': 'Volatility 25 (1s) Index',
+  '1HZ50V': 'Volatility 50 (1s) Index',
+  '1HZ75V': 'Volatility 75 (1s) Index',
+  '1HZ100V': 'Volatility 100 (1s) Index'
 };
 
-// ---- Other global functions ----
+const MARKET_DECIMALS = {
+  'R_10': 2, 'R_25': 3, 'R_50': 4, 'R_75': 4, 'R_100': 2,
+  '1HZ10V': 2, '1HZ25V': 2, '1HZ50V': 2, '1HZ75V': 2, '1HZ100V': 2
+};
+
+function formatPrice(symbol, raw) {
+  if (raw === undefined || raw === null) return '—';
+  const dec = MARKET_DECIMALS[symbol] || 2;
+  return Number(raw).toFixed(dec);
+}
+
+// ============================================================
+// TAB SWITCHING
+// ============================================================
+document.querySelectorAll('.nav-tab').forEach(btn => {
+  btn.addEventListener('click', function() {
+    const tabId = this.dataset.tab;
+    document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
+    this.classList.add('active');
+    document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
+    document.getElementById(tabId).classList.add('active');
+    if (tabId === 'analytics') {
+      if (typeof renderCharts === 'function') renderCharts();
+    }
+  });
+});
+
+// ============================================================
+// CLOCK
+// ============================================================
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock-display').textContent =
+    now.toLocaleTimeString('en-US', { timeZone: 'Africa/Nairobi', hour12: false });
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ============================================================
+// SSE CONNECTION
+// ============================================================
+let sse = null;
+function connectSSE() {
+  if (sse) sse.close();
+  sse = new EventSource('/api/logs');
+  sse.onopen = () => console.log('✅ SSE connected');
+  sse.onerror = (err) => {
+    console.warn('⚠️ SSE error:', err);
+    setTimeout(connectSSE, 5000);
+  };
+  sse.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.state) {
+        globalState = data.state;
+        renderUI(globalState);
+      }
+      if (data.logs && data.logs.length) {
+        const box = document.getElementById('log-stream');
+        data.logs.forEach(log => {
+          const el = document.createElement('div');
+          el.className = 'log-entry';
+          el.innerHTML = `<span class="ts">[${new Date(log.time).toLocaleTimeString()}]</span><span class="msg">${log.message}</span>`;
+          box.prepend(el);
+        });
+        while (box.children.length > 200) box.removeChild(box.lastChild);
+      }
+    } catch (err) { console.error('SSE parse error:', err); }
+  };
+}
+connectSSE();
+
+// ============================================================
+// RENDER UI
+// ============================================================
+function renderUI(state) {
+  const safeState = state || {};
+  const balance = safeState.balance || null;
+  const sessionPnl = safeState.sessionPnl || 0;
+  const dailyPnl = safeState.dailyPnl || 0;
+  const currentStake = safeState.currentStake || 0.35;
+  const marketMetrics = safeState.marketMetrics || {};
+
+  // Sidebar
+  document.getElementById('m-profile').textContent = (safeState.tradingMode || 'demo').toUpperCase();
+  document.getElementById('m-balance').textContent = balance !== null ? `$${Number(balance).toFixed(2)}` : '—';
+  document.getElementById('m-session').textContent = `$${Number(sessionPnl).toFixed(2)}`;
+  document.getElementById('m-daily').textContent = `$${Number(dailyPnl).toFixed(2)}`;
+  document.getElementById('m-stake').textContent = `$${Number(currentStake).toFixed(2)}`;
+
+  // Focus bar (if you have one, we'll skip for now, but can add later)
+
+  // Table
+  const tbody = document.getElementById('tableBody');
+  tbody.innerHTML = '';
+  for (const sym in MARKETS_CFG) {
+    const metric = marketMetrics[sym] || null;
+    const price = metric?.price;
+    const formattedPrice = metric?.formattedPrice || formatPrice(sym, price);
+    const support = metric?.support ? Number(metric.support).toFixed(2) : '—';
+    const resistance = metric?.resistance ? Number(metric.resistance).toFixed(2) : '—';
+    const rsi = metric?.rsi !== undefined ? Number(metric.rsi).toFixed(1) : '—';
+    const vol = metric?.volatility !== undefined ? Number(metric.volatility).toFixed(2) + '%' : '—';
+    const breakout = metric?.isBreakout ? '🟢 UP' : (metric?.isBreakdown ? '🔴 DOWN' : '⚪ RANGE');
+    const supportPct = metric?.supportPct !== undefined ? Math.round(metric.supportPct) : null;
+    const resistancePct = metric?.resistancePct !== undefined ? Math.round(metric.resistancePct) : null;
+    const risePct = metric?.risePct !== undefined ? Math.round(metric.risePct) : null;
+    const fallPct = metric?.fallPct !== undefined ? Math.round(metric.fallPct) : null;
+    const srPctDisplay = (supportPct !== null && resistancePct !== null) ? `${supportPct}% / ${resistancePct}%` : '—';
+    const rfPctDisplay = (risePct !== null && fallPct !== null) ? `${risePct}% / ${fallPct}%` : '—';
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${MARKETS_CFG[sym]}</td>
+      <td>${formattedPrice}</td>
+      <td><span class="s">${support}</span> / <span class="r">${resistance}</span></td>
+      <td>${srPctDisplay}</td>
+      <td>${rfPctDisplay}</td>
+      <td>${breakout}</td>
+      <td>${rsi}</td>
+      <td>${metric?.bandwidth !== undefined ? metric.bandwidth.toFixed(2) + '%' : '—'}</td>
+      <td>—</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+// ============================================================
+// CONTROLS
+// ============================================================
 window.sendControl = function(action) {
-    fetch('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) })
-        .then(res => res.json())
-        .then(data => {
-            if (data.error) alert('Error: ' + data.error);
-            else if (data.message) console.log(data.message);
-        })
-        .catch(err => console.error('Control error:', err));
+  fetch('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) })
+    .then(res => res.json())
+    .then(data => { if (data.error) alert(data.error); })
+    .catch(console.error);
 };
 
 window.swapEnvironment = function() {
-    const targetMode = window.serverMode || 'demo';
-    const newMode = targetMode === 'demo' ? 'real' : 'demo';
-    fetch('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'set_mode', mode: newMode }) })
-        .then(res => res.json())
-        .then(data => {
-            if (data.error) alert('Error: ' + data.error);
-        })
-        .catch(err => console.error('Swap error:', err));
+  const newMode = serverMode === 'demo' ? 'real' : 'demo';
+  fetch('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'set_mode', mode: newMode }) })
+    .then(res => res.json())
+    .then(data => { if (data.error) alert(data.error); })
+    .catch(console.error);
 };
 
 window.fireManual = function(type) {
-    const duration = parseInt(document.getElementById('manual-duration')?.value) || 7;
-    const unit = document.getElementById('manual-unit')?.value || 't';
-    const price = window.currentMarketPrices ? window.currentMarketPrices[window.currentFocus] : null;
-    if (price === undefined || price === null) {
-        alert('No price data available for ' + (window.currentFocus || '') + '. Please wait for ticks.');
-        return;
-    }
-
-    fetch('/api/trade/manual', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol: window.currentFocus, contractType: type, duration: duration, durationUnit: unit, price: price })
+  const duration = parseInt(document.getElementById('manual-duration').value) || 7;
+  const unit = document.getElementById('manual-unit').value;
+  const price = globalState?.marketMetrics?.[currentFocus]?.price;
+  if (!price) { alert('No price data available for ' + currentFocus); return; }
+  fetch('/api/manual-trade', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbol: currentFocus, contractType: type, duration, durationUnit: unit, price })
+  })
+    .then(async res => {
+      const text = await res.text();
+      if (!res.ok) throw new Error(text);
+      const data = JSON.parse(text);
+      if (data.error) alert(data.error);
+      else console.log('Trade sent:', data.message);
     })
-    .then(async (response) => {
-        const text = await response.text();
-        if (!response.ok) {
-            let errMsg;
-            try {
-                const errData = JSON.parse(text);
-                errMsg = errData.error || 'Server error';
-            } catch (e) {
-                errMsg = `Server responded with ${response.status}: ${text.slice(0, 100)}`;
-            }
-            throw new Error(errMsg);
-        }
-        const data = JSON.parse(text);
-        if (data.error) alert('Manual trade failed: ' + data.error);
-        else console.log('Manual trade request sent:', data.message);
-    })
-    .catch(err => {
-        alert('Network error: ' + err.message);
-        console.error('Manual trade fetch error:', err);
-    });
+    .catch(err => alert('Error: ' + err.message));
 };
 
 window.clearLogs = function() {
-    const stream = document.getElementById('log-stream');
-    if (stream) stream.innerHTML = '';
-};
-
-window.toggleDatePicker = function() {
-    const group = document.getElementById('datePickerGroup');
-    if (group) group.style.display = group.style.display === 'none' ? 'flex' : 'none';
-};
-
-window.setFocusMarket = function(sym) {
-    if (!sym) return;
-    window.currentFocus = sym;
-    if (window.globalState && typeof renderUI === 'function') renderUI(window.globalState);
-    document.querySelectorAll('.asset-chip').forEach(el => el.classList.remove('active'));
-    const chip = document.querySelector(`.asset-chip[data-symbol="${sym}"]`);
-    if (chip) chip.classList.add('active');
+  document.getElementById('log-stream').innerHTML = '';
 };
 
 // ============================================================
-// DOM READY – SET UP THE REST
+// ANALYTICS CHARTS (simplified placeholders)
 // ============================================================
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('DOMContentLoaded fired');
+let assetChart = null, equityChart = null;
 
-    // ---- Tab switching with event listeners ----
-    document.querySelectorAll('.nav-tab').forEach(btn => {
-        btn.addEventListener('click', function(e) {
-            e.preventDefault();
-            const tabId = this.dataset.tab;
-            if (tabId && typeof window.switchTab === 'function') {
-                window.switchTab(tabId);
-            } else {
-                console.warn('Tab click failed: tabId=' + tabId);
-            }
-        });
-    });
+function renderCharts() {
+  // Placeholder – will be implemented once data flows
+  console.log('Analytics charts placeholder');
+}
 
-    // ---- Theme toggle ----
-    const themeToggle = document.getElementById('themeToggle');
-    if (themeToggle) {
-        const currentTheme = localStorage.getItem('theme') || 'dark';
-        document.body.classList.toggle('light', currentTheme === 'light');
-        themeToggle.textContent = currentTheme === 'light' ? '☀️' : '🌙';
-        themeToggle.addEventListener('click', function() {
-            const isLight = document.body.classList.toggle('light');
-            localStorage.setItem('theme', isLight ? 'light' : 'dark');
-            themeToggle.textContent = isLight ? '☀️' : '🌙';
-        });
-    }
+window.timeframePreset = function(btn, mode) {
+  document.querySelectorAll('.btn-preset').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  // Fetch analytics data from /api/ledger/aggregated?mode=...
+  fetch(`/api/ledger/aggregated?mode=${mode}`)
+    .then(res => res.json())
+    .then(data => {
+      // update metrics
+      document.getElementById('meta-profit').textContent = `$${data.totalProfit.toFixed(2)}`;
+      // update charts (placeholder)
+      console.log('Analytics data:', data);
+    })
+    .catch(console.error);
+};
 
-    // ---- Sidebar toggle ----
-    const sidebar = document.getElementById('appSidebar');
-    const toggleFixed = document.getElementById('sidebarToggleFixed');
-    if (toggleFixed) {
-        toggleFixed.addEventListener('click', function() {
-            if (sidebar) sidebar.classList.toggle('collapsed');
-            toggleFixed.textContent = sidebar?.classList.contains('collapsed') ? '▶' : '◀';
-        });
-    }
+window.saveSettings = function() {
+  const config = {
+    ANALYSIS_WINDOW: parseInt(document.getElementById('config-ANALYSIS_WINDOW').value),
+    BOLLINGER_PERIOD: parseInt(document.getElementById('config-BOLLINGER_PERIOD').value),
+    BOLLINGER_STD: parseFloat(document.getElementById('config-BOLLINGER_STD').value),
+    RSI_PERIOD: parseInt(document.getElementById('config-RSI_PERIOD').value),
+    MIN_VOLATILITY_PERCENT: parseFloat(document.getElementById('config-MIN_VOLATILITY_PERCENT').value)
+  };
+  fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config)
+  })
+    .then(res => res.json())
+    .then(data => {
+      if (data.success) alert('Settings applied');
+      else alert('Error: ' + data.error);
+    })
+    .catch(console.error);
+};
 
-    // ---- Clock ----
-    function updateClock() {
-        try {
-            const now = new Date();
-            const timeStr = now.toLocaleTimeString('en-US', { timeZone: 'Africa/Nairobi', hour12: false });
-            const clockEl = document.getElementById('clock-display');
-            if (clockEl) clockEl.textContent = timeStr;
-        } catch(e) { /* ignore */ }
-    }
-    setInterval(updateClock, 1000);
-    updateClock();
-
-    // ---- Variables ----
-    const MARKETS_CFG = {
-        'R_10': 'Volatility 10 Index',
-        'R_25': 'Volatility 25 Index',
-        'R_50': 'Volatility 50 Index',
-        'R_75': 'Volatility 75 Index',
-        'R_100': 'Volatility 100 Index',
-        '1HZ10V': 'Volatility 10 (1s) Index',
-        '1HZ25V': 'Volatility 25 (1s) Index',
-        '1HZ50V': 'Volatility 50 (1s) Index',
-        '1HZ75V': 'Volatility 75 (1s) Index',
-        '1HZ100V': 'Volatility 100 (1s) Index'
-    };
-    const MARKET_DECIMALS = {
-        'R_10': 2, 'R_25': 3, 'R_50': 4, 'R_75': 4, 'R_100': 2,
-        '1HZ10V': 2, '1HZ25V': 2, '1HZ50V': 2, '1HZ75V': 2, '1HZ100V': 2
-    };
-
-    window.formatPrice = function(symbol, raw) {
-        if (raw === undefined || raw === null) return '—';
-        const dec = MARKET_DECIMALS[symbol] || 2;
-        return Number(raw).toFixed(dec);
-    };
-    window.getAssetLabel = function(name, isMobile) {
-        if (!isMobile) return name;
-        const shortMap = {
-            'Volatility 10 Index': 'V10',
-            'Volatility 25 Index': 'V25',
-            'Volatility 50 Index': 'V50',
-            'Volatility 75 Index': 'V75',
-            'Volatility 100 Index': 'V100',
-            'Volatility 10 (1s) Index': 'V10 (1s)',
-            'Volatility 25 (1s) Index': 'V25 (1s)',
-            'Volatility 50 (1s) Index': 'V50 (1s)',
-            'Volatility 75 (1s) Index': 'V75 (1s)',
-            'Volatility 100 (1s) Index': 'V100 (1s)'
-        };
-        return shortMap[name] || name;
-    };
-
-    // ---- State ----
-    let currentFocus = 'R_75';
-    let serverMode = 'demo';
-    let globalState = null;
-    window.currentMarketPrices = {};
-    window.currentFocus = currentFocus;
-    window.globalState = globalState;
-    window.serverMode = serverMode;
-
-    // ---- Render UI (throttled) ----
-    let lastRenderTime = 0;
-    window.renderUI = function(state) {
-        const now = Date.now();
-        if (now - lastRenderTime < 250) return;
-        lastRenderTime = now;
-
-        try {
-            const safeState = state || {};
-            const tradingMode = safeState.tradingMode || 'demo';
-            const balance = safeState.balance || null;
-            const sessionPnl = safeState.sessionPnl || 0;
-            const dailyPnl = safeState.dailyPnl || 0;
-            const currentStake = safeState.currentStake || 0.35;
-            const locked = safeState.locked || false;
-            const active = safeState.active || false;
-            const lastTriggerTime = safeState.lastTriggerTime || 0;
-            const tradeInProgress = safeState.tradeInProgress || false;
-            const marketMetrics = safeState.marketMetrics || {};
-
-            serverMode = tradingMode;
-            window.serverMode = serverMode;
-
-            const header = document.getElementById('header-status');
-            const nowTime = Date.now();
-            if (locked) {
-                if (active) { header.textContent = '● PAUSED'; header.className = 'header-status paused'; }
-                else { header.textContent = '● LOCKED'; header.className = 'header-status off'; }
-            } else if (active) {
-                const remaining = Math.max(0, Math.ceil((lastTriggerTime + 30000 - nowTime) / 1000));
-                let cooldownText = remaining > 0 ? `⏳${remaining}s` : '';
-                let lockText = tradeInProgress ? '🔒' : '';
-                header.innerHTML = `● ARMED ${cooldownText ? `<span class="cooldown">${cooldownText}</span>` : ''} ${lockText ? `<span class="lock">${lockText}</span>` : ''}`;
-                header.className = 'header-status on';
-            } else {
-                header.textContent = '● IDLE';
-                header.className = 'header-status';
-            }
-
-            document.getElementById('m-profile').textContent = tradingMode.toUpperCase();
-            document.getElementById('m-balance').textContent = balance !== null ? `$${Number(balance).toFixed(2)}` : '---';
-            const sessVal = Number(sessionPnl);
-            const sessEl = document.getElementById('m-session');
-            sessEl.textContent = `$${sessVal.toFixed(2)}`;
-            sessEl.className = 'val ' + (sessVal >= 0 ? 'green' : 'red');
-            const dailyVal = Number(dailyPnl);
-            const dailyEl = document.getElementById('m-daily');
-            dailyEl.textContent = `$${dailyVal.toFixed(2)}`;
-            dailyEl.className = 'val ' + (dailyVal >= 0 ? 'green' : 'red');
-            document.getElementById('m-stake').textContent = `$${Number(currentStake).toFixed(2)}`;
-
-            const focusMetric = marketMetrics[currentFocus] || null;
-            document.getElementById('f-name').textContent = MARKETS_CFG[currentFocus] || 'Volatility 75 Index';
-            const priceDisplay = focusMetric?.formattedPrice || formatPrice(currentFocus, focusMetric?.price) || '—';
-            document.getElementById('f-price').textContent = priceDisplay;
-            const srEl = document.getElementById('f-sr');
-            if (focusMetric) {
-                const s = focusMetric.support ? Number(focusMetric.support).toFixed(2) : '—';
-                const r = focusMetric.resistance ? Number(focusMetric.resistance).toFixed(2) : '—';
-                srEl.innerHTML = `<span class="s">S: ${s}</span> <span class="r">R: ${r}</span>`;
-                const badge = document.getElementById('f-breakout-badge');
-                if (focusMetric.isBreakout) { badge.textContent = '🚀 BREAKOUT'; badge.className = 'badge breakout'; }
-                else if (focusMetric.isBreakdown) { badge.textContent = '📉 BREAKDOWN'; badge.className = 'badge breakdown'; }
-                else { badge.textContent = 'IDLE'; badge.className = 'badge idle'; }
-                document.getElementById('f-rsi').textContent = `RSI: ${focusMetric.rsi !== undefined ? Number(focusMetric.rsi).toFixed(1) : '—'}`;
-                document.getElementById('f-vol').textContent = `Vol: ${focusMetric.volatility !== undefined ? Number(focusMetric.volatility).toFixed(2) + '%' : '—'}`;
-            } else {
-                srEl.innerHTML = '<span class="s">S: —</span> <span class="r">R: —</span>';
-                document.getElementById('f-breakout-badge').textContent = 'IDLE';
-                document.getElementById('f-breakout-badge').className = 'badge idle';
-                document.getElementById('f-rsi').textContent = 'RSI: —';
-                document.getElementById('f-vol').textContent = 'Vol: —';
-            }
-
-            const tbody = document.getElementById('tableBody');
-            if (!tbody) return;
-            tbody.innerHTML = '';
-            let bestScore = -Infinity, bestSym = null;
-            for (const sym in MARKETS_CFG) {
-                const m = marketMetrics[sym] || null;
-                if (m && m.score > bestScore) { bestScore = m.score; bestSym = sym; }
-            }
-            for (const sym in MARKETS_CFG) {
-                const metric = marketMetrics[sym] || null;
-                const isActive = sym === currentFocus;
-                let priceDisplay = '—', step = 0, stepLabel = 'SCAN', stepClass = 'step-0';
-                let support = '—', resistance = '—';
-                let breakoutLabel = '⚪ RANGE';
-                let breakoutClass = 'badge-range';
-                let rsiVal = '—', rsiClass = '';
-                let squeezeDisplay = '—';
-                let squeezeClass = '';
-                let trendHtml = '';
-
-                let supportPct = null, resistancePct = null, risePct = null, fallPct = null;
-
-                if (metric) {
-                    priceDisplay = metric.formattedPrice || formatPrice(sym, metric.price) || '—';
-                    step = metric.step || 0;
-
-                    const price = metric.price;
-                    const sup = metric.support;
-                    const res = metric.resistance;
-                    if (sup !== null && res !== null) {
-                        if (price > res) {
-                            breakoutLabel = '🟢 UP';
-                            breakoutClass = 'badge-up';
-                        } else if (price < sup) {
-                            breakoutLabel = '🔴 DOWN';
-                            breakoutClass = 'badge-down';
-                        }
-                    }
-
-                    if (step === 3) { stepLabel = 'ENTRY'; stepClass = 'step-3'; }
-                    else if (step === 2) { stepLabel = 'NEAR'; stepClass = 'step-2'; }
-                    else if (step === 1) { stepLabel = 'LEVEL'; stepClass = 'step-1'; }
-                    else { stepLabel = 'SCAN'; stepClass = 'step-0'; }
-
-                    support = metric.support ? Number(metric.support).toFixed(2) : '—';
-                    resistance = metric.resistance ? Number(metric.resistance).toFixed(2) : '—';
-                    rsiVal = metric.rsi !== undefined ? Number(metric.rsi).toFixed(1) : '—';
-                    if (metric.rsi !== undefined && metric.rsi > 70) rsiClass = 'overbought';
-                    else if (metric.rsi !== undefined && metric.rsi < 30) rsiClass = 'oversold';
-
-                    if (metric.bandwidth !== null && metric.bandwidth !== undefined) {
-                        squeezeDisplay = metric.bandwidth.toFixed(2) + '%';
-                        if (metric.bandwidth < 2.0) {
-                            squeezeClass = 'badge-squeeze';
-                        }
-                    }
-
-                    if (metric.tickDirections && metric.tickDirections.length > 0) {
-                        const dirs = metric.tickDirections.slice(-5);
-                        trendHtml = dirs.map(d => {
-                            if (d > 0) return '<span class="tick-up">▲</span>';
-                            else if (d < 0) return '<span class="tick-down">▼</span>';
-                            else return '<span class="tick-flat">—</span>';
-                        }).join('');
-                    } else {
-                        trendHtml = '—';
-                    }
-
-                    supportPct = metric.supportPct !== undefined ? Math.round(metric.supportPct) : null;
-                    resistancePct = metric.resistancePct !== undefined ? Math.round(metric.resistancePct) : null;
-                    risePct = metric.risePct !== undefined ? Math.round(metric.risePct) : null;
-                    fallPct = metric.fallPct !== undefined ? Math.round(metric.fallPct) : null;
-                }
-
-                const srPctDisplay = (supportPct !== null && resistancePct !== null)
-                    ? `<span style="color:#10b981;">${supportPct}%</span> / <span style="color:#ef4444;">${resistancePct}%</span>`
-                    : '—';
-                const rfPctDisplay = (risePct !== null && fallPct !== null)
-                    ? `<span style="color:#10b981;">${risePct}%</span> / <span style="color:#ef4444;">${fallPct}%</span>`
-                    : '—';
-
-                const tr = document.createElement('tr');
-                tr.className = `${isActive ? 'active' : ''} ${stepClass}`;
-                tr.onclick = () => window.setFocusMarket(sym);
-                tr.innerHTML = `
-                    <td class="col-asset">${MARKETS_CFG[sym]}</td>
-                    <td class="col-price">${priceDisplay}</td>
-                    <td class="col-sr"><span class="s">${support}</span> / <span class="r">${resistance}</span></td>
-                    <td class="col-sr-pct">${srPctDisplay}</td>
-                    <td class="col-rf-pct">${rfPctDisplay}</td>
-                    <td class="col-status"><span class="${breakoutClass}">${breakoutLabel}</span></td>
-                    <td class="col-rsi ${rsiClass}">${rsiVal}</td>
-                    <td class="col-bb-squeeze"><span class="${squeezeClass}">${squeezeDisplay}</span></td>
-                    <td class="col-trend">${trendHtml}</td>
-                `;
-                tbody.appendChild(tr);
-            }
-
-            // ---- Mobile view ----
-            renderMobileView(state);
-
-        } catch(err) {
-            console.error('❌ Error in renderUI:', err);
-        }
-    };
-
-    function renderMobileView(state) {
-        try {
-            const safeState = state || {};
-            const marketMetrics = safeState.marketMetrics || {};
-            const symbols = Object.keys(MARKETS_CFG);
-            const carousel = document.getElementById('assetCarousel');
-            if (carousel) {
-                carousel.innerHTML = '';
-                symbols.forEach(sym => {
-                    const chip = document.createElement('div');
-                    chip.className = 'asset-chip' + (sym === currentFocus ? ' active' : '');
-                    chip.dataset.symbol = sym;
-                    const shortName = getAssetLabel(MARKETS_CFG[sym], true);
-                    chip.textContent = shortName;
-                    chip.onclick = () => window.setFocusMarket(sym);
-                    carousel.appendChild(chip);
-                });
-            }
-
-            const metric = marketMetrics[currentFocus] || null;
-            if (!metric) {
-                document.getElementById('mobile-asset-name').textContent = MARKETS_CFG[currentFocus] || '—';
-                document.getElementById('mobile-asset-price').textContent = '—';
-                document.getElementById('mobile-support').textContent = '—';
-                document.getElementById('mobile-resistance').textContent = '—';
-                document.getElementById('mobile-breakout').textContent = '—';
-                document.getElementById('mobile-rsi-value').textContent = '—';
-                document.getElementById('mobile-volatility').textContent = '—';
-                document.getElementById('mobile-tick-digits').innerHTML = '<span class="tick-digit">—</span>';
-                document.getElementById('mobile-rsi-gauge').querySelector('.rsi-fill').style.width = '50%';
-                return;
-            }
-
-            const price = metric.price;
-            const formattedPrice = metric.formattedPrice || formatPrice(currentFocus, price) || '—';
-            const support = metric.support ? Number(metric.support).toFixed(2) : '—';
-            const resistance = metric.resistance ? Number(metric.resistance).toFixed(2) : '—';
-            const rsi = metric.rsi !== undefined ? Number(metric.rsi).toFixed(1) : '—';
-            const vol = metric.volatility !== undefined ? Number(metric.volatility).toFixed(2) + '%' : '—';
-            const breakout = metric.isBreakout ? '🚀 UP' : (metric.isBreakdown ? '📉 DOWN' : '—');
-            const breakoutClass = metric.isBreakout ? 'breakout' : (metric.isBreakdown ? 'breakdown' : '');
-
-            const lastPrices = metric.lastPrices || [];
-            let change = 0;
-            let changeClass = '';
-            if (lastPrices.length >= 2) {
-                const prev = lastPrices[lastPrices.length - 2];
-                const curr = lastPrices[lastPrices.length - 1];
-                if (prev !== undefined && curr !== undefined) {
-                    change = curr - prev;
-                    changeClass = change > 0 ? 'up' : (change < 0 ? 'down' : '');
-                }
-            }
-            const changeDisplay = change !== 0 ? (change > 0 ? '+' : '') + change.toFixed(2) : '—';
-
-            document.getElementById('mobile-asset-name').textContent = MARKETS_CFG[currentFocus] || '—';
-            document.getElementById('mobile-asset-price').textContent = formattedPrice;
-            const changeEl = document.getElementById('mobile-asset-change');
-            changeEl.textContent = changeDisplay;
-            changeEl.className = 'asset-change ' + changeClass;
-
-            document.getElementById('mobile-support').textContent = support;
-            document.getElementById('mobile-resistance').textContent = resistance;
-            const breakoutEl = document.getElementById('mobile-breakout');
-            breakoutEl.textContent = breakout;
-            breakoutEl.className = 'value ' + breakoutClass;
-
-            document.getElementById('mobile-rsi-value').textContent = rsi;
-            const rsiFill = document.getElementById('mobile-rsi-gauge').querySelector('.rsi-fill');
-            if (rsiFill) {
-                const rsiNum = parseFloat(rsi);
-                if (!isNaN(rsiNum)) {
-                    rsiFill.style.width = Math.min(100, Math.max(0, rsiNum)) + '%';
-                } else {
-                    rsiFill.style.width = '50%';
-                }
-            }
-
-            document.getElementById('mobile-volatility').textContent = vol;
-
-            const digitsContainer = document.getElementById('mobile-tick-digits');
-            if (digitsContainer) {
-                if (lastPrices.length > 0) {
-                    const lastTicks = lastPrices.slice(-10);
-                    let html = '';
-                    let prev = null;
-                    lastTicks.forEach((val) => {
-                        const num = Number(val);
-                        const cls = (prev !== null) ? (num > prev ? 'up' : (num < prev ? 'down' : '')) : '';
-                        html += `<span class="tick-digit ${cls}">${num.toFixed(2)}</span>`;
-                        prev = num;
-                    });
-                    digitsContainer.innerHTML = html;
-                } else {
-                    digitsContainer.innerHTML = '<span class="tick-digit">—</span>';
-                }
-            }
-        } catch(err) {
-            console.error('❌ Error in renderMobileView:', err);
-        }
-    }
-
-    renderUI({});
-
-    // ---- SSE ----
-    let sse = null;
-    let reconnectAttempts = 0;
-    const maxReconnectAttempts = 10;
-
-    function connectSSE() {
-        if (sse) { sse.close(); sse = null; }
-        sse = new EventSource('/api/logs');
-        sse.onopen = function() { console.log('✅ SSE connected'); reconnectAttempts = 0; };
-        sse.onerror = function(err) {
-            console.warn('⚠️ SSE error:', err);
-            if (sse) sse.close();
-            const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 10000);
-            setTimeout(() => {
-                reconnectAttempts++;
-                if (reconnectAttempts <= maxReconnectAttempts) connectSSE();
-                else console.error('❌ SSE max retries reached.');
-            }, delay);
-        };
-        sse.onmessage = function(e) {
-            try {
-                const data = JSON.parse(e.data);
-                if (data.event === 'analytics_delta') {
-                    if (typeof handleAnalyticsDelta === 'function') handleAnalyticsDelta(data.data);
-                    return;
-                }
-                if (data.state) {
-                    globalState = data.state;
-                    window.globalState = globalState;
-                    if (data.state.marketMetrics) {
-                        for (const sym in data.state.marketMetrics) {
-                            const metric = data.state.marketMetrics[sym];
-                            if (metric && metric.price !== undefined) {
-                                window.currentMarketPrices[sym] = metric.price;
-                            }
-                        }
-                    }
-                    if (typeof renderUI === 'function') renderUI(data.state);
-                }
-                if (data.logs && data.logs.length > 0) {
-                    const box = document.getElementById('log-stream');
-                    if (box) {
-                        data.logs.forEach(log => {
-                            const r = document.createElement('div');
-                            r.className = 'log-entry';
-                            r.innerHTML = `<span class="ts">[${new Date(log.time).toLocaleTimeString()}]</span><span class="msg">${log.message}</span>`;
-                            box.appendChild(r);
-                        });
-                        while (box.children.length > 200) box.removeChild(box.firstChild);
-                        box.scrollTop = box.scrollHeight;
-                    }
-                }
-            } catch(err) { console.error('❌ Error parsing SSE:', err); }
-        };
-    }
-
-    // ---- Analytics delta handler ----
-    let currentAnalyticsData = null;
-    function handleAnalyticsDelta(delta) {
-        if (!currentAnalyticsData) return;
-        const asset = delta.asset || 'Unknown';
-        const pnl = delta.pnl || 0;
-        const assetMap = {};
-        currentAnalyticsData.assetContributions.forEach(a => { assetMap[a.name] = a.pnl; });
-        assetMap[asset] = (assetMap[asset] || 0) + pnl;
-        currentAnalyticsData.assetContributions = Object.entries(assetMap)
-            .map(([name, pnl]) => ({ name, pnl }))
-            .sort((a, b) => b.pnl - a.pnl);
-
-        if (currentAnalyticsData.equityData) {
-            const lastEquity = currentAnalyticsData.equityData.length > 0 ?
-                currentAnalyticsData.equityData[currentAnalyticsData.equityData.length-1].equity : 0;
-            const newEquity = lastEquity + pnl;
-            currentAnalyticsData.equityData.push({
-                timestamp: delta.timestamp || Date.now(),
-                equity: newEquity
-            });
-            if (currentAnalyticsData.equityData.length > 200) {
-                currentAnalyticsData.equityData = currentAnalyticsData.equityData.slice(-200);
-            }
-        }
-        currentAnalyticsData.totalProfit += pnl;
-        currentAnalyticsData.tradeCount += 1;
-        if (pnl > 0) {
-            currentAnalyticsData.winCount += 1;
-            currentAnalyticsData.grossProfit += pnl;
-        } else if (pnl < 0) {
-            currentAnalyticsData.lossCount += 1;
-            currentAnalyticsData.grossLoss += Math.abs(pnl);
-        }
-
-        if (typeof renderAssetBarChart === 'function') renderAssetBarChart(currentAnalyticsData.assetContributions);
-        if (typeof renderEquityCurve === 'function') renderEquityCurve(currentAnalyticsData.equityData, currentAnalyticsData.startingBalance || 0, currentAnalyticsData.timeframe || 'session');
-        if (typeof updateMetrics === 'function') updateMetrics(currentAnalyticsData);
-    }
-
-    // ---- Analytics chart functions ----
-    let assetBarChart = null;
-    let equityChartInstance = null;
-
-    const barValueLabelPlugin = {
-        id: 'barValueLabel',
-        afterDraw: function(chart) {
-            const ctx = chart.ctx;
-            chart.data.datasets.forEach(function(dataset, i) {
-                const meta = chart.getDatasetMeta(i);
-                if (!meta || !meta.data) return;
-                meta.data.forEach(function(element, index) {
-                    const value = dataset.data[index];
-                    if (value === undefined || value === null) return;
-                    const x = element.x;
-                    const y = element.y;
-                    const text = (value >= 0 ? '+' : '') + '$' + value.toFixed(2);
-                    ctx.save();
-                    ctx.font = '8px Inter, sans-serif';
-                    ctx.textAlign = value >= 0 ? 'left' : 'right';
-                    ctx.textBaseline = 'middle';
-                    ctx.fillStyle = value >= 0 ? '#10b981' : '#ef4444';
-                    const offset = value >= 0 ? 6 : -6;
-                    ctx.fillText(text, x + offset, y);
-                    ctx.restore();
-                });
-            });
-        }
-    };
-
-    function renderCharts() {
-        try {
-            const isMobile = window.innerWidth < 768;
-            const ctxBar = document.getElementById('chart-donut')?.getContext('2d');
-            const ctxLine = document.getElementById('chart-line')?.getContext('2d');
-            if (!ctxBar || !ctxLine) return;
-
-            if (assetBarChart) assetBarChart.destroy();
-            assetBarChart = new Chart(ctxBar, {
-                type: 'bar',
-                data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderColor: [], borderWidth: 0, borderRadius: 4 }] },
-                options: {
-                    indexAxis: 'y',
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: function(context) {
-                        const value = context.parsed.x;
-                        return (value >= 0 ? '+' : '') + '$' + value.toFixed(2);
-                    } } } },
-                    scales: {
-                        x: { grid: { display: isMobile ? false : true }, ticks: { display: isMobile ? false : true, callback: function(value) {
-                            return (value >= 0 ? '+' : '') + '$' + value.toFixed(2);
-                        } } },
-                        y: { grid: { display: false }, ticks: { font: { size: isMobile ? 8 : 9 }, color: '#d1d5db' }, afterFit: function(scale) {
-                            if (window.innerWidth < 768) scale.width = 70;
-                            else scale.width = 120;
-                        } }
-                    }
-                },
-                plugins: [barValueLabelPlugin]
-            });
-
-            if (equityChartInstance) { equityChartInstance.destroy(); equityChartInstance = null; }
-            equityChartInstance = new Chart(ctxLine, {
-                type: 'line',
-                data: { datasets: [{ label: 'Equity', data: [], borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 5, pointHitRadius: 10, borderWidth: 2, pointBackgroundColor: '#10b981' }] },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: function(context) {
-                        const value = context.parsed.y;
-                        return 'Balance: ' + (value >= 0 ? '+$' : '-$') + Math.abs(value).toFixed(2);
-                    } } } },
-                    scales: {
-                        x: { type: 'category', grid: { display: false }, ticks: { font: { size: 7 }, maxTicksLimit: window.innerWidth < 768 ? 5 : 20, maxRotation: 0, autoSkip: true, color: '#9ca3af' } },
-                        y: { grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { font: { size: 7 }, color: '#9ca3af', callback: function(value) {
-                            return (value >= 0 ? '+' : '-') + '$' + Math.abs(value).toFixed(2);
-                        } } }
-                    }
-                }
-            });
-        } catch(e) { console.error('renderCharts error:', e); }
-    }
-
-    function renderAssetBarChart(contributions) {
-        if (!assetBarChart) return;
-        try {
-            const isMobile = window.innerWidth < 768;
-            const labels = contributions.map(a => getAssetLabel(a.name, isMobile));
-            const values = contributions.map(a => a.pnl);
-            const colors = values.map(v => v >= 0 ? '#10b981' : '#ef4444');
-            const maxAbs = values.reduce((max, v) => Math.max(max, Math.abs(v)), 0);
-            const buffer = maxAbs * 0.15;
-            const suggestedMax = maxAbs + buffer;
-            const suggestedMin = -suggestedMax;
-
-            assetBarChart.data.labels = labels;
-            assetBarChart.data.datasets[0].data = values;
-            assetBarChart.data.datasets[0].backgroundColor = colors;
-            assetBarChart.data.datasets[0].borderColor = colors;
-            assetBarChart.options.scales.x = {
-                grid: { display: isMobile ? false : true, color: 'rgba(0,0,0,0.05)' },
-                ticks: { display: isMobile ? false : true, callback: function(value) {
-                    return (value >= 0 ? '+' : '') + '$' + value.toFixed(2);
-                } },
-                suggestedMin: suggestedMin,
-                suggestedMax: suggestedMax
-            };
-            assetBarChart.update('none');
-        } catch(e) { console.error('renderAssetBarChart error:', e); }
-    }
-
-    function formatEquityLabel(timestamp, timeframe) {
-        const date = new Date(timestamp);
-        if (timeframe === '24h' || timeframe === 'hour' || timeframe === 'session') {
-            const hours = String(date.getHours()).padStart(2, '0');
-            const minutes = String(date.getMinutes()).padStart(2, '0');
-            return hours + ':' + minutes;
-        } else {
-            return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-        }
-    }
-
-    function showChartEmptyState(containerId, message) {
-        const container = document.getElementById(containerId);
-        if (!container) return;
-        let empty = container.parentElement?.querySelector('.chart-empty-state');
-        if (!empty) {
-            empty = document.createElement('div');
-            empty.className = 'chart-empty-state';
-            empty.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:13px;text-align:center;padding:20px;';
-            container.parentElement.style.position = 'relative';
-            container.parentElement.appendChild(empty);
-        }
-        empty.textContent = message || 'No trade history recorded for this period';
-        container.style.display = 'none';
-    }
-
-    function hideChartEmptyState(containerId) {
-        const container = document.getElementById(containerId);
-        if (!container) return;
-        container.style.display = 'block';
-        const parent = container.parentElement;
-        if (parent) {
-            const empty = parent.querySelector('.chart-empty-state');
-            if (empty) empty.remove();
-        }
-    }
-
-    function renderEquityCurve(equityData, startingBalance, timeframe) {
-        if (!equityChartInstance) return;
-        try {
-            if (!equityData || equityData.length < 2) {
-                showChartEmptyState('chart-line', 'No trade history recorded for this period');
-                equityChartInstance.data.labels = [];
-                equityChartInstance.data.datasets[0].data = [];
-                equityChartInstance.update('none');
-                return;
-            }
-            hideChartEmptyState('chart-line');
-
-            const labels = equityData.map(point => formatEquityLabel(point.timestamp, timeframe));
-            const values = equityData.map(point => point.equity);
-            const baseline = startingBalance || 0;
-            const lastValue = values.length > 0 ? values[values.length-1] : baseline;
-            const isAbove = lastValue >= baseline;
-            const lineColor = isAbove ? '#10b981' : '#ef4444';
-            const fillColor = isAbove ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
-
-            equityChartInstance.data.labels = labels;
-            equityChartInstance.data.datasets[0].data = values;
-            equityChartInstance.data.datasets[0].borderColor = lineColor;
-            equityChartInstance.data.datasets[0].backgroundColor = fillColor;
-            equityChartInstance.data.datasets[0].pointBackgroundColor = lineColor;
-
-            const baselineData = [baseline, baseline];
-            equityChartInstance.data.datasets[1] = {
-                label: 'Start',
-                data: baselineData,
-                borderColor: 'rgba(100,116,139,0.4)',
-                borderDash: [5, 5],
-                borderWidth: 1,
-                pointRadius: 0,
-                fill: false,
-                tension: 0
-            };
-
-            while (equityChartInstance.data.datasets.length > 2) {
-                equityChartInstance.data.datasets.pop();
-            }
-            equityChartInstance.update('none');
-        } catch(e) { console.error('renderEquityCurve error:', e); }
-    }
-
-    function updateMetrics(data) {
-        try {
-            const profitEl = document.getElementById('meta-profit');
-            if (profitEl) profitEl.textContent = `$${data.totalProfit.toFixed(2)}`;
-            const total = data.tradeCount || 0;
-            const wins = data.winCount || 0;
-            const strike = total > 0 ? (wins / total) * 100 : 0;
-            const strikeEl = document.getElementById('meta-strike');
-            if (strikeEl) strikeEl.innerHTML = `${strike.toFixed(1)}% <small style="display:block;font-size:8px;color:#787b86;font-weight:400;">${total} trades total</small>`;
-            const grossProfit = data.grossProfit || 0;
-            const grossLoss = data.grossLoss || 0;
-            let pf;
-            if (grossLoss === 0) pf = grossProfit > 0 ? '10.0+' : '0.00';
-            else pf = (grossProfit / grossLoss).toFixed(2);
-            const pfEl = document.getElementById('meta-pf');
-            if (pfEl) pfEl.textContent = pf;
-            const maxDD = data.maxDrawdown || 0;
-            const ddEl = document.getElementById('meta-dd');
-            if (ddEl) ddEl.textContent = `-${maxDD.toFixed(2)}%`;
-            const losses = data.lossCount || 0;
-            const avgWin = wins > 0 ? grossProfit / wins : 0;
-            const avgLoss = losses > 0 ? grossLoss / losses : 0;
-            const avgEl = document.getElementById('meta-avg-win-loss');
-            if (avgEl) avgEl.textContent = `$${avgWin.toFixed(2)} / $${avgLoss.toFixed(2)}`;
-            const maxConsecEl = document.getElementById('meta-max-consec');
-            if (maxConsecEl) maxConsecEl.textContent = `W:${wins} / L:${losses}`;
-            const avgDurEl = document.getElementById('meta-avg-duration');
-            if (avgDurEl) avgDurEl.textContent = `${total > 0 ? (data.totalDuration || 0) / total : 0}s`;
-            const wonLostEl = document.getElementById('meta-won-lost');
-            if (wonLostEl) wonLostEl.textContent = `${wins} / ${losses}`;
-        } catch(e) { console.error('updateMetrics error:', e); }
-    }
-
-    function updateDatePickersForPreset(mode) {
-        const now = new Date();
-        const startEl = document.getElementById('date-start');
-        const endEl = document.getElementById('date-end');
-        if (!startEl || !endEl) return;
-        let startDate, endDate;
-        switch (mode) {
-            case '24h': startDate = new Date(now.getTime() - 24*60*60*1000); endDate = now; break;
-            case 'week': startDate = new Date(now.getTime() - 7*24*60*60*1000); endDate = now; break;
-            case 'month': startDate = new Date(now.getTime() - 30*24*60*60*1000); endDate = now; break;
-            case 'year': startDate = new Date(now.getTime() - 365*24*60*60*1000); endDate = now; break;
-            default: return;
-        }
-        const formatDate = (d) => d.toISOString().split('T')[0];
-        startEl.value = formatDate(startDate);
-        endEl.value = formatDate(endDate);
-    }
-
-    window.timeframePreset = async function(btn, mode) {
-        if (btn) {
-            document.querySelectorAll('.preset-strip .btn-preset').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-        }
-        if (mode === 'clear') {
-            renderAssetBarChart([]);
-            renderEquityCurve([], 0);
-            document.getElementById('meta-profit').textContent = '$0.00';
-            document.getElementById('meta-strike').innerHTML = '0.0% <small style="display:block;font-size:8px;color:#787b86;">0 trades total</small>';
-            document.getElementById('meta-pf').textContent = '0.00';
-            document.getElementById('meta-dd').textContent = '0.0%';
-            document.getElementById('meta-avg-win-loss').textContent = '$0.00 / $0.00';
-            document.getElementById('meta-max-consec').textContent = 'W:0 / L:0';
-            document.getElementById('meta-avg-duration').textContent = '0s';
-            document.getElementById('meta-won-lost').textContent = '0 / 0';
-            return;
-        }
-        updateDatePickersForPreset(mode);
-        try {
-            const resp = await fetch(`/api/ledger/aggregated?mode=${mode}`);
-            const data = await resp.json();
-            currentAnalyticsData = data;
-            currentAnalyticsData.timeframe = mode;
-            const startingBalance = data.equityData.length > 0 ? data.equityData[0].equity : 0;
-            currentAnalyticsData.startingBalance = startingBalance;
-            renderAssetBarChart(data.assetContributions);
-            renderEquityCurve(data.equityData, startingBalance, mode);
-            updateMetrics(data);
-        } catch(err) {
-            console.error('Analytics error:', err);
-        }
-    };
-
-    // ---- Settings ----
-    window.loadConfig = async function() {
-        try {
-            const resp = await fetch('/api/config');
-            const config = await resp.json();
-            const map = {
-                'ANALYSIS_WINDOW': 'ANALYSIS_WINDOW',
-                'BOLLINGER_PERIOD': 'BOLLINGER_PERIOD',
-                'BOLLINGER_STD': 'BOLLINGER_STD',
-                'RSI_PERIOD': 'RSI_PERIOD',
-                'OVERSOLD_THRESHOLD': 'OVERSOLD_THRESHOLD',
-                'OVERBOUGHT_THRESHOLD': 'OVERBOUGHT_THRESHOLD',
-                'MIN_VOLATILITY_PERCENT': 'MIN_VOLATILITY_PERCENT',
-                'DURATION_SECONDS': 'DURATION_SECONDS',
-                'MAX_CONSECUTIVE_LOSSES': 'MAX_CONSECUTIVE_LOSSES',
-                'RISK_PERCENT': 'RISK_PERCENT',
-                'TP_PERCENT': 'TP_PERCENT',
-                'SL_PERCENT': 'SL_PERCENT',
-                'MIN_STAKE': 'MIN_STAKE',
-                'COOLDOWN_TICKS': 'COOLDOWN_TICKS'
-            };
-            for (const [id, key] of Object.entries(map)) {
-                const el = document.getElementById('config-' + id);
-                if (el && config[key] !== undefined) el.value = config[key];
-            }
-            const msFields = {
-                'MIN_TRIGGER_INTERVAL': 1000,
-                'LOSS_COOLDOWN_MS': 60000,
-                'SETTLEMENT_TIMEOUT_MS': 1000,
-                'PNL_SYNC_INTERVAL_MS': 1000
-            };
-            for (const [id, divisor] of Object.entries(msFields)) {
-                const secondsId = id.replace('_MS', '_SECONDS');
-                const el = document.getElementById('config-' + secondsId);
-                if (el && config[id] !== undefined) {
-                    el.value = config[id] / divisor;
-                }
-            }
-            document.getElementById('settings-status').textContent = 'Config loaded.';
-        } catch(err) {
-            document.getElementById('settings-status').textContent = 'Error loading config.';
-            console.error(err);
-        }
-    };
-
-    window.saveSettings = async function() {
-        try {
-            const config = {};
-            const direct = [
-                'ANALYSIS_WINDOW', 'BOLLINGER_PERIOD', 'BOLLINGER_STD', 'RSI_PERIOD',
-                'OVERSOLD_THRESHOLD', 'OVERBOUGHT_THRESHOLD', 'MIN_VOLATILITY_PERCENT',
-                'DURATION_SECONDS', 'MAX_CONSECUTIVE_LOSSES',
-                'RISK_PERCENT', 'TP_PERCENT', 'SL_PERCENT', 'MIN_STAKE',
-                'COOLDOWN_TICKS'
-            ];
-            for (const id of direct) {
-                const el = document.getElementById('config-' + id);
-                if (el) {
-                    const val = parseFloat(el.value);
-                    if (!isNaN(val)) config[id] = val;
-                }
-            }
-            const secondsToMs = {
-                'MIN_TRIGGER_INTERVAL_SECONDS': 'MIN_TRIGGER_INTERVAL',
-                'LOSS_COOLDOWN_MINUTES': 'LOSS_COOLDOWN_MS',
-                'SETTLEMENT_TIMEOUT_SECONDS': 'SETTLEMENT_TIMEOUT_MS',
-                'PNL_SYNC_INTERVAL_SECONDS': 'PNL_SYNC_INTERVAL_MS'
-            };
-            for (const [secondsId, msId] of Object.entries(secondsToMs)) {
-                const el = document.getElementById('config-' + secondsId);
-                if (el) {
-                    const val = parseFloat(el.value);
-                    if (!isNaN(val)) {
-                        let multiplier = 1000;
-                        if (secondsId === 'LOSS_COOLDOWN_MINUTES') multiplier = 60000;
-                        config[msId] = val * multiplier;
-                    }
-                }
-            }
-            const resp = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) });
-            const result = await resp.json();
-            if (result.success) {
-                document.getElementById('settings-status').textContent = '✅ Settings applied!';
-            } else {
-                document.getElementById('settings-status').textContent = '❌ Error: ' + result.error;
-            }
-        } catch(err) {
-            document.getElementById('settings-status').textContent = '❌ Network error.';
-            console.error(err);
-        }
-    };
-
-    // ---- Initialize ----
-    connectSSE();
-
-    console.log('🚀 QUANTCORE Terminal v6.0 loaded');
+// ============================================================
+// THEME TOGGLE
+// ============================================================
+document.getElementById('themeToggle').addEventListener('click', function() {
+  document.body.classList.toggle('light');
+  this.textContent = document.body.classList.contains('light') ? '☀️' : '🌙';
 });
+
+console.log('🚀 QUANTCORE Terminal loaded');
