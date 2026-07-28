@@ -15,23 +15,39 @@ function getNairobiDateStr(date = new Date()) {
 const state = {
     active: false,
     tradingMode: 'demo',
+    
+    // ---- Connection & Execution State (Used by client.js) ----
+    isConnected: false,
+    isTrading: false, 
+    tradeInProgress: false, // Kept for backward compatibility with other files
     balance: null,
     currency: 'USD',
+    lastTick: null,
+    lastDigit: null,
+
+    // ---- PnL & Performance Metrics ----
     sessionPnl: 0,
     dailyPnl: 0,
+    totalProfit: 0, // Used by client.js
+    totalWins: 0,   // Used by client.js
+    totalLosses: 0, // Used by client.js
+    consecutiveLosses: 0,
     dailyStartBalance: null,
+
+    // ---- Risk Management & Locks ----
     locked: false,
     lockReason: '',
-    tradeInProgress: false,
+    lossCooldownUntil: 0,
+    cooldownTicksLeft: 0,
+    
+    // ---- Trade Context ----
     activeRealTrade: null,
     currentStake: 0.35,
-    cooldownTicksLeft: 0,
     marketMetrics: {},
     logs: [],
     lastTriggerTime: 0,
-    lossCooldownUntil: 0,
     pendingSettlement: false,
-    consecutiveLosses: 0,
+    
     // ---- Midnight heartbeat tracking ----
     currentTradingDayStr: getNairobiDateStr(),
     dailyLimitReached: false,
@@ -52,6 +68,10 @@ function saveState() {
             sessionActive: state.active,
             sessionPnl: state.sessionPnl,
             dailyPnl: state.dailyPnl,
+            totalProfit: state.totalProfit,
+            totalWins: state.totalWins,
+            totalLosses: state.totalLosses,
+            consecutiveLosses: state.consecutiveLosses,
             dailyLimitReached: state.dailyLimitReached,
             dailyStartBalance: state.dailyStartBalance
         }, null, 2);
@@ -79,6 +99,10 @@ function loadState() {
                 state.active = saved.sessionActive || false;
                 state.sessionPnl = saved.sessionPnl || 0;
                 state.dailyPnl = saved.dailyPnl || 0;
+                state.totalProfit = saved.totalProfit || 0;
+                state.totalWins = saved.totalWins || 0;
+                state.totalLosses = saved.totalLosses || 0;
+                state.consecutiveLosses = saved.consecutiveLosses || 0;
                 state.dailyLimitReached = saved.dailyLimitReached || false;
                 state.dailyStartBalance = saved.dailyStartBalance || null;
             } else {
@@ -88,6 +112,10 @@ function loadState() {
                 state.active = saved.sessionActive || false;
                 state.sessionPnl = 0;
                 state.dailyPnl = 0;
+                state.totalProfit = 0;
+                state.totalWins = 0;
+                state.totalLosses = 0;
+                state.consecutiveLosses = 0;
                 state.dailyLimitReached = false;
                 state.dailyStartBalance = null;
             }
@@ -110,13 +138,22 @@ function startMidnightHeartbeat() {
         if (todayStr !== state.currentTradingDayStr) {
             console.log(`[System] 🕛 Midnight crossed (${TIMEZONE}). Resetting daily limits for new session.`);
             state.currentTradingDayStr = todayStr;
+            
+            // Reset Session / Daily Trackers
             state.dailyPnl = 0;
+            state.sessionPnl = 0;
+            state.totalProfit = 0;
+            state.totalWins = 0;
+            state.totalLosses = 0;
+            state.consecutiveLosses = 0;
+            
+            // Reset Lock States
             state.dailyLimitReached = false;
             state.locked = false;
             state.lockReason = '';
-            state.sessionPnl = 0;
-            state.consecutiveLosses = 0;
+            
             state.lastTradeTimestamp = 0;
+            
             if (state.balance !== null) {
                 state.dailyStartBalance = state.balance;
             }
