@@ -1,11 +1,12 @@
 const fs = require('fs');
 const path = require('path');
 
-const CONFIG_FILE = '/var/data/deriv_config.json';
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '../data');
+const CONFIG_FILE = path.join(DATA_DIR, 'deriv_config.json');
 
-const DEFAULT_CONFIG = {
+const DEFAULT_CONFIG = Object.freeze({
     // ---------- Trade Execution ----------
-    DURATION: 7,                     // 7 ticks for auto trading
+    DURATION: 7,                     // Ticks for auto trading
     MAX_CONSECUTIVE_LOSSES: 3,
     LOSS_COOLDOWN_MS: 300000,
     COOLDOWN_TICKS: 5,
@@ -15,8 +16,8 @@ const DEFAULT_CONFIG = {
     BOLLINGER_PERIOD: 20,
     BOLLINGER_STD: 2,
     RSI_PERIOD: 20,
-    MIN_VOLATILITY_PERCENT: 0.10,    // increased to 0.10% for sniper mode
-    MA_DIFF_THRESHOLD: 0.08,         // minimum absolute MA diff for entry
+    MIN_VOLATILITY_PERCENT: 0.10,    // 0.10% for sniper mode
+    MA_DIFF_THRESHOLD: 0.08,         // Minimum absolute MA diff for entry
 
     // ---------- Risk ----------
     RISK_PERCENT: 1,
@@ -28,24 +29,37 @@ const DEFAULT_CONFIG = {
     MIN_TRIGGER_INTERVAL: 300000,    // 5 minutes cooldown between trades
     SETTLEMENT_TIMEOUT_MS: 15000,
     PNL_SYNC_INTERVAL_MS: 300000
-};
+});
 
 function loadConfig() {
     try {
         if (fs.existsSync(CONFIG_FILE)) {
-            const saved = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+            const rawData = fs.readFileSync(CONFIG_FILE, 'utf8');
+            const saved = JSON.parse(rawData);
             return { ...DEFAULT_CONFIG, ...saved };
         }
-    } catch(e) {}
+    } catch (error) {
+        console.error(`[CONFIG ERROR] Failed to load config from ${CONFIG_FILE}:`, error.message);
+    }
     return { ...DEFAULT_CONFIG };
 }
 
 function saveConfig(config) {
     try {
-        const dir = path.dirname(CONFIG_FILE);
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
-    } catch(e) {}
+        if (!config || typeof config !== 'object') {
+            throw new Error('Invalid config object provided');
+        }
+        if (!fs.existsSync(DATA_DIR)) {
+            fs.mkdirSync(DATA_DIR, { recursive: true });
+        }
+        
+        const merged = { ...DEFAULT_CONFIG, ...config };
+        fs.writeFileSync(CONFIG_FILE, JSON.stringify(merged, null, 2));
+        return merged;
+    } catch (error) {
+        console.error(`[CONFIG ERROR] Failed to save config to ${CONFIG_FILE}:`, error.message);
+        throw error; // Re-throw so caller (e.g. API route) knows it failed
+    }
 }
 
 module.exports = { DEFAULT_CONFIG, loadConfig, saveConfig };
