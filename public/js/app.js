@@ -1,68 +1,60 @@
-// =========================================================================
-// 1. DEFINE GLOBAL FUNCTIONS FIRST (so inline onclick works)
-// =========================================================================
+// ============================================================
+// 1. GLOBAL FUNCTIONS (defines switchTab, etc.)
+// ============================================================
 window.switchTab = function(tabId) {
     console.log('[switchTab] called with:', tabId);
-    try {
-        document.querySelectorAll('.tab-pages').forEach(p => p.classList.remove('active'));
-        const target = document.getElementById('tab-' + tabId);
-        if (target) target.classList.add('active');
+    if (!tabId) return;
 
-        document.querySelectorAll('.header-tabs .tab-btn').forEach(b => b.classList.remove('active'));
-        const headerBtn = document.querySelector(`.header-tabs .tab-btn[data-tab="${tabId}"]`);
-        if (headerBtn) headerBtn.classList.add('active');
+    // 1. Update nav buttons
+    document.querySelectorAll('.nav-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tabId);
+    });
 
-        document.querySelectorAll('.tab-bar .tab-item').forEach(b => b.classList.remove('active'));
-        const barBtn = document.querySelector(`.tab-bar .tab-item[data-tab="${tabId}"]`);
-        if (barBtn) barBtn.classList.add('active');
+    // 2. Update tab pages
+    document.querySelectorAll('.tab-page').forEach(page => {
+        page.classList.toggle('active', page.id === tabId);
+    });
 
-        const focusBar = document.getElementById('focusBar');
-        if (focusBar) {
-            focusBar.style.display = (tabId === 'analytics' || tabId === 'digits') ? 'none' : 'flex';
+    // 3. Extra actions
+    if (tabId === 'tab-analytics') {
+        if (typeof renderCharts === 'function') renderCharts();
+        if (typeof timeframePreset === 'function') {
+            const sessionBtn = document.getElementById('p-session');
+            if (sessionBtn) timeframePreset(sessionBtn, 'session');
         }
+    }
+    if (tabId === 'tab-digits') {
+        if (window.engine) window.engine.computeDigits = true;
+        if (typeof renderDigitsTab === 'function') renderDigitsTab();
+    }
+    if (tabId === 'tab-settings') {
+        if (typeof loadConfig === 'function') loadConfig();
+    }
+    if (tabId === 'tab-logs') {
+        if (typeof scrollLogsToBottom === 'function') scrollLogsToBottom();
+    }
 
-        const body = document.body;
-        body.classList.remove('analytics-active', 'dashboard-active');
-        if (tabId === 'analytics') {
-            body.classList.add('analytics-active');
-            const sidebar = document.getElementById('appSidebar');
-            if (sidebar) sidebar.classList.add('collapsed');
-            const toggle = document.getElementById('sidebarToggleFixed');
-            if (toggle) toggle.textContent = '▶';
-        } else if (tabId === 'dashboard') {
-            body.classList.add('dashboard-active');
-        }
+    // Focus bar visibility
+    const focusBar = document.getElementById('focusBar');
+    if (focusBar) {
+        focusBar.style.display = (tabId === 'tab-analytics' || tabId === 'tab-digits') ? 'none' : 'flex';
+    }
 
-        // Initialize tab content
-        if (tabId === 'analytics') {
-            setTimeout(() => {
-                if (typeof renderCharts === 'function') renderCharts();
-                if (typeof timeframePreset === 'function') {
-                    const sessionBtn = document.getElementById('p-session');
-                    if (sessionBtn) timeframePreset(sessionBtn, 'session');
-                }
-            }, 100);
-        }
-        if (tabId === 'digits') {
-            if (window.engine) window.engine.computeDigits = true;
-            setTimeout(() => {
-                if (typeof renderDigitsTab === 'function') renderDigitsTab();
-            }, 100);
-        }
-        if (tabId === 'settings') {
-            if (typeof loadConfig === 'function') loadConfig();
-        }
-        if (tabId === 'logs') {
-            if (typeof scrollLogsToBottom === 'function') scrollLogsToBottom();
-        }
-    } catch (e) {
-        console.error('switchTab error:', e);
+    // Sidebar collapse on analytics
+    const body = document.body;
+    body.classList.remove('analytics-active', 'dashboard-active');
+    if (tabId === 'tab-analytics') {
+        body.classList.add('analytics-active');
+        const sidebar = document.getElementById('appSidebar');
+        if (sidebar) sidebar.classList.add('collapsed');
+        const toggle = document.getElementById('sidebarToggleFixed');
+        if (toggle) toggle.textContent = '▶';
+    } else if (tabId === 'tab-dashboard') {
+        body.classList.add('dashboard-active');
     }
 };
 
-// =========================================================================
-// 2. OTHER GLOBAL FUNCTIONS (declared early to be accessible)
-// =========================================================================
+// ---- Other global functions (for inline onclick) ----
 window.sendControl = function(action) {
     fetch('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) })
         .then(res => res.json())
@@ -74,7 +66,7 @@ window.sendControl = function(action) {
 };
 
 window.swapEnvironment = function() {
-    const targetMode = serverMode || 'demo';
+    const targetMode = window.serverMode || 'demo';
     const newMode = targetMode === 'demo' ? 'real' : 'demo';
     fetch('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'set_mode', mode: newMode }) })
         .then(res => res.json())
@@ -87,15 +79,15 @@ window.swapEnvironment = function() {
 window.fireManual = function(type) {
     const duration = parseInt(document.getElementById('manual-duration')?.value) || 7;
     const unit = document.getElementById('manual-unit')?.value || 't';
-    const price = window.currentMarketPrices ? window.currentMarketPrices[currentFocus] : null;
+    const price = window.currentMarketPrices ? window.currentMarketPrices[window.currentFocus] : null;
     if (price === undefined || price === null) {
-        alert('No price data available for ' + (currentFocus || '') + '. Please wait for ticks.');
+        alert('No price data available for ' + (window.currentFocus || '') + '. Please wait for ticks.');
         return;
     }
     fetch('/api/manual-trade', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol: currentFocus, contractType: type, duration: duration, durationUnit: unit, price: price })
+        body: JSON.stringify({ symbol: window.currentFocus, contractType: type, duration: duration, durationUnit: unit, price: price })
     })
         .then(async (response) => {
             const text = await response.text();
@@ -131,8 +123,8 @@ window.toggleDatePicker = function() {
 
 window.setFocusMarket = function(sym) {
     if (!sym) return;
-    currentFocus = sym;
-    if (globalState && typeof renderUI === 'function') renderUI(globalState);
+    window.currentFocus = sym;
+    if (window.globalState && typeof renderUI === 'function') renderUI(window.globalState);
     document.querySelectorAll('.asset-chip').forEach(el => el.classList.remove('active'));
     const chip = document.querySelector(`.asset-chip[data-symbol="${sym}"]`);
     if (chip) chip.classList.add('active');
@@ -141,11 +133,24 @@ window.setFocusMarket = function(sym) {
     }
 };
 
-// =========================================================================
-// 3. DOM READY: SET UP THE REST
-// =========================================================================
+// ============================================================
+// 2. DOM READY – SET UP THE REST
+// ============================================================
 document.addEventListener('DOMContentLoaded', function() {
     console.log('DOMContentLoaded fired');
+
+    // ---- Tab switching with event listeners ----
+    document.querySelectorAll('.nav-tab').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            const tabId = this.dataset.tab;
+            if (tabId && typeof window.switchTab === 'function') {
+                window.switchTab(tabId);
+            } else {
+                console.warn('Tab click failed: tabId=' + tabId);
+            }
+        });
+    });
 
     // ---- Theme toggle ----
     const themeToggle = document.getElementById('themeToggle');
@@ -246,6 +251,7 @@ document.addEventListener('DOMContentLoaded', function() {
     window.currentMarketPrices = {};
     window.currentFocus = currentFocus;
     window.globalState = globalState;
+    window.serverMode = serverMode;
 
     // ---- Digits Tab Render ----
     window.renderDigitsTab = function() {
@@ -706,7 +712,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (typeof updateMetrics === 'function') updateMetrics(currentAnalyticsData);
     }
 
-    // ---- Analytics chart functions (simplified) ----
+    // ---- Analytics chart functions ----
     let assetBarChart = null;
     let equityChartInstance = null;
 
@@ -1080,6 +1086,5 @@ document.addEventListener('DOMContentLoaded', function() {
     // ---- Initialize ----
     connectSSE();
 
-    // Ensure switchTab is defined globally (already defined at top)
     console.log('🚀 QUANTCORE Terminal v6.0 loaded');
 });
