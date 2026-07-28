@@ -1,5 +1,5 @@
 const WebSocket = require('ws');
-const { state, CONFIG, syncDailyPnlFromDB, getFullState, saveState, checkDailyLimits } = require('../state/manager');
+const { state, CONFIG, consecutiveLosses, checkStrategy, syncDailyPnlFromDB, getFullState, saveState, checkDailyLimits } = require('../state/manager');
 const { addLog, broadcastSSE } = require('../api/sse');
 const { MARKETS, formatMarketPrice } = require('../markets/definitions');
 const { saveTradeToCloud } = require('../database');
@@ -11,19 +11,17 @@ let keepAliveLoop = null;
 let watchdogTimer = null;
 let settlementTimer = null;
 
-// ---- Sniper mode state (per symbol) ----
-const maDiffHistory = {};
-const symbols = Object.keys(MARKETS);
-symbols.forEach(sym => { maDiffHistory[sym] = [0, 0, 0]; }); // last 3 diffs
+// ---- Deduplication Set ----
+const subscribedSymbols = new Set();
 
-const engine = new MultiMarketPipeline(symbols);
+const engine = new MultiMarketPipeline(Object.keys(MARKETS));
 
 function send(msg) {
+    // ---- PROTECTED SEND ----
     if (derivWs && derivWs.readyState === WebSocket.OPEN) {
         derivWs.send(JSON.stringify(msg));
     } else {
-        console.warn('[DEBUG] Cannot send: WebSocket not open');
-        addLog(`⚠️ Cannot send: WebSocket not open (readyState=${derivWs ? derivWs.readyState : 'null'})`);
+        console.warn(`⚠️ Cannot send: WebSocket not open (readyState=${derivWs ? derivWs.readyState : 'null'})`);
     }
 }
 
@@ -36,6 +34,8 @@ function disconnectDeriv() {
     clearTimeout(watchdogTimer);
     clearTimeout(settlementTimer);
     if (derivWs) { derivWs.removeAllListeners(); try { derivWs.terminate(); } catch(e) {} derivWs = null; }
+    // Clear subscription set on disconnect
+    subscribedSymbols.clear();
 }
 
 async function connectDeriv() {
@@ -79,10 +79,15 @@ async function connectDeriv() {
             addLog(`🌐 Connected. Balance: $${state.balance.toFixed(2)} | Session: $${state.sessionPnl.toFixed(2)}`);
             send({ balance: 1, subscribe: 1, req_id: getNextReqId() });
 
-            for (const key of symbols) {
-                send({ ticks_history: key, count: 2000, end: 'latest', subscribe: 1, req_id: getNextReqId() });
+            // ---- Subscribe only once per symbol ----
+            const allSymbols = Object.keys(MARKETS);
+            for (const key of allSymbols) {
+                if (!subscribedSymbols.has(key)) {
+                    send({ ticks_history: key, count: 2000, end: 'latest', subscribe: 1, req_id: getNextReqId() });
+                    subscribedSymbols.add(key);
+                }
             }
-            addLog(`📡 Subscribed to ${symbols.length} markets.`);
+            addLog(`📡 Subscribed to ${allSymbols.length} markets (single stream).`);
 
             setInterval(() => { broadcastSSE({ state: getFullState() }); }, 3000);
 
@@ -149,6 +154,7 @@ function handleMessage(msg) {
         const prices = msg.history.prices.map(p => parseFloat(p));
         prices.forEach(p => engine.feed(symbol, p));
         addLog(`✅ History synchronized for ${symbol}`);
+        // No extra ticks subscription here – already done in open
         return;
     }
 
@@ -207,10 +213,10 @@ function handleMessage(msg) {
                     state.dailyPnl += netProfit;
 
                     if (isWin) {
-                        state.consecutiveLosses = 0;
+                        consecutiveLosses = 0;
                     } else {
-                        state.consecutiveLosses++;
-                        if (state.consecutiveLosses >= CONFIG.MAX_CONSECUTIVE_LOSSES) {
+                        consecutiveLosses++;
+                        if (consecutiveLosses >= CONFIG.MAX_CONSECUTIVE_LOSSES) {
                             state.lossCooldownUntil = Date.now() + CONFIG.LOSS_COOLDOWN_MS;
                             addLog(`⏳ ${CONFIG.MAX_CONSECUTIVE_LOSSES} consecutive losses. Cooldown for ${CONFIG.LOSS_COOLDOWN_MS/60000} minutes.`);
                         }
@@ -237,7 +243,7 @@ function handleMessage(msg) {
                     const outcomeLabel = isWin ? `🟢 WIN (+$${netProfit.toFixed(2)})` : `🔴 LOSS (-$${Math.abs(netProfit).toFixed(2)})`;
                     addLog(`[Trade Finished] ${state.activeRealTrade.symbol} | ${state.activeRealTrade.contractType} | ${outcomeLabel} | Session: $${state.sessionPnl.toFixed(2)} | Daily: $${state.dailyPnl.toFixed(2)}`);
 
-                    // ---- Broadcast analytics delta ----
+                    // Broadcast analytics delta
                     broadcastSSE({
                         event: 'analytics_delta',
                         data: {
@@ -276,80 +282,62 @@ function handleMessage(msg) {
     }
 }
 
-// =====================================================================
-//  SNIPER ENTRY EVALUATION
-// =====================================================================
+// ---- Sniper Entry (unchanged) ----
+const maDiffHistory = {};
+const symbols = Object.keys(MARKETS);
+symbols.forEach(sym => { maDiffHistory[sym] = [0, 0, 0]; });
+
 function evaluateSniperEntry(symbol, metric) {
     if (!metric) return 'IDLE';
-
     const { rsi, volatility, maDiff } = metric;
-
-    // 1. Master system locks
     if (state.locked || state.dailyLimitReached) return 'IDLE (LOCKED)';
     const now = Date.now();
-    if (now - state.lastTradeTimestamp < CONFIG.MIN_TRIGGER_INTERVAL) {
-        return 'IDLE (COOLDOWN)';
-    }
-
-    // 2. Minimum volatility (0.10%)
+    if (now - state.lastTradeTimestamp < CONFIG.MIN_TRIGGER_INTERVAL) return 'IDLE (COOLDOWN)';
     if (volatility < CONFIG.MIN_VOLATILITY_PERCENT) return 'IDLE (LOW VOL)';
 
-    // 3. Update MA Diff history for this symbol
     if (!maDiffHistory[symbol]) maDiffHistory[symbol] = [0, 0, 0];
     const history = maDiffHistory[symbol];
     history.shift();
     history.push(maDiff);
 
-    // 4. Consecutive expansion rule (3 ticks)
     const isBullishExpansion = (history[2] > history[1]) && (history[1] > history[0]) && (history[2] >= CONFIG.MA_DIFF_THRESHOLD);
     const isBearishExpansion = (history[2] < history[1]) && (history[1] < history[0]) && (history[2] <= -CONFIG.MA_DIFF_THRESHOLD);
 
-    // 5. Surgical RSI zones
     if (isBullishExpansion && rsi >= 60 && rsi <= 67) {
         state.lastTradeTimestamp = now;
         return 'CALL';
     }
-
     if (isBearishExpansion && rsi >= 33 && rsi <= 40) {
         state.lastTradeTimestamp = now;
         return 'PUT';
     }
-
     return 'IDLE';
 }
 
-// =====================================================================
-//  PROCESS LIVE FEED (with sniper mode)
-// =====================================================================
 function processLiveFeed(symbol, price) {
     const metric = engine.feed(symbol, price);
     if (!metric) return;
     state.marketMetrics[symbol] = metric;
 
-    // Cooldown ticks (still used for tick-based cooldown)
     if (state.cooldownTicksLeft > 0) state.cooldownTicksLeft--;
 
-    // Skip if automation off, locked, or trade in progress
     if (!state.active || state.locked || state.tradeInProgress || state.cooldownTicksLeft > 0) {
         broadcastSSE({ state: getFullState() });
         return;
     }
 
-    // Loss cooldown
     const now = Date.now();
     if (now < state.lossCooldownUntil) {
         broadcastSSE({ state: getFullState() });
         return;
     }
 
-    // ---- Sniper evaluation ----
     const signal = evaluateSniperEntry(symbol, metric);
     if (signal === 'IDLE' || signal.startsWith('IDLE')) {
         broadcastSSE({ state: getFullState() });
         return;
     }
 
-    // ---- Signal found: execute trade ----
     const direction = signal;
     state.tradeInProgress = true;
     const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
@@ -358,7 +346,7 @@ function processLiveFeed(symbol, price) {
     addLog(`🔥 Sniper Signal: ${symbol} | ${direction} | RSI: ${metric.rsi.toFixed(1)} | Vol: ${metric.volatility.toFixed(2)}% | MA Diff: ${metric.maDiff.toFixed(3)}%`);
 
     const duration = CONFIG.DURATION;
-    const unit = 't'; // always ticks for auto
+    const unit = 't';
 
     state.activeRealTrade = {
         symbol,
