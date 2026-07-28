@@ -47,7 +47,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (barBtn) barBtn.classList.add('active');
 
         const focusBar = document.getElementById('focusBar');
-        if (tabId === 'analytics') {
+        if (tabId === 'analytics' || tabId === 'digits') {
             focusBar.style.display = 'none';
         } else {
             focusBar.style.display = 'flex';
@@ -67,6 +67,11 @@ document.addEventListener('DOMContentLoaded', function() {
             setTimeout(() => {
                 renderCharts();
                 timeframePreset(document.getElementById('p-session'), 'session');
+            }, 100);
+        }
+        if (tabId === 'digits') {
+            setTimeout(() => {
+                renderDigitsTab();
             }, 100);
         }
         if (tabId === 'settings') { loadConfig(); }
@@ -116,6 +121,7 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     function formatPrice(symbol, raw) {
+        if (raw === undefined || raw === null) return '—';
         const dec = MARKET_DECIMALS[symbol] || 2;
         return Number(raw).toFixed(dec);
     }
@@ -131,6 +137,10 @@ document.addEventListener('DOMContentLoaded', function() {
         document.querySelectorAll('.asset-chip').forEach(el => el.classList.remove('active'));
         const chip = document.querySelector(`.asset-chip[data-symbol="${sym}"]`);
         if (chip) chip.classList.add('active');
+        // Also update digits tab if visible
+        if (document.getElementById('tab-digits').classList.contains('active')) {
+            renderDigitsTab();
+        }
     };
 
     function getAssetLabel(name, isMobile) {
@@ -148,6 +158,75 @@ document.addEventListener('DOMContentLoaded', function() {
             'Volatility 100 (1s) Index': 'V100 (1s)'
         };
         return shortMap[name] || name;
+    }
+
+    // =========================================================================
+    // DIGITS TAB RENDER
+    // =========================================================================
+    function renderDigitsTab() {
+        const activeMetric = globalState?.marketMetrics?.[currentFocus] || null;
+        if (!activeMetric) return;
+
+        // Update asset chips
+        const chipsContainer = document.getElementById('digitsAssetChips');
+        if (chipsContainer) {
+            chipsContainer.innerHTML = '';
+            const symbols = Object.keys(MARKETS_CFG);
+            symbols.forEach(sym => {
+                const chip = document.createElement('button');
+                chip.className = 'digits-chip' + (sym === currentFocus ? ' active' : '');
+                chip.textContent = getAssetLabel(MARKETS_CFG[sym], true);
+                chip.onclick = () => window.setFocusMarket(sym);
+                chipsContainer.appendChild(chip);
+            });
+        }
+
+        // Rise/Fall stats
+        const risePct = activeMetric.risePct || 0;
+        const fallPct = activeMetric.fallPct || 0;
+        const riseBar = document.getElementById('riseBar');
+        const fallBar = document.getElementById('fallBar');
+        if (riseBar) {
+            const total = risePct + fallPct || 1;
+            const riseWidth = (risePct / total) * 100;
+            riseBar.style.width = riseWidth + '%';
+            riseBar.textContent = 'Rise ' + riseWidth.toFixed(1) + '%';
+        }
+        if (fallBar) {
+            const total = risePct + fallPct || 1;
+            const fallWidth = (fallPct / total) * 100;
+            fallBar.style.width = fallWidth + '%';
+            fallBar.textContent = 'Fall ' + fallWidth.toFixed(1) + '%';
+        }
+
+        // S/R Position
+        const srPos = activeMetric.srPositionPct || 50;
+        const srValue = document.getElementById('srPositionValue');
+        if (srValue) srValue.textContent = srPos.toFixed(1) + '%';
+        const srFill = document.getElementById('srPositionFill');
+        if (srFill) srFill.style.width = Math.min(100, Math.max(0, srPos)) + '%';
+
+        // Digit Matrix
+        const matrix = activeMetric.digitMatrix || [];
+        const tbody = document.getElementById('digitsTableBody');
+        if (tbody) {
+            tbody.innerHTML = '';
+            matrix.forEach(row => {
+                const tr = document.createElement('tr');
+                const overPct = row.over || 0;
+                const underPct = row.under || 0;
+                const matchesPct = row.matches || 0;
+                const differsPct = row.differs || 0;
+                tr.innerHTML = `
+                    <td><strong>${row.digit}</strong></td>
+                    <td class="${overPct > 70 ? 'high' : (overPct < 30 ? 'low' : '')}">${overPct.toFixed(1)}%</td>
+                    <td class="${underPct > 70 ? 'high' : (underPct < 30 ? 'low' : '')}">${underPct.toFixed(1)}%</td>
+                    <td class="${matchesPct > 70 ? 'high' : (matchesPct < 30 ? 'low' : '')}">${matchesPct.toFixed(1)}%</td>
+                    <td class="${differsPct > 70 ? 'high' : (differsPct < 30 ? 'low' : '')}">${differsPct.toFixed(1)}%</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
     }
 
     // =========================================================================
@@ -258,6 +337,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 }
                 renderUI(data.state);
+                // If digits tab is active, update it
+                if (document.getElementById('tab-digits').classList.contains('active')) {
+                    renderDigitsTab();
+                }
             }
             if (data.logs && data.logs.length > 0) {
                 const box = document.getElementById('log-stream');
@@ -317,7 +400,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // =========================================================================
-    // RENDER UI (with updated table columns)
+    // RENDER UI (with crash‑proof checks)
     // =========================================================================
     function renderUI(state) {
         try {
@@ -365,9 +448,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const focusMetric = marketMetrics[currentFocus] || null;
             document.getElementById('f-name').textContent = MARKETS_CFG[currentFocus] || 'Volatility 75 Index';
-            const priceDisplay = focusMetric
-                ? (focusMetric.formattedPrice || formatPrice(currentFocus, focusMetric.price))
-                : '—';
+            const priceDisplay = focusMetric?.formattedPrice || formatPrice(currentFocus, focusMetric?.price) || '—';
             document.getElementById('f-price').textContent = priceDisplay;
             const srEl = document.getElementById('f-sr');
             if (focusMetric) {
@@ -388,8 +469,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('f-vol').textContent = 'Vol: —';
             }
 
-            // ---- Data table (updated columns) ----
+            // ---- Data table (with safe checks) ----
             const tbody = document.getElementById('tableBody');
+            if (!tbody) return;
             tbody.innerHTML = '';
             let bestScore = -Infinity, bestSym = null;
             for (const sym in MARKETS_CFG) {
@@ -411,7 +493,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 let digit = '—';
 
                 if (metric) {
-                    priceDisplay = metric.formattedPrice || formatPrice(sym, metric.price);
+                    priceDisplay = metric.formattedPrice || formatPrice(sym, metric.price) || '—';
                     step = metric.step || 0;
 
                     // Breakout
@@ -441,7 +523,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     else if (metric.rsi !== undefined && metric.rsi < 30) rsiClass = 'oversold';
                     vol = metric.volatility !== undefined ? Number(metric.volatility).toFixed(2) + '%' : '—';
 
-                    // ---- BB Squeeze ----
+                    // BB Squeeze
                     if (metric.bandwidth !== null && metric.bandwidth !== undefined) {
                         squeezeDisplay = metric.bandwidth.toFixed(2) + '%';
                         if (metric.bandwidth < 2.0) {
@@ -449,7 +531,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     }
 
-                    // ---- Micro Trend ----
+                    // Micro Trend
                     if (metric.tickDirections && metric.tickDirections.length > 0) {
                         const dirs = metric.tickDirections.slice(-5);
                         trendHtml = dirs.map(d => {
@@ -461,7 +543,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         trendHtml = '—';
                     }
 
-                    // ---- Last Digit ----
                     digit = metric.lastDigit !== undefined && metric.lastDigit !== null ? metric.lastDigit : '—';
                 }
 
@@ -491,105 +572,113 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // ---- Mobile Market View ----
+    // ---- Mobile Market View (with safe checks) ----
     function renderMobileView(state) {
-        const safeState = state || {};
-        const marketMetrics = safeState.marketMetrics || {};
-        const symbols = Object.keys(MARKETS_CFG);
-        const carousel = document.getElementById('assetCarousel');
-        if (carousel) {
-            carousel.innerHTML = '';
-            symbols.forEach(sym => {
-                const chip = document.createElement('div');
-                chip.className = 'asset-chip' + (sym === currentFocus ? ' active' : '');
-                chip.dataset.symbol = sym;
-                const shortName = getAssetLabel(MARKETS_CFG[sym], true);
-                chip.textContent = shortName;
-                chip.onclick = () => window.setFocusMarket(sym);
-                carousel.appendChild(chip);
-            });
-        }
-
-        const metric = marketMetrics[currentFocus] || null;
-        if (!metric) {
-            document.getElementById('mobile-asset-name').textContent = MARKETS_CFG[currentFocus] || '—';
-            document.getElementById('mobile-asset-price').textContent = '—';
-            document.getElementById('mobile-support').textContent = '—';
-            document.getElementById('mobile-resistance').textContent = '—';
-            document.getElementById('mobile-breakout').textContent = '—';
-            document.getElementById('mobile-rsi-value').textContent = '—';
-            document.getElementById('mobile-volatility').textContent = '—';
-            document.getElementById('mobile-tick-digits').innerHTML = '<span class="tick-digit">—</span>';
-            document.getElementById('mobile-rsi-gauge').querySelector('.rsi-fill').style.width = '50%';
-            return;
-        }
-
-        const price = metric.price;
-        const formattedPrice = metric.formattedPrice || formatPrice(currentFocus, price);
-        const support = metric.support ? Number(metric.support).toFixed(2) : '—';
-        const resistance = metric.resistance ? Number(metric.resistance).toFixed(2) : '—';
-        const rsi = metric.rsi !== undefined ? Number(metric.rsi).toFixed(1) : '—';
-        const vol = metric.volatility !== undefined ? Number(metric.volatility).toFixed(2) + '%' : '—';
-        const breakout = metric.isBreakout ? '🚀 UP' : (metric.isBreakdown ? '📉 DOWN' : '—');
-        const breakoutClass = metric.isBreakout ? 'breakout' : (metric.isBreakdown ? 'breakdown' : '');
-
-        const lastPrices = metric.lastPrices || [];
-        let change = 0;
-        let changeClass = '';
-        if (lastPrices.length >= 2) {
-            const prev = lastPrices[lastPrices.length - 2];
-            const curr = lastPrices[lastPrices.length - 1];
-            if (prev !== undefined && curr !== undefined) {
-                change = curr - prev;
-                changeClass = change > 0 ? 'up' : (change < 0 ? 'down' : '');
+        try {
+            const safeState = state || {};
+            const marketMetrics = safeState.marketMetrics || {};
+            const symbols = Object.keys(MARKETS_CFG);
+            const carousel = document.getElementById('assetCarousel');
+            if (carousel) {
+                carousel.innerHTML = '';
+                symbols.forEach(sym => {
+                    const chip = document.createElement('div');
+                    chip.className = 'asset-chip' + (sym === currentFocus ? ' active' : '');
+                    chip.dataset.symbol = sym;
+                    const shortName = getAssetLabel(MARKETS_CFG[sym], true);
+                    chip.textContent = shortName;
+                    chip.onclick = () => window.setFocusMarket(sym);
+                    carousel.appendChild(chip);
+                });
             }
-        }
-        const changeDisplay = change !== 0 ? (change > 0 ? '+' : '') + change.toFixed(2) : '—';
 
-        document.getElementById('mobile-asset-name').textContent = MARKETS_CFG[currentFocus] || '—';
-        document.getElementById('mobile-asset-price').textContent = formattedPrice;
-        const changeEl = document.getElementById('mobile-asset-change');
-        changeEl.textContent = changeDisplay;
-        changeEl.className = 'asset-change ' + changeClass;
+            const metric = marketMetrics[currentFocus] || null;
+            if (!metric) {
+                document.getElementById('mobile-asset-name').textContent = MARKETS_CFG[currentFocus] || '—';
+                document.getElementById('mobile-asset-price').textContent = '—';
+                document.getElementById('mobile-support').textContent = '—';
+                document.getElementById('mobile-resistance').textContent = '—';
+                document.getElementById('mobile-breakout').textContent = '—';
+                document.getElementById('mobile-rsi-value').textContent = '—';
+                document.getElementById('mobile-volatility').textContent = '—';
+                document.getElementById('mobile-tick-digits').innerHTML = '<span class="tick-digit">—</span>';
+                document.getElementById('mobile-rsi-gauge').querySelector('.rsi-fill').style.width = '50%';
+                return;
+            }
 
-        document.getElementById('mobile-support').textContent = support;
-        document.getElementById('mobile-resistance').textContent = resistance;
-        const breakoutEl = document.getElementById('mobile-breakout');
-        breakoutEl.textContent = breakout;
-        breakoutEl.className = 'value ' + breakoutClass;
+            const price = metric.price;
+            const formattedPrice = metric.formattedPrice || formatPrice(currentFocus, price) || '—';
+            const support = metric.support ? Number(metric.support).toFixed(2) : '—';
+            const resistance = metric.resistance ? Number(metric.resistance).toFixed(2) : '—';
+            const rsi = metric.rsi !== undefined ? Number(metric.rsi).toFixed(1) : '—';
+            const vol = metric.volatility !== undefined ? Number(metric.volatility).toFixed(2) + '%' : '—';
+            const breakout = metric.isBreakout ? '🚀 UP' : (metric.isBreakdown ? '📉 DOWN' : '—');
+            const breakoutClass = metric.isBreakout ? 'breakout' : (metric.isBreakdown ? 'breakdown' : '');
 
-        document.getElementById('mobile-rsi-value').textContent = rsi;
-        const rsiFill = document.getElementById('mobile-rsi-gauge').querySelector('.rsi-fill');
-        const rsiNum = parseFloat(rsi);
-        if (!isNaN(rsiNum)) {
-            rsiFill.style.width = Math.min(100, Math.max(0, rsiNum)) + '%';
-        } else {
-            rsiFill.style.width = '50%';
-        }
+            const lastPrices = metric.lastPrices || [];
+            let change = 0;
+            let changeClass = '';
+            if (lastPrices.length >= 2) {
+                const prev = lastPrices[lastPrices.length - 2];
+                const curr = lastPrices[lastPrices.length - 1];
+                if (prev !== undefined && curr !== undefined) {
+                    change = curr - prev;
+                    changeClass = change > 0 ? 'up' : (change < 0 ? 'down' : '');
+                }
+            }
+            const changeDisplay = change !== 0 ? (change > 0 ? '+' : '') + change.toFixed(2) : '—';
 
-        document.getElementById('mobile-volatility').textContent = vol;
+            document.getElementById('mobile-asset-name').textContent = MARKETS_CFG[currentFocus] || '—';
+            document.getElementById('mobile-asset-price').textContent = formattedPrice;
+            const changeEl = document.getElementById('mobile-asset-change');
+            changeEl.textContent = changeDisplay;
+            changeEl.className = 'asset-change ' + changeClass;
 
-        const digitsContainer = document.getElementById('mobile-tick-digits');
-        if (lastPrices.length > 0) {
-            const lastTicks = lastPrices.slice(-10);
-            let html = '';
-            let prev = null;
-            lastTicks.forEach((val) => {
-                const num = Number(val);
-                const cls = (prev !== null) ? (num > prev ? 'up' : (num < prev ? 'down' : '')) : '';
-                html += `<span class="tick-digit ${cls}">${num.toFixed(2)}</span>`;
-                prev = num;
-            });
-            digitsContainer.innerHTML = html;
-        } else {
-            digitsContainer.innerHTML = '<span class="tick-digit">—</span>';
+            document.getElementById('mobile-support').textContent = support;
+            document.getElementById('mobile-resistance').textContent = resistance;
+            const breakoutEl = document.getElementById('mobile-breakout');
+            breakoutEl.textContent = breakout;
+            breakoutEl.className = 'value ' + breakoutClass;
+
+            document.getElementById('mobile-rsi-value').textContent = rsi;
+            const rsiFill = document.getElementById('mobile-rsi-gauge').querySelector('.rsi-fill');
+            if (rsiFill) {
+                const rsiNum = parseFloat(rsi);
+                if (!isNaN(rsiNum)) {
+                    rsiFill.style.width = Math.min(100, Math.max(0, rsiNum)) + '%';
+                } else {
+                    rsiFill.style.width = '50%';
+                }
+            }
+
+            document.getElementById('mobile-volatility').textContent = vol;
+
+            const digitsContainer = document.getElementById('mobile-tick-digits');
+            if (digitsContainer) {
+                if (lastPrices.length > 0) {
+                    const lastTicks = lastPrices.slice(-10);
+                    let html = '';
+                    let prev = null;
+                    lastTicks.forEach((val) => {
+                        const num = Number(val);
+                        const cls = (prev !== null) ? (num > prev ? 'up' : (num < prev ? 'down' : '')) : '';
+                        html += `<span class="tick-digit ${cls}">${num.toFixed(2)}</span>`;
+                        prev = num;
+                    });
+                    digitsContainer.innerHTML = html;
+                } else {
+                    digitsContainer.innerHTML = '<span class="tick-digit">—</span>';
+                }
+            }
+        } catch(err) {
+            console.error('❌ Error in renderMobileView:', err);
         }
     }
 
     renderUI({});
 
     // =========================================================================
-    // SETTINGS
+    // SETTINGS (safe)
     // =========================================================================
     window.loadConfig = async function() {
         try {
@@ -636,39 +725,39 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     window.saveSettings = async function() {
-        const config = {};
-        const direct = [
-            'ANALYSIS_WINDOW', 'BOLLINGER_PERIOD', 'BOLLINGER_STD', 'RSI_PERIOD',
-            'OVERSOLD_THRESHOLD', 'OVERBOUGHT_THRESHOLD', 'MIN_VOLATILITY_PERCENT',
-            'DURATION_SECONDS', 'MAX_CONSECUTIVE_LOSSES',
-            'RISK_PERCENT', 'TP_PERCENT', 'SL_PERCENT', 'MIN_STAKE',
-            'COOLDOWN_TICKS'
-        ];
-        for (const id of direct) {
-            const el = document.getElementById('config-' + id);
-            if (el) {
-                const val = parseFloat(el.value);
-                if (!isNaN(val)) config[id] = val;
-            }
-        }
-        const secondsToMs = {
-            'MIN_TRIGGER_INTERVAL_SECONDS': 'MIN_TRIGGER_INTERVAL',
-            'LOSS_COOLDOWN_MINUTES': 'LOSS_COOLDOWN_MS',
-            'SETTLEMENT_TIMEOUT_SECONDS': 'SETTLEMENT_TIMEOUT_MS',
-            'PNL_SYNC_INTERVAL_SECONDS': 'PNL_SYNC_INTERVAL_MS'
-        };
-        for (const [secondsId, msId] of Object.entries(secondsToMs)) {
-            const el = document.getElementById('config-' + secondsId);
-            if (el) {
-                const val = parseFloat(el.value);
-                if (!isNaN(val)) {
-                    let multiplier = 1000;
-                    if (secondsId === 'LOSS_COOLDOWN_MINUTES') multiplier = 60000;
-                    config[msId] = val * multiplier;
+        try {
+            const config = {};
+            const direct = [
+                'ANALYSIS_WINDOW', 'BOLLINGER_PERIOD', 'BOLLINGER_STD', 'RSI_PERIOD',
+                'OVERSOLD_THRESHOLD', 'OVERBOUGHT_THRESHOLD', 'MIN_VOLATILITY_PERCENT',
+                'DURATION_SECONDS', 'MAX_CONSECUTIVE_LOSSES',
+                'RISK_PERCENT', 'TP_PERCENT', 'SL_PERCENT', 'MIN_STAKE',
+                'COOLDOWN_TICKS'
+            ];
+            for (const id of direct) {
+                const el = document.getElementById('config-' + id);
+                if (el) {
+                    const val = parseFloat(el.value);
+                    if (!isNaN(val)) config[id] = val;
                 }
             }
-        }
-        try {
+            const secondsToMs = {
+                'MIN_TRIGGER_INTERVAL_SECONDS': 'MIN_TRIGGER_INTERVAL',
+                'LOSS_COOLDOWN_MINUTES': 'LOSS_COOLDOWN_MS',
+                'SETTLEMENT_TIMEOUT_SECONDS': 'SETTLEMENT_TIMEOUT_MS',
+                'PNL_SYNC_INTERVAL_SECONDS': 'PNL_SYNC_INTERVAL_MS'
+            };
+            for (const [secondsId, msId] of Object.entries(secondsToMs)) {
+                const el = document.getElementById('config-' + secondsId);
+                if (el) {
+                    const val = parseFloat(el.value);
+                    if (!isNaN(val)) {
+                        let multiplier = 1000;
+                        if (secondsId === 'LOSS_COOLDOWN_MINUTES') multiplier = 60000;
+                        config[msId] = val * multiplier;
+                    }
+                }
+            }
             const resp = await fetch('/api/config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -687,7 +776,7 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     // =========================================================================
-    // ANALYTICS
+    // ANALYTICS CHARTS
     // =========================================================================
     let assetBarChart = null;
     let equityChartInstance = null;
@@ -720,8 +809,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function renderCharts() {
         const isMobile = window.innerWidth < 768;
-        const ctxBar = document.getElementById('chart-donut').getContext('2d');
-        const ctxLine = document.getElementById('chart-line').getContext('2d');
+        const ctxBar = document.getElementById('chart-donut')?.getContext('2d');
+        const ctxLine = document.getElementById('chart-line')?.getContext('2d');
+        if (!ctxBar || !ctxLine) return;
 
         if (assetBarChart) assetBarChart.destroy();
         assetBarChart = new Chart(ctxBar, {
@@ -826,32 +916,34 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function renderAssetBarChart(contributions) {
         if (!assetBarChart) return;
-        const isMobile = window.innerWidth < 768;
-        const labels = contributions.map(a => getAssetLabel(a.name, isMobile));
-        const values = contributions.map(a => a.pnl);
-        const colors = values.map(v => v >= 0 ? '#10b981' : '#ef4444');
-        const maxAbs = values.reduce((max, v) => Math.max(max, Math.abs(v)), 0);
-        const buffer = maxAbs * 0.15;
-        const suggestedMax = maxAbs + buffer;
-        const suggestedMin = -suggestedMax;
+        try {
+            const isMobile = window.innerWidth < 768;
+            const labels = contributions.map(a => getAssetLabel(a.name, isMobile));
+            const values = contributions.map(a => a.pnl);
+            const colors = values.map(v => v >= 0 ? '#10b981' : '#ef4444');
+            const maxAbs = values.reduce((max, v) => Math.max(max, Math.abs(v)), 0);
+            const buffer = maxAbs * 0.15;
+            const suggestedMax = maxAbs + buffer;
+            const suggestedMin = -suggestedMax;
 
-        assetBarChart.data.labels = labels;
-        assetBarChart.data.datasets[0].data = values;
-        assetBarChart.data.datasets[0].backgroundColor = colors;
-        assetBarChart.data.datasets[0].borderColor = colors;
+            assetBarChart.data.labels = labels;
+            assetBarChart.data.datasets[0].data = values;
+            assetBarChart.data.datasets[0].backgroundColor = colors;
+            assetBarChart.data.datasets[0].borderColor = colors;
 
-        assetBarChart.options.scales.x = {
-            grid: { display: isMobile ? false : true, color: 'rgba(0,0,0,0.05)' },
-            ticks: {
-                display: isMobile ? false : true,
-                callback: function(value) {
-                    return (value >= 0 ? '+' : '') + '$' + value.toFixed(2);
-                }
-            },
-            suggestedMin: suggestedMin,
-            suggestedMax: suggestedMax
-        };
-        assetBarChart.update('none');
+            assetBarChart.options.scales.x = {
+                grid: { display: isMobile ? false : true, color: 'rgba(0,0,0,0.05)' },
+                ticks: {
+                    display: isMobile ? false : true,
+                    callback: function(value) {
+                        return (value >= 0 ? '+' : '') + '$' + value.toFixed(2);
+                    }
+                },
+                suggestedMin: suggestedMin,
+                suggestedMax: suggestedMax
+            };
+            assetBarChart.update('none');
+        } catch(e) { console.error('renderAssetBarChart error:', e); }
     }
 
     function formatEquityLabel(timestamp, timeframe) {
@@ -868,7 +960,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function showChartEmptyState(containerId, message) {
         const container = document.getElementById(containerId);
         if (!container) return;
-        let empty = container.parentElement.querySelector('.chart-empty-state');
+        let empty = container.parentElement?.querySelector('.chart-empty-state');
         if (!empty) {
             empty = document.createElement('div');
             empty.className = 'chart-empty-state';
@@ -885,89 +977,107 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!container) return;
         container.style.display = 'block';
         const parent = container.parentElement;
-        const empty = parent.querySelector('.chart-empty-state');
-        if (empty) empty.remove();
+        if (parent) {
+            const empty = parent.querySelector('.chart-empty-state');
+            if (empty) empty.remove();
+        }
     }
 
     function renderEquityCurve(equityData, startingBalance, timeframe) {
         if (!equityChartInstance) return;
-        if (!equityData || equityData.length < 2) {
-            showChartEmptyState('chart-line', 'No trade history recorded for this period');
-            equityChartInstance.data.labels = [];
-            equityChartInstance.data.datasets[0].data = [];
+        try {
+            if (!equityData || equityData.length < 2) {
+                showChartEmptyState('chart-line', 'No trade history recorded for this period');
+                equityChartInstance.data.labels = [];
+                equityChartInstance.data.datasets[0].data = [];
+                equityChartInstance.update('none');
+                return;
+            }
+            hideChartEmptyState('chart-line');
+
+            const labels = equityData.map(point => formatEquityLabel(point.timestamp, timeframe));
+            const values = equityData.map(point => point.equity);
+            const baseline = startingBalance || 0;
+            const lastValue = values.length > 0 ? values[values.length-1] : baseline;
+            const isAbove = lastValue >= baseline;
+            const lineColor = isAbove ? '#10b981' : '#ef4444';
+            const fillColor = isAbove ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
+
+            equityChartInstance.data.labels = labels;
+            equityChartInstance.data.datasets[0].data = values;
+            equityChartInstance.data.datasets[0].borderColor = lineColor;
+            equityChartInstance.data.datasets[0].backgroundColor = fillColor;
+            equityChartInstance.data.datasets[0].pointBackgroundColor = lineColor;
+
+            const baselineData = [baseline, baseline];
+            equityChartInstance.data.datasets[1] = {
+                label: 'Start',
+                data: baselineData,
+                borderColor: 'rgba(100,116,139,0.4)',
+                borderDash: [5, 5],
+                borderWidth: 1,
+                pointRadius: 0,
+                fill: false,
+                tension: 0
+            };
+
+            while (equityChartInstance.data.datasets.length > 2) {
+                equityChartInstance.data.datasets.pop();
+            }
             equityChartInstance.update('none');
-            return;
-        }
-        hideChartEmptyState('chart-line');
-
-        const labels = equityData.map(point => formatEquityLabel(point.timestamp, timeframe));
-        const values = equityData.map(point => point.equity);
-        const baseline = startingBalance || 0;
-        const lastValue = values.length > 0 ? values[values.length-1] : baseline;
-        const isAbove = lastValue >= baseline;
-        const lineColor = isAbove ? '#10b981' : '#ef4444';
-        const fillColor = isAbove ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
-
-        equityChartInstance.data.labels = labels;
-        equityChartInstance.data.datasets[0].data = values;
-        equityChartInstance.data.datasets[0].borderColor = lineColor;
-        equityChartInstance.data.datasets[0].backgroundColor = fillColor;
-        equityChartInstance.data.datasets[0].pointBackgroundColor = lineColor;
-
-        const baselineData = [baseline, baseline];
-        const baselineLabels = [labels[0], labels[labels.length-1]];
-        equityChartInstance.data.datasets[1] = {
-            label: 'Start',
-            data: baselineData,
-            borderColor: 'rgba(100,116,139,0.4)',
-            borderDash: [5, 5],
-            borderWidth: 1,
-            pointRadius: 0,
-            fill: false,
-            tension: 0
-        };
-
-        while (equityChartInstance.data.datasets.length > 2) {
-            equityChartInstance.data.datasets.pop();
-        }
-        equityChartInstance.update('none');
+        } catch(e) { console.error('renderEquityCurve error:', e); }
     }
 
     function updateMetrics(data) {
-        const profitEl = document.getElementById('meta-profit');
-        profitEl.textContent = `$${data.totalProfit.toFixed(2)}`;
-        profitEl.className = 'val ' + (data.totalProfit >= 0 ? 'positive' : 'negative');
+        try {
+            const profitEl = document.getElementById('meta-profit');
+            if (profitEl) {
+                profitEl.textContent = `$${data.totalProfit.toFixed(2)}`;
+                profitEl.className = 'val ' + (data.totalProfit >= 0 ? 'positive' : 'negative');
+            }
 
-        const total = data.tradeCount || 0;
-        const wins = data.winCount || 0;
-        const strike = total > 0 ? (wins / total) * 100 : 0;
-        const strikeEl = document.getElementById('meta-strike');
-        strikeEl.innerHTML = `${strike.toFixed(1)}% <small style="display:block;font-size:8px;color:#787b86;font-weight:400;">${total} trades total</small>`;
-        strikeEl.className = 'val';
+            const total = data.tradeCount || 0;
+            const wins = data.winCount || 0;
+            const strike = total > 0 ? (wins / total) * 100 : 0;
+            const strikeEl = document.getElementById('meta-strike');
+            if (strikeEl) {
+                strikeEl.innerHTML = `${strike.toFixed(1)}% <small style="display:block;font-size:8px;color:#787b86;font-weight:400;">${total} trades total</small>`;
+                strikeEl.className = 'val';
+            }
 
-        const grossProfit = data.grossProfit || 0;
-        const grossLoss = data.grossLoss || 0;
-        let pf;
-        if (grossLoss === 0) {
-            pf = grossProfit > 0 ? '10.0+' : '0.00';
-        } else {
-            pf = (grossProfit / grossLoss).toFixed(2);
-        }
-        document.getElementById('meta-pf').textContent = pf;
+            const grossProfit = data.grossProfit || 0;
+            const grossLoss = data.grossLoss || 0;
+            let pf;
+            if (grossLoss === 0) {
+                pf = grossProfit > 0 ? '10.0+' : '0.00';
+            } else {
+                pf = (grossProfit / grossLoss).toFixed(2);
+            }
+            const pfEl = document.getElementById('meta-pf');
+            if (pfEl) pfEl.textContent = pf;
 
-        const maxDD = data.maxDrawdown || 0;
-        const ddEl = document.getElementById('meta-dd');
-        ddEl.textContent = `-${maxDD.toFixed(2)}%`;
-        ddEl.className = 'val negative';
+            const maxDD = data.maxDrawdown || 0;
+            const ddEl = document.getElementById('meta-dd');
+            if (ddEl) {
+                ddEl.textContent = `-${maxDD.toFixed(2)}%`;
+                ddEl.className = 'val negative';
+            }
 
-        const losses = data.lossCount || 0;
-        const avgWin = wins > 0 ? grossProfit / wins : 0;
-        const avgLoss = losses > 0 ? grossLoss / losses : 0;
-        document.getElementById('meta-avg-win-loss').textContent = `$${avgWin.toFixed(2)} / $${avgLoss.toFixed(2)}`;
+            const losses = data.lossCount || 0;
+            const avgWin = wins > 0 ? grossProfit / wins : 0;
+            const avgLoss = losses > 0 ? grossLoss / losses : 0;
+            const avgEl = document.getElementById('meta-avg-win-loss');
+            if (avgEl) avgEl.textContent = `$${avgWin.toFixed(2)} / $${avgLoss.toFixed(2)}`;
 
-        document.getElementById('meta-max-consec').textContent = `W:${wins} / L:${losses}`;
-        document.getElementById('meta-avg-duration').textContent = `${total > 0 ? (data.totalDuration || 0) / total : 0}s`;
-        document.getElementById('meta-won-lost').textContent = `${wins} / ${losses}`;
+            const maxConsecEl = document.getElementById('meta-max-consec');
+            if (maxConsecEl) maxConsecEl.textContent = `W:${wins} / L:${losses}`;
+
+            const avgDurEl = document.getElementById('meta-avg-duration');
+            if (avgDurEl) avgDurEl.textContent = `${total > 0 ? (data.totalDuration || 0) / total : 0}s`;
+
+            const wonLostEl = document.getElementById('meta-won-lost');
+            if (wonLostEl) wonLostEl.textContent = `${wins} / ${losses}`;
+        } catch(e) { console.error('updateMetrics error:', e); }
     }
 
     function updateDatePickersForPreset(mode) {
