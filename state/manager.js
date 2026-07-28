@@ -25,7 +25,11 @@ const state = {
     lastTriggerTime: 0,
     lossCooldownUntil: 0,
     pendingSettlement: false,
-    consecutiveLosses: 0
+    consecutiveLosses: 0,
+    // ---- midnight heartbeat state ----
+    currentTradingDay: new Date().getDate(),
+    dailyLimitReached: false,
+    lastTradeTimestamp: 0
 };
 
 function saveState() {
@@ -38,7 +42,10 @@ function saveState() {
             locked: state.locked,
             lockReason: state.lockReason,
             sessionActive: state.active,
-            sessionPnl: state.sessionPnl
+            sessionPnl: state.sessionPnl,
+            dailyPnl: state.dailyPnl,
+            dailyLimitReached: state.dailyLimitReached,
+            currentTradingDay: state.currentTradingDay
         }));
     } catch(e) {}
 }
@@ -54,10 +61,16 @@ function loadState() {
                 state.lockReason = saved.lockReason || '';
                 state.active = saved.sessionActive || false;
                 state.sessionPnl = saved.sessionPnl || 0;
+                state.dailyPnl = saved.dailyPnl || 0;
+                state.dailyLimitReached = saved.dailyLimitReached || false;
+                state.currentTradingDay = saved.currentTradingDay || new Date().getDate();
             } else {
                 state.locked = false; state.lockReason = '';
                 state.active = saved.sessionActive || false;
                 state.sessionPnl = 0;
+                state.dailyPnl = 0;
+                state.dailyLimitReached = false;
+                state.currentTradingDay = new Date().getDate();
             }
         }
     } catch(e) {}
@@ -68,38 +81,43 @@ function getFullState() {
     return { ...rest, marketMetrics: state.marketMetrics || {} };
 }
 
-// ---- Strategy: uses internal maDiff and maDiffExpanding2Tick ----
+// ---- Midnight Heartbeat ----
+function startMidnightHeartbeat() {
+    setInterval(() => {
+        const now = new Date();
+        const today = now.getDate();
+        if (today !== state.currentTradingDay) {
+            console.log(`[System] 🕛 Midnight crossed. Resetting daily limits for new session.`);
+            state.currentTradingDay = today;
+            state.dailyPnl = 0;
+            state.dailyLimitReached = false;
+            state.locked = false;
+            state.lockReason = '';
+            state.sessionPnl = 0; // optional reset
+            state.consecutiveLosses = 0;
+            state.lastTradeTimestamp = 0;
+            saveState();
+            // broadcast via SSE will happen in ws/client periodic broadcast
+        }
+    }, 60000);
+}
+
+// ---- Strategy ----
 function checkStrategy(symbol, metric) {
     if (!metric) return null;
 
     const { rsi, volatility, maDiff, maDiffExpanding2Tick } = metric;
 
-    // 1. Volatility >= MIN_VOLATILITY_PERCENT
-    if (volatility < CONFIG.MIN_VOLATILITY_PERCENT) {
-        return null;
-    }
+    if (volatility < CONFIG.MIN_VOLATILITY_PERCENT) return null;
+    if (!maDiffExpanding2Tick) return null;
+    if (Math.abs(maDiff) < CONFIG.MA_DIFF_THRESHOLD) return null;
 
-    // 2. MA Diff must be expanding vs 2 ticks ago
-    if (!maDiffExpanding2Tick) {
-        return null;
-    }
-
-    // 3. MA Diff must be ≥ threshold
-    const absMaDiff = Math.abs(maDiff);
-    if (absMaDiff < CONFIG.MA_DIFF_THRESHOLD) {
-        return null;
-    }
-
-    // 4. CALL: RSI > OVERBOUGHT_THRESHOLD
     if (maDiff > 0 && rsi > CONFIG.OVERBOUGHT_THRESHOLD) {
         return { direction: 'CALL', score: volatility * 1.5 };
     }
-
-    // 5. PUT: RSI < OVERSOLD_THRESHOLD
     if (maDiff < 0 && rsi < CONFIG.OVERSOLD_THRESHOLD) {
         return { direction: 'PUT', score: volatility * 1.5 };
     }
-
     return null;
 }
 
@@ -127,16 +145,19 @@ function checkDailyLimits() {
     const slLimit = state.dailyStartBalance * (CONFIG.SL_PERCENT / 100);
     if (state.dailyPnl >= tpLimit) {
         state.locked = true;
+        state.dailyLimitReached = true;
         state.lockReason = `🎯 Daily Target Reached: +$${state.dailyPnl.toFixed(2)} (${CONFIG.TP_PERCENT}% of start). Trading paused. Will resume at midnight.`;
         return true;
     }
     if (state.dailyPnl <= -slLimit) {
         state.locked = true;
+        state.dailyLimitReached = true;
         state.lockReason = `🛑 Daily Loss Limit Breached: -$${Math.abs(state.dailyPnl).toFixed(2)} (${CONFIG.SL_PERCENT}% of start). Trading paused. Will resume at midnight.`;
         return true;
     }
     if (state.locked && state.dailyPnl < tpLimit && state.dailyPnl > -slLimit) {
         state.locked = false;
+        state.dailyLimitReached = false;
         state.lockReason = '';
         return true;
     }
@@ -149,6 +170,7 @@ module.exports = {
     saveState,
     loadState,
     getFullState,
+    startMidnightHeartbeat,
     checkStrategy,
     syncDailyPnlFromDB,
     checkDailyLimits
