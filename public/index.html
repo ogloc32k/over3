@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>QUANTCORE // TERMINAL v6.0</title>
-  <!-- Force no caching -->
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
@@ -13,26 +12,26 @@
 </head>
 <body>
 
-  <!-- ====== HEADER ====== -->
+  <!-- HEADER -->
   <header class="app-header" id="appHeader">
     <div class="left">
       <div class="app-brand">QUANTCORE<span>//</span>TERMINAL <small>v6.0</small></div>
       <div class="header-tabs" id="headerTabs">
-        <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">Dashboard</button>
-        <button class="tab-btn" data-tab="logs" onclick="switchTab('logs')">Logs</button>
-        <button class="tab-btn" data-tab="analytics" onclick="switchTab('analytics')">Analytics</button>
-        <button class="tab-btn" data-tab="digits" onclick="switchTab('digits')">Digits</button>
-        <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">Settings</button>
+        <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+        <button class="tab-btn" data-tab="logs">Logs</button>
+        <button class="tab-btn" data-tab="analytics">Analytics</button>
+        <button class="tab-btn" data-tab="digits">Digits</button>
+        <button class="tab-btn" data-tab="settings">Settings</button>
       </div>
     </div>
     <div class="header-right">
       <span class="header-status" id="header-status">● IDLE</span>
       <div class="header-clock"><span id="clock-display">00:00:00</span> EAT</div>
-      <button class="theme-toggle" id="themeToggle" title="Toggle theme">🌙</button>
+      <button class="theme-toggle" id="themeToggle">🌙</button>
     </div>
   </header>
 
-  <!-- ====== BODY ====== -->
+  <!-- BODY -->
   <div class="app-body" id="appBody">
 
     <!-- SIDEBAR -->
@@ -74,7 +73,7 @@
     <!-- MAIN CONTENT -->
     <main class="app-main">
 
-      <!-- FOCUS BAR (hidden on Analytics & Digits) -->
+      <!-- FOCUS BAR -->
       <div class="focus-bar" id="focusBar">
         <div class="left">
           <span class="name" id="f-name">Volatility 75 Index</span>
@@ -89,7 +88,7 @@
       </div>
 
       <!-- TAB PAGES -->
-      <!-- ====== DASHBOARD TAB ====== -->
+      <!-- DASHBOARD -->
       <div class="tab-pages active" id="tab-dashboard">
         <div class="table-container desktop-table">
           <table class="data-table" id="dataTable">
@@ -98,13 +97,13 @@
                 <th class="col-asset">Asset</th>
                 <th class="col-price">Price</th>
                 <th class="col-sr">S/R</th>
+                <th class="col-sr-pct">S/R %</th>
+                <th class="col-rf-pct">Rise/Fall %</th>
                 <th class="col-status">Breakout</th>
                 <th class="col-rsi">RSI</th>
                 <th class="col-bb-squeeze">BB Squeeze</th>
                 <th class="col-trend">Micro Trend</th>
                 <th class="col-digit">Digit</th>
-                <th class="col-vol">Vol</th>
-                <th class="col-step">Step</th>
               </tr>
             </thead>
             <tbody id="tableBody"></tbody>
@@ -128,9 +127,7 @@
             <div class="detail-indicators">
               <div class="indicator-item">
                 <span class="label">RSI (14)</span>
-                <div class="rsi-gauge" id="mobile-rsi-gauge">
-                  <div class="rsi-fill" style="width:50%;"></div>
-                </div>
+                <div class="rsi-gauge" id="mobile-rsi-gauge"><div class="rsi-fill" style="width:50%;"></div></div>
                 <span class="value" id="mobile-rsi-value">50.0</span>
               </div>
               <div class="indicator-item">
@@ -146,7 +143,7 @@
         </div>
       </div>
 
-      <!-- ====== LOGS TAB ====== -->
+      <!-- LOGS -->
       <div class="tab-pages" id="tab-logs">
         <div class="log-header">
           <span class="title">📋 Live System Audit Log</span>
@@ -155,22 +152,13 @@
         <div class="log-stream" id="log-stream"></div>
       </div>
 
-      <!-- ====== ANALYTICS TAB ====== -->
+      <!-- ANALYTICS -->
       <div class="tab-pages" id="tab-analytics">
         <div class="analytics-container">
-
-          <!-- Compact Stats Bar (S/R & Rise/Fall) -->
-          <div id="analytics-stats-bar" style="display: flex; flex-wrap: wrap; gap: 12px; padding: 4px 0 8px 0; font-size: 13px; font-weight: 600; color: var(--text-secondary); border-bottom: 1px solid var(--border-subtle); margin-bottom: 6px;">
-            <span>Support <span id="stat-support" style="color: #10b981;">--%</span> | <span id="stat-resistance" style="color: #ef4444;">--%</span> Resistance</span>
-            <span style="color: var(--text-muted);">|</span>
-            <span>Rise <span id="stat-rise" style="color: #10b981;">--%</span> | <span id="stat-fall" style="color: #ef4444;">--%</span> Fall</span>
-          </div>
-
-          <!-- FILTER BAR -->
           <div class="analytics-filter-bar">
             <span class="page-title">Session Analytics</span>
             <div class="filter-left">
-              <button class="btn-date-toggle" id="dateToggle" onclick="toggleDatePicker()">📅</button>
+              <button class="btn-date-toggle" id="dateToggle">📅</button>
               <div class="date-picker-group" id="datePickerGroup" style="display:none;">
                 <label>From</label><input type="date" id="date-start" onchange="applyDateFilter()">
                 <label>To</label><input type="date" id="date-end" onchange="applyDateFilter()">
@@ -178,199 +166,92 @@
             </div>
             <div class="filter-right">
               <div class="preset-strip">
-                <button class="btn-preset" id="p-24h" onclick="timeframePreset(this,'24h')">24H</button>
-                <button class="btn-preset active" id="p-session" onclick="timeframePreset(this,'session')">Session</button>
-                <button class="btn-preset" id="p-week" onclick="timeframePreset(this,'week')">1W</button>
-                <button class="btn-preset" id="p-month" onclick="timeframePreset(this,'month')">1M</button>
-                <button class="btn-preset" id="p-year" onclick="timeframePreset(this,'year')">1Y</button>
-                <button class="btn-preset" id="p-clear" onclick="timeframePreset(this,'clear')">✕</button>
+                <button class="btn-preset" id="p-24h">24H</button>
+                <button class="btn-preset active" id="p-session">Session</button>
+                <button class="btn-preset" id="p-week">1W</button>
+                <button class="btn-preset" id="p-month">1M</button>
+                <button class="btn-preset" id="p-year">1Y</button>
+                <button class="btn-preset" id="p-clear">✕</button>
               </div>
             </div>
           </div>
-
-          <!-- PRIMARY KPI CARDS -->
           <div class="metrics-grid-4">
             <div class="metric-card"><div class="lbl">Net Profit</div><div class="val" id="meta-profit">$0.00</div></div>
             <div class="metric-card"><div class="lbl">Strike Rate</div><div class="val" id="meta-strike">0.0%</div></div>
             <div class="metric-card"><div class="lbl">Profit Factor</div><div class="val" id="meta-pf">0.00</div></div>
             <div class="metric-card"><div class="lbl">Max Drawdown</div><div class="val" id="meta-dd">0.0%</div></div>
           </div>
-
-          <!-- SECONDARY METRICS -->
           <div class="metrics-secondary">
-            <div class="metric-item">
-              <span class="lbl">Avg Win / Avg Loss</span>
-              <span class="val" id="meta-avg-win-loss">$0.00 / $0.00</span>
-            </div>
-            <div class="metric-item">
-              <span class="lbl">Max Consecutive</span>
-              <span class="val" id="meta-max-consec">W:0 / L:0</span>
-            </div>
-            <div class="metric-item">
-              <span class="lbl">Avg Trade Duration</span>
-              <span class="val" id="meta-avg-duration">0s</span>
-            </div>
-            <div class="metric-item">
-              <span class="lbl">Won / Lost</span>
-              <span class="val" id="meta-won-lost">0 / 0</span>
-            </div>
+            <div class="metric-item"><span class="lbl">Avg Win / Avg Loss</span><span class="val" id="meta-avg-win-loss">$0.00 / $0.00</span></div>
+            <div class="metric-item"><span class="lbl">Max Consecutive</span><span class="val" id="meta-max-consec">W:0 / L:0</span></div>
+            <div class="metric-item"><span class="lbl">Avg Trade Duration</span><span class="val" id="meta-avg-duration">0s</span></div>
+            <div class="metric-item"><span class="lbl">Won / Lost</span><span class="val" id="meta-won-lost">0 / 0</span></div>
           </div>
-
-          <!-- CHARTS -->
           <div class="charts-grid-2">
-            <div class="chart-box">
-              <div class="ch-label">Asset Performance</div>
-              <div class="ch-wrap">
-                <canvas id="chart-donut"></canvas>
-              </div>
-            </div>
-            <div class="chart-box">
-              <div class="ch-label">Equity Curve</div>
-              <div class="ch-wrap">
-                <canvas id="chart-line"></canvas>
-              </div>
-            </div>
+            <div class="chart-box"><div class="ch-label">Asset Performance</div><div class="ch-wrap"><canvas id="chart-donut"></canvas></div></div>
+            <div class="chart-box"><div class="ch-label">Equity Curve</div><div class="ch-wrap"><canvas id="chart-line"></canvas></div></div>
           </div>
-
         </div>
       </div>
 
-      <!-- ====== DIGITS TAB ====== -->
+      <!-- DIGITS -->
       <div class="tab-pages" id="tab-digits">
         <div class="digits-container">
-          <!-- Asset Selector -->
           <div class="digits-asset-selector">
             <span class="digits-label">Asset:</span>
             <div class="digits-asset-chips" id="digitsAssetChips"></div>
           </div>
-
-          <!-- Digit Matrix Table -->
           <div class="digits-matrix">
             <table class="digits-table">
-              <thead>
-                <tr>
-                  <th>Digit</th>
-                  <th>Over %</th>
-                  <th>Under %</th>
-                  <th>Matches %</th>
-                  <th>Differs %</th>
-                </tr>
-              </thead>
+              <thead><tr><th>Digit</th><th>Over %</th><th>Under %</th><th>Matches %</th><th>Differs %</th></tr></thead>
               <tbody id="digitsTableBody"></tbody>
             </table>
           </div>
         </div>
       </div>
 
-      <!-- ====== SETTINGS TAB ====== -->
+      <!-- SETTINGS -->
       <div class="tab-pages" id="tab-settings">
         <div class="settings-grid">
           <div class="settings-section">
             <h4>📊 Breakout Parameters</h4>
             <div class="settings-subgrid">
-              <div class="setting-item">
-                <label>Analysis Window <span class="hint">(ticks)</span></label>
-                <input type="number" id="config-ANALYSIS_WINDOW" step="1" value="500" />
-              </div>
-              <div class="setting-item">
-                <label>Bollinger Period <span class="hint">(ticks)</span></label>
-                <input type="number" id="config-BOLLINGER_PERIOD" step="1" value="20" />
-              </div>
-              <div class="setting-item">
-                <label>Bollinger Std Dev</label>
-                <input type="number" id="config-BOLLINGER_STD" step="0.1" value="2" />
-              </div>
-              <div class="setting-item">
-                <label>RSI Period <span class="hint">(ticks)</span></label>
-                <input type="number" id="config-RSI_PERIOD" step="1" value="20" />
-              </div>
-              <div class="setting-item">
-                <label>Oversold Threshold <span class="hint">%</span></label>
-                <input type="number" id="config-OVERSOLD_THRESHOLD" step="1" value="30" />
-              </div>
-              <div class="setting-item">
-                <label>Overbought Threshold <span class="hint">%</span></label>
-                <input type="number" id="config-OVERBOUGHT_THRESHOLD" step="1" value="70" />
-              </div>
-              <div class="setting-item">
-                <label>Min Volatility <span class="hint">%</span></label>
-                <input type="number" id="config-MIN_VOLATILITY_PERCENT" step="0.01" value="0.06" />
-              </div>
-              <div class="setting-item">
-                <label>Duration <span class="hint">ticks</span></label>
-                <input type="number" id="config-DURATION_SECONDS" step="1" value="7" />
-              </div>
+              <div class="setting-item"><label>Analysis Window <span class="hint">(ticks)</span></label><input type="number" id="config-ANALYSIS_WINDOW" step="1" value="500" /></div>
+              <div class="setting-item"><label>Bollinger Period <span class="hint">(ticks)</span></label><input type="number" id="config-BOLLINGER_PERIOD" step="1" value="20" /></div>
+              <div class="setting-item"><label>Bollinger Std Dev</label><input type="number" id="config-BOLLINGER_STD" step="0.1" value="2" /></div>
+              <div class="setting-item"><label>RSI Period <span class="hint">(ticks)</span></label><input type="number" id="config-RSI_PERIOD" step="1" value="20" /></div>
+              <div class="setting-item"><label>Oversold Threshold <span class="hint">%</span></label><input type="number" id="config-OVERSOLD_THRESHOLD" step="1" value="30" /></div>
+              <div class="setting-item"><label>Overbought Threshold <span class="hint">%</span></label><input type="number" id="config-OVERBOUGHT_THRESHOLD" step="1" value="70" /></div>
+              <div class="setting-item"><label>Min Volatility <span class="hint">%</span></label><input type="number" id="config-MIN_VOLATILITY_PERCENT" step="0.01" value="0.06" /></div>
+              <div class="setting-item"><label>Duration <span class="hint">ticks</span></label><input type="number" id="config-DURATION_SECONDS" step="1" value="7" /></div>
             </div>
           </div>
-
           <div class="settings-section">
             <h4>⏱ Timing & Cooldowns</h4>
             <div class="settings-subgrid">
-              <div class="setting-item">
-                <label>Trigger Interval <span class="hint">(seconds)</span></label>
-                <input type="number" id="config-MIN_TRIGGER_INTERVAL_SECONDS" step="1" value="300" />
-              </div>
-              <div class="setting-item">
-                <label>Max Consecutive Losses</label>
-                <select id="config-MAX_CONSECUTIVE_LOSSES">
-                  <option value="1">1</option>
-                  <option value="2">2</option>
-                  <option value="3" selected>3</option>
-                  <option value="4">4</option>
-                  <option value="5">5</option>
-                </select>
-              </div>
-              <div class="setting-item">
-                <label>Loss Cooldown <span class="hint">(minutes)</span></label>
-                <input type="number" id="config-LOSS_COOLDOWN_MINUTES" step="1" value="5" />
-                <input type="hidden" id="config-LOSS_COOLDOWN_MS" value="300000" />
-              </div>
+              <div class="setting-item"><label>Trigger Interval <span class="hint">(seconds)</span></label><input type="number" id="config-MIN_TRIGGER_INTERVAL_SECONDS" step="1" value="300" /></div>
+              <div class="setting-item"><label>Max Consecutive Losses</label><select id="config-MAX_CONSECUTIVE_LOSSES"><option value="1">1</option><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option><option value="5">5</option></select></div>
+              <div class="setting-item"><label>Loss Cooldown <span class="hint">(minutes)</span></label><input type="number" id="config-LOSS_COOLDOWN_MINUTES" step="1" value="5" /><input type="hidden" id="config-LOSS_COOLDOWN_MS" value="300000" /></div>
             </div>
           </div>
-
           <div class="settings-section">
             <h4>💰 Risk Management</h4>
             <div class="settings-subgrid">
-              <div class="setting-item">
-                <label>Risk per Trade <span class="hint">%</span></label>
-                <input type="number" id="config-RISK_PERCENT" step="0.1" value="1" />
-              </div>
-              <div class="setting-item">
-                <label>Daily TP <span class="hint">%</span></label>
-                <input type="number" id="config-TP_PERCENT" step="0.1" value="5" />
-              </div>
-              <div class="setting-item">
-                <label>Daily SL <span class="hint">%</span></label>
-                <input type="number" id="config-SL_PERCENT" step="0.1" value="10" />
-              </div>
-              <div class="setting-item">
-                <label>Min Stake <span class="hint">$</span></label>
-                <input type="number" id="config-MIN_STAKE" step="0.01" value="0.35" />
-              </div>
+              <div class="setting-item"><label>Risk per Trade <span class="hint">%</span></label><input type="number" id="config-RISK_PERCENT" step="0.1" value="1" /></div>
+              <div class="setting-item"><label>Daily TP <span class="hint">%</span></label><input type="number" id="config-TP_PERCENT" step="0.1" value="5" /></div>
+              <div class="setting-item"><label>Daily SL <span class="hint">%</span></label><input type="number" id="config-SL_PERCENT" step="0.1" value="10" /></div>
+              <div class="setting-item"><label>Min Stake <span class="hint">$</span></label><input type="number" id="config-MIN_STAKE" step="0.01" value="0.35" /></div>
             </div>
           </div>
-
           <div class="settings-section">
             <h4>⚙️ Trade Execution</h4>
             <div class="settings-subgrid">
-              <div class="setting-item">
-                <label>Cooldown Ticks</label>
-                <input type="number" id="config-COOLDOWN_TICKS" step="1" value="5" />
-              </div>
-              <div class="setting-item">
-                <label>Settlement Timeout <span class="hint">(seconds)</span></label>
-                <input type="number" id="config-SETTLEMENT_TIMEOUT_SECONDS" step="1" value="15" />
-                <input type="hidden" id="config-SETTLEMENT_TIMEOUT_MS" value="15000" />
-              </div>
-              <div class="setting-item">
-                <label>P&L Sync <span class="hint">(seconds)</span></label>
-                <input type="number" id="config-PNL_SYNC_INTERVAL_SECONDS" step="1" value="300" />
-                <input type="hidden" id="config-PNL_SYNC_INTERVAL_MS" value="300000" />
-              </div>
+              <div class="setting-item"><label>Cooldown Ticks</label><input type="number" id="config-COOLDOWN_TICKS" step="1" value="5" /></div>
+              <div class="setting-item"><label>Settlement Timeout <span class="hint">(seconds)</span></label><input type="number" id="config-SETTLEMENT_TIMEOUT_SECONDS" step="1" value="15" /><input type="hidden" id="config-SETTLEMENT_TIMEOUT_MS" value="15000" /></div>
+              <div class="setting-item"><label>P&L Sync <span class="hint">(seconds)</span></label><input type="number" id="config-PNL_SYNC_INTERVAL_SECONDS" step="1" value="300" /><input type="hidden" id="config-PNL_SYNC_INTERVAL_MS" value="300000" /></div>
             </div>
           </div>
         </div>
-
         <div class="settings-actions">
           <button class="btn-save" onclick="saveSettings()">Apply Settings</button>
           <span class="settings-status" id="settings-status"></span>
@@ -382,14 +263,13 @@
 
   <!-- BOTTOM TAB BAR (Mobile) -->
   <div class="tab-bar" id="tabBar">
-    <button class="tab-item active" data-tab="dashboard" onclick="switchTab('dashboard')"><span class="icon">📊</span><span class="label">Markets</span></button>
-    <button class="tab-item" data-tab="logs" onclick="switchTab('logs')"><span class="icon">📋</span><span class="label">Logs</span></button>
-    <button class="tab-item" data-tab="analytics" onclick="switchTab('analytics')"><span class="icon">📈</span><span class="label">Analytics</span></button>
-    <button class="tab-item" data-tab="digits" onclick="switchTab('digits')"><span class="icon">🔢</span><span class="label">Digits</span></button>
-    <button class="tab-item" data-tab="settings" onclick="switchTab('settings')"><span class="icon">⚙️</span><span class="label">Settings</span></button>
+    <button class="tab-item active" data-tab="dashboard"><span class="icon">📊</span><span class="label">Markets</span></button>
+    <button class="tab-item" data-tab="logs"><span class="icon">📋</span><span class="label">Logs</span></button>
+    <button class="tab-item" data-tab="analytics"><span class="icon">📈</span><span class="label">Analytics</span></button>
+    <button class="tab-item" data-tab="digits"><span class="icon">🔢</span><span class="label">Digits</span></button>
+    <button class="tab-item" data-tab="settings"><span class="icon">⚙️</span><span class="label">Settings</span></button>
   </div>
 
-  <!-- CACHE‑BUSTED SCRIPT -->
   <script src="js/app.js?v=2"></script>
 </body>
 </html>
