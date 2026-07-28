@@ -1523,3 +1523,76 @@ body.analytics-active .app-main {
     display: none !important;
   }
 }
+
+/* ---- Digits Stream ---- */
+.digits-stream {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-bottom: 8px;
+}
+
+.digits-stream-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+}
+
+.digits-stream-digits {
+    display: flex;
+    gap: 6px;
+    flex-wrap: nowrap; /* Keep on one row */
+    overflow-x: auto; /* Fallback scroll if screen is ultra-narrow */
+    align-items: center;
+}
+
+.stream-digit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    background: var(--bg-terminal);
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    font-size: 18px;
+    font-weight: 700;
+    font-family: 'Consolas', monospace;
+    color: var(--text-primary);
+    transition: all 0.15s ease-in-out;
+}
+
+.stream-digit:hover {
+    background: var(--bg-surface);
+    transform: scale(1.05);
+}
+
+/* --- High-Value Visual Extensions --- */
+
+/* 1. Highlight the newest incoming digit */
+.stream-digit.latest {
+    border-color: #3b82f6;
+    box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
+    transform: scale(1.08);
+}
+
+/* 2. Optional Color Coding for Even/Odd or Up/Down */
+.stream-digit.even { color: #00E676; } /* Green accent */
+.stream-digit.odd { color: #FF5252; }  /* Red accent */
+
+/* 3. Mobile responsiveness (keeps 10 badges on 1 row) */
+@media (max-width: 480px) {
+    .stream-digit {
+        width: 28px;
+        height: 28px;
+        font-size: 14px;
+    }
+    .digits-stream-digits {
+        gap: 4px;
+    }
+}
