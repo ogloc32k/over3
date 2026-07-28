@@ -114,7 +114,7 @@ class MultiMarketPipeline {
                 symbol, price,
                 formattedPrice: formatMarketPrice(symbol, price),
                 risePct: 0, fallPct: 0,
-                srPositionPct: 50,
+                supportPct: 50, resistancePct: 50,
                 rsi: 50,
                 bbUpper: null, bbLower: null, bbMiddle: null,
                 bandwidth: null,
@@ -157,11 +157,13 @@ class MultiMarketPipeline {
             bandwidth = ((bb.upper - bb.lower) / bb.middle) * 100;
         }
 
-        // ---- S/R Position % ----
-        let srPositionPct = 50;
+        // ---- S/R Position % (Support % = distance from Support) ----
+        let supportPct = 50;
+        let resistancePct = 50;
         if (sr.support !== null && sr.resistance !== null && sr.resistance !== sr.support) {
-            srPositionPct = ((price - sr.support) / (sr.resistance - sr.support)) * 100;
-            srPositionPct = Math.min(100, Math.max(0, srPositionPct));
+            supportPct = ((price - sr.support) / (sr.resistance - sr.support)) * 100;
+            supportPct = Math.min(100, Math.max(0, supportPct));
+            resistancePct = 100 - supportPct;
         }
 
         // ---- MA diff (internal) ----
@@ -221,7 +223,6 @@ class MultiMarketPipeline {
         for (let d = 0; d <= 9; d++) {
             const matches = (digitCounts[d] / totalTicks) * 100;
             const differs = 100 - matches;
-            // Over: count of ticks with last digit > d
             let overCount = 0, underCount = 0;
             window.forEach(p => {
                 const str = p.toString();
@@ -276,7 +277,7 @@ class MultiMarketPipeline {
             symbol, price,
             formattedPrice: formatMarketPrice(symbol, price),
             risePct, fallPct,
-            srPositionPct,
+            supportPct, resistancePct,
             rsi,
             bbUpper: bb.upper,
             bbLower: bb.lower,
