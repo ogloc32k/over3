@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>QUANTCORE // TERMINAL v6.0</title>
-  <!-- Force no caching -->
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
@@ -13,26 +12,26 @@
 </head>
 <body>
 
-  <!-- ====== HEADER ====== -->
+  <!-- HEADER -->
   <header class="app-header" id="appHeader">
     <div class="left">
       <div class="app-brand">QUANTCORE<span>//</span>TERMINAL <small>v6.0</small></div>
       <div class="header-tabs" id="headerTabs">
-        <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">Dashboard</button>
-        <button class="tab-btn" data-tab="logs" onclick="switchTab('logs')">Logs</button>
-        <button class="tab-btn" data-tab="analytics" onclick="switchTab('analytics')">Analytics</button>
-        <button class="tab-btn" data-tab="digits" onclick="switchTab('digits')">Digits</button>
-        <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')">Settings</button>
+        <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+        <button class="tab-btn" data-tab="logs">Logs</button>
+        <button class="tab-btn" data-tab="analytics">Analytics</button>
+        <button class="tab-btn" data-tab="digits">Digits</button>
+        <button class="tab-btn" data-tab="settings">Settings</button>
       </div>
     </div>
     <div class="header-right">
       <span class="header-status" id="header-status">● IDLE</span>
       <div class="header-clock"><span id="clock-display">00:00:00</span> EAT</div>
-      <button class="theme-toggle" id="themeToggle" title="Toggle theme">🌙</button>
+      <button class="theme-toggle" id="themeToggle">🌙</button>
     </div>
   </header>
 
-  <!-- ====== BODY ====== -->
+  <!-- BODY -->
   <div class="app-body" id="appBody">
 
     <!-- SIDEBAR -->
@@ -74,7 +73,7 @@
     <!-- MAIN CONTENT -->
     <main class="app-main">
 
-      <!-- FOCUS BAR (hidden on Analytics & Digits) -->
+      <!-- FOCUS BAR -->
       <div class="focus-bar" id="focusBar">
         <div class="left">
           <span class="name" id="f-name">Volatility 75 Index</span>
@@ -89,9 +88,8 @@
       </div>
 
       <!-- TAB PAGES -->
-      <!-- ====== DASHBOARD TAB ====== -->
+      <!-- DASHBOARD -->
       <div class="tab-pages active" id="tab-dashboard">
-        <!-- DESKTOP TABLE -->
         <div class="table-container desktop-table">
           <table class="data-table" id="dataTable">
             <thead>
@@ -144,7 +142,7 @@
         </div>
       </div>
 
-      <!-- ====== LOGS TAB ====== -->
+      <!-- LOGS -->
       <div class="tab-pages" id="tab-logs">
         <div class="log-header">
           <span class="title">📋 Live System Audit Log</span>
@@ -153,7 +151,7 @@
         <div class="log-stream" id="log-stream"></div>
       </div>
 
-      <!-- ====== ANALYTICS TAB ====== -->
+      <!-- ANALYTICS -->
       <div class="tab-pages" id="tab-analytics">
         <div class="analytics-container">
           <div class="analytics-filter-bar">
@@ -195,7 +193,7 @@
         </div>
       </div>
 
-      <!-- ====== DIGITS TAB ====== -->
+      <!-- ====== DIGITS TAB (UPDATED) ====== -->
       <div class="tab-pages" id="tab-digits">
         <div class="digits-container">
           <!-- Asset Selector -->
@@ -206,31 +204,31 @@
 
           <!-- Last 10 Digits Stream -->
           <div class="digits-stream">
-            <div class="digits-stream-label">Last 10 Digits</div>
-            <div class="digits-stream-digits" id="digitsStreamDigits">
-              <!-- filled by JS -->
-            </div>
+            <div class="digits-stream-label">LAST 10 DIGITS</div>
+            <div id="digitsHistoryBadges" class="digits-stream-digits"></div>
           </div>
 
-          <!-- Digit Matrix Table -->
+          <!-- Digit Analysis Matrix Table -->
           <div class="digits-matrix">
-            <table class="digits-table">
+            <table class="digits-table" style="width: 100%; text-align: center;">
               <thead>
                 <tr>
-                  <th>Digit</th>
-                  <th>Over %</th>
-                  <th>Under %</th>
-                  <th>Matches %</th>
-                  <th>Differs %</th>
+                  <th>DIGIT</th>
+                  <th>0</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th>
                 </tr>
               </thead>
-              <tbody id="digitsTableBody"></tbody>
+              <tbody>
+                <tr id="row-over"><td><strong>OVER %</strong></td></tr>
+                <tr id="row-under"><td><strong>UNDER %</strong></td></tr>
+                <tr id="row-matches"><td><strong>MATCHES %</strong></td></tr>
+                <tr id="row-differs"><td><strong>DIFFERS %</strong></td></tr>
+              </tbody>
             </table>
           </div>
         </div>
       </div>
 
-      <!-- ====== SETTINGS TAB ====== -->
+      <!-- SETTINGS -->
       <div class="tab-pages" id="tab-settings">
         <div class="settings-grid">
           <div class="settings-section">
@@ -283,11 +281,11 @@
 
   <!-- BOTTOM TAB BAR (Mobile) -->
   <div class="tab-bar" id="tabBar">
-    <button class="tab-item active" data-tab="dashboard" onclick="switchTab('dashboard')"><span class="icon">📊</span><span class="label">Markets</span></button>
-    <button class="tab-item" data-tab="logs" onclick="switchTab('logs')"><span class="icon">📋</span><span class="label">Logs</span></button>
-    <button class="tab-item" data-tab="analytics" onclick="switchTab('analytics')"><span class="icon">📈</span><span class="label">Analytics</span></button>
-    <button class="tab-item" data-tab="digits" onclick="switchTab('digits')"><span class="icon">🔢</span><span class="label">Digits</span></button>
-    <button class="tab-item" data-tab="settings" onclick="switchTab('settings')"><span class="icon">⚙️</span><span class="label">Settings</span></button>
+    <button class="tab-item active" data-tab="dashboard"><span class="icon">📊</span><span class="label">Markets</span></button>
+    <button class="tab-item" data-tab="logs"><span class="icon">📋</span><span class="label">Logs</span></button>
+    <button class="tab-item" data-tab="analytics"><span class="icon">📈</span><span class="label">Analytics</span></button>
+    <button class="tab-item" data-tab="digits"><span class="icon">🔢</span><span class="label">Digits</span></button>
+    <button class="tab-item" data-tab="settings"><span class="icon">⚙️</span><span class="label">Settings</span></button>
   </div>
 
   <script src="js/app.js?v=2"></script>
