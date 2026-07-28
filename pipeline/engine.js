@@ -7,12 +7,14 @@ const BUFFER_CLEANUP_THRESHOLD = 2200;
 class MultiMarketPipeline {
     constructor(symbols) {
         this.buffers = {};
+        this.rawBuffers = {};       // store raw price strings for last 10 ticks
         this.lastPrices = {};
         this.diffHistory = {};
         this.rsiState = {};
         this.computeDigits = false; // default off (only for Digits tab)
         for (const symbol of symbols) {
             this.buffers[symbol] = [];
+            this.rawBuffers[symbol] = [];
             this.lastPrices[symbol] = null;
             this.diffHistory[symbol] = [];
             this.rsiState[symbol] = { avgGain: 0, avgLoss: 0, initialized: false };
@@ -99,9 +101,15 @@ class MultiMarketPipeline {
         return { support: min, resistance: max };
     }
 
-    feed(symbol, price) {
+    // ---- feed() now accepts rawPrice ----
+    feed(symbol, price, rawPrice) {
         const buf = this.buffers[symbol];
         buf.push(price);
+
+        // Store raw price strings (keep last 10)
+        const rawBuf = this.rawBuffers[symbol];
+        rawBuf.push(rawPrice);
+        if (rawBuf.length > 10) rawBuf.shift();
 
         if (buf.length > BUFFER_CLEANUP_THRESHOLD) {
             this.buffers[symbol] = buf.slice(-BUFFER_CAPACITY);
@@ -113,6 +121,8 @@ class MultiMarketPipeline {
         if (analysisWindow < 50) {
             const result = {
                 symbol, price,
+                rawPrice: rawPrice,
+                rawPrices: rawBuf.slice(), // copy
                 formattedPrice: formatMarketPrice(symbol, price),
                 risePct: 0, fallPct: 0,
                 supportPct: 50, resistancePct: 50,
@@ -208,9 +218,8 @@ class MultiMarketPipeline {
             while (tickDirections.length > 5) tickDirections.shift();
         }
 
-        // ---- Last digit ----
-        const priceStr = price.toString();
-        const lastDigit = parseInt(priceStr[priceStr.length - 1]) || 0;
+        // ---- Last digit from raw string ----
+        const lastDigit = rawPrice ? parseInt(rawPrice[rawPrice.length - 1]) : null;
 
         // ---- Digit Matrix (only if enabled) ----
         let digitMatrix = null;
@@ -278,6 +287,8 @@ class MultiMarketPipeline {
 
         const result = {
             symbol, price,
+            rawPrice: rawPrice,
+            rawPrices: rawBuf.slice(), // copy last 10 raw strings
             formattedPrice: formatMarketPrice(symbol, price),
             risePct, fallPct,
             supportPct, resistancePct,
