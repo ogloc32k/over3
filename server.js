@@ -103,7 +103,9 @@ async function boot() {
     }
 
     // 3. Connect to Deriv WebSocket & start sync timers
+    console.log('[DEBUG] About to call connectDeriv()...');
     connectDeriv();
+    console.log('[DEBUG] connectDeriv() returned.');
     startPnlSync();
 
     // 4. Bind HTTP Server
