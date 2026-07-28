@@ -1,252 +1,225 @@
 const fs = require('fs');
 const path = require('path');
-const { loadConfig } = require('../config/defaults');
+const { defaultConfig } = require('../config/defaults');
 const { supabase } = require('../database');
 
-const CONFIG = loadConfig();
-const STATE_FILE = '/var/data/deriv_multimarket_state.json';
-const TIMEZONE = 'Africa/Nairobi';
+// Path to persist state across restarts
+const STATE_FILE = path.join(__dirname, '../../data/state.json');
 
-// Helper: Get ISO Date string (YYYY-MM-DD) in Africa/Nairobi timezone
-function getNairobiDateStr(date = new Date()) {
-    return date.toLocaleDateString("en-CA", { timeZone: TIMEZONE });
-}
+// Global CONFIG object initialized with defaults
+const CONFIG = { ...defaultConfig };
 
+/**
+ * Mutable Global State Container
+ */
 const state = {
-    active: false,
-    tradingMode: 'demo',
-    
-    // ---- Connection & Execution State (Used by client.js) ----
+    // Connection & Mode
     isConnected: false,
-    isTrading: false, 
-    tradeInProgress: false, // Kept for backward compatibility with other files
-    balance: null,
+    active: false,             // Is automated bot armed?
+    tradingMode: 'demo',       // 'demo' or 'real'
     currency: 'USD',
-    lastTick: null,
-    lastDigit: null,
+    balance: 0.00,
 
-    // ---- PnL & Performance Metrics ----
-    sessionPnl: 0,
-    dailyPnl: 0,
-    totalProfit: 0, // Used by client.js
-    totalWins: 0,   // Used by client.js
-    totalLosses: 0, // Used by client.js
-    consecutiveLosses: 0,
-    dailyStartBalance: null,
-
-    // ---- Risk Management & Locks ----
+    // Lock & Limits
     locked: false,
-    lockReason: '',
-    lossCooldownUntil: 0,
-    cooldownTicksLeft: 0,
-    
-    // ---- Trade Context ----
-    activeRealTrade: null,
-    currentStake: 0.35,
-    marketMetrics: {},
-    logs: [],
-    lastTriggerTime: 0,
-    pendingSettlement: false,
-    
-    // ---- Midnight heartbeat tracking ----
-    currentTradingDayStr: getNairobiDateStr(),
-    dailyLimitReached: false,
-    lastTradeTimestamp: 0
+    lockReason: null,
+
+    // Trade Tracking
+    isTrading: false,           // WS execution in flight
+    tradeInProgress: false,     // Manual trade or bot pipeline active
+    activeRealTrade: null,      // Active contract details (includes barrier, symbol, duration)
+    currentStake: CONFIG.MIN_STAKE,
+
+    // Performance Metrics
+    sessionPnl: 0.00,
+    dailyPnl: 0.00,
+    totalProfit: 0.00,
+    totalWins: 0,
+    totalLosses: 0,
+    consecutiveLosses: 0,
+
+    // Real-Time Digit & Market Feed
+    lastTick: 0,
+    lastDigit: null,
+    digitHistory: [],           // Array of last N digits (e.g., max 100)
+    marketMetrics: {
+        digitCounts: { 0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0, 7:0, 8:0, 9:0 },
+        digitPercentages: { 0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0, 7:0, 8:0, 9:0 },
+        evenPercent: 50,
+        oddPercent: 50,
+        overPercent: 50,        // Over 4 (5-9)
+        underPercent: 50,       // Under 5 (0-4)
+        sampleSize: 0
+    },
+
+    // In-memory System Logs
+    logs: []
 };
 
-// ---------- Atomic File Persistence ----------
-function saveState() {
-    try {
-        const dir = path.dirname(STATE_FILE);
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+/**
+ * Recalculates digit distribution statistics from digitHistory
+ */
+function updateMarketMetrics() {
+    const history = state.digitHistory || [];
+    const total = history.length;
 
-        const payload = JSON.stringify({
-            dateStr: getNairobiDateStr(),
-            tradingMode: state.tradingMode,
-            locked: state.locked,
-            lockReason: state.lockReason,
-            sessionActive: state.active,
-            sessionPnl: state.sessionPnl,
-            dailyPnl: state.dailyPnl,
-            totalProfit: state.totalProfit,
-            totalWins: state.totalWins,
-            totalLosses: state.totalLosses,
-            consecutiveLosses: state.consecutiveLosses,
-            dailyLimitReached: state.dailyLimitReached,
-            dailyStartBalance: state.dailyStartBalance
-        }, null, 2);
+    if (total === 0) return;
 
-        // Safe atomic write pattern
-        const tempPath = `${STATE_FILE}.tmp`;
-        fs.writeFileSync(tempPath, payload, 'utf8');
-        fs.renameSync(tempPath, STATE_FILE);
-    } catch (e) {
-        console.error('❌ [State Manager] Failed to save state:', e.message);
+    const counts = { 0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0, 7:0, 8:0, 9:0 };
+    let evens = 0;
+    let odds = 0;
+    let overs = 0;   // 5, 6, 7, 8, 9
+    let unders = 0;  // 0, 1, 2, 3, 4
+
+    history.forEach(d => {
+        if (counts[d] !== undefined) counts[d]++;
+        if (d % 2 === 0) evens++; else odds++;
+        if (d >= 5) overs++; else unders++;
+    });
+
+    const percentages = {};
+    for (let i = 0; i <= 9; i++) {
+        percentages[i] = parseFloat(((counts[i] / total) * 100).toFixed(1));
     }
+
+    state.marketMetrics = {
+        digitCounts: counts,
+        digitPercentages: percentages,
+        evenPercent: parseFloat(((evens / total) * 100).toFixed(1)),
+        oddPercent: parseFloat(((odds / total) * 100).toFixed(1)),
+        overPercent: parseFloat(((overs / total) * 100).toFixed(1)),
+        underPercent: parseFloat(((unders / total) * 100).toFixed(1)),
+        sampleSize: total
+    };
 }
 
-function loadState() {
-    try {
-        if (fs.existsSync(STATE_FILE)) {
-            const raw = fs.readFileSync(STATE_FILE, 'utf8');
-            const saved = JSON.parse(raw);
-            const todayStr = getNairobiDateStr();
-
-            if (saved.dateStr === todayStr) {
-                state.tradingMode = saved.tradingMode || 'demo';
-                state.locked = saved.locked || false;
-                state.lockReason = saved.lockReason || '';
-                state.active = saved.sessionActive || false;
-                state.sessionPnl = saved.sessionPnl || 0;
-                state.dailyPnl = saved.dailyPnl || 0;
-                state.totalProfit = saved.totalProfit || 0;
-                state.totalWins = saved.totalWins || 0;
-                state.totalLosses = saved.totalLosses || 0;
-                state.consecutiveLosses = saved.consecutiveLosses || 0;
-                state.dailyLimitReached = saved.dailyLimitReached || false;
-                state.dailyStartBalance = saved.dailyStartBalance || null;
-            } else {
-                console.log(`[State Manager] New day detected on startup. Resetting daily counters.`);
-                state.locked = false;
-                state.lockReason = '';
-                state.active = saved.sessionActive || false;
-                state.sessionPnl = 0;
-                state.dailyPnl = 0;
-                state.totalProfit = 0;
-                state.totalWins = 0;
-                state.totalLosses = 0;
-                state.consecutiveLosses = 0;
-                state.dailyLimitReached = false;
-                state.dailyStartBalance = null;
-            }
-            state.currentTradingDayStr = todayStr;
-        }
-    } catch (e) {
-        console.error('⚠️ [State Manager] Error reading state file (resetting to defaults):', e.message);
-    }
-}
-
+/**
+ * Returns a comprehensive, serialized snapshot of the state
+ * (Calculates live market metrics right before returning for SSE emission)
+ */
 function getFullState() {
-    const { logs, ...rest } = state;
-    return { ...rest, marketMetrics: state.marketMetrics || {} };
+    updateMarketMetrics();
+
+    return {
+        isConnected: state.isConnected,
+        active: state.active,
+        tradingMode: state.tradingMode,
+        currency: state.currency,
+        balance: state.balance,
+        locked: state.locked,
+        lockReason: state.lockReason,
+        isTrading: state.isTrading,
+        tradeInProgress: state.tradeInProgress,
+        activeRealTrade: state.activeRealTrade,
+        currentStake: state.currentStake,
+        sessionPnl: parseFloat((state.sessionPnl || 0).toFixed(2)),
+        dailyPnl: parseFloat((state.dailyPnl || 0).toFixed(2)),
+        totalProfit: parseFloat((state.totalProfit || 0).toFixed(2)),
+        totalWins: state.totalWins,
+        totalLosses: state.totalLosses,
+        consecutiveLosses: state.consecutiveLosses,
+        lastTick: state.lastTick,
+        lastDigit: state.lastDigit,
+        digitHistory: state.digitHistory.slice(-20), // Send last 20 ticks for UI sparklines
+        marketMetrics: state.marketMetrics,
+        config: CONFIG
+    };
 }
 
-// ---------- Midnight Heartbeat ----------
-function startMidnightHeartbeat() {
-    setInterval(() => {
-        const todayStr = getNairobiDateStr();
-        if (todayStr !== state.currentTradingDayStr) {
-            console.log(`[System] 🕛 Midnight crossed (${TIMEZONE}). Resetting daily limits for new session.`);
-            state.currentTradingDayStr = todayStr;
-            
-            // Reset Session / Daily Trackers
-            state.dailyPnl = 0;
-            state.sessionPnl = 0;
-            state.totalProfit = 0;
-            state.totalWins = 0;
-            state.totalLosses = 0;
-            state.consecutiveLosses = 0;
-            
-            // Reset Lock States
-            state.dailyLimitReached = false;
-            state.locked = false;
-            state.lockReason = '';
-            
-            state.lastTradeTimestamp = 0;
-            
-            if (state.balance !== null) {
-                state.dailyStartBalance = state.balance;
-            }
-            saveState();
-        }
-    }, 30000); // Check every 30 seconds
-}
-
-// ---------- Strategy Check ----------
-function checkStrategy(symbol, metric) {
-    if (!metric) return null;
-
-    // Aligned with pipeline output property: maDiffExpanding
-    const { rsi, volatility, maDiff, maDiffExpanding } = metric;
-
-    if (volatility < CONFIG.MIN_VOLATILITY_PERCENT) return null;
-    if (!maDiffExpanding) return null;
-    if (Math.abs(maDiff) < CONFIG.MA_DIFF_THRESHOLD) return null;
-
-    // Signal confirmation
-    if (maDiff > 0 && rsi >= 50 && rsi <= (CONFIG.OVERBOUGHT_THRESHOLD || 85)) {
-        return { direction: 'CALL', score: volatility * 1.5 };
-    }
-    if (maDiff < 0 && rsi <= 50 && rsi >= (CONFIG.OVERSOLD_THRESHOLD || 15)) {
-        return { direction: 'PUT', score: volatility * 1.5 };
-    }
-    return null;
-}
-
-// ---------- Database Sync ----------
-async function syncDailyPnlFromDB() {
-    try {
-        // Calculate Nairobi midnight in UTC ISO format
-        const nowStr = getNairobiDateStr();
-        const startOfDayNairobi = new Date(`${nowStr}T00:00:00+03:00`);
-
-        const { data, error } = await supabase
-            .from('trading_ledger')
-            .select('profit_loss')
-            .gte('created_at', startOfDayNairobi.toISOString());
-
-        if (error) throw error;
-
-        const total = data.reduce((sum, row) => sum + (row.profit_loss || 0), 0);
-        state.dailyPnl = total;
-
-        if (state.balance !== null && state.dailyStartBalance === null) {
-            state.dailyStartBalance = state.balance - state.dailyPnl;
-        }
-
-        return checkDailyLimits();
-    } catch (err) {
-        console.error('❌ Failed to sync daily P&L from DB:', err.message);
-        return false;
-    }
-}
-
-// ---------- Risk Limits ----------
+/**
+ * Checks risk management rules (Daily Stop Loss / Take Profit)
+ */
 function checkDailyLimits() {
-    // If start balance is missing, attempt fallback to current balance
-    const baseBalance = state.dailyStartBalance || state.balance;
-    if (!baseBalance || baseBalance <= 0) return false;
+    if (state.locked) return true;
 
-    const tpLimit = baseBalance * (CONFIG.TP_PERCENT / 100);
-    const slLimit = baseBalance * (CONFIG.SL_PERCENT / 100);
-
-    if (state.dailyPnl >= tpLimit) {
+    if (CONFIG.TAKE_PROFIT > 0 && state.dailyPnl >= CONFIG.TAKE_PROFIT) {
         state.locked = true;
-        state.dailyLimitReached = true;
-        state.lockReason = `🎯 Daily Target Reached: +$${state.dailyPnl.toFixed(2)} (${CONFIG.TP_PERCENT}%). Trading paused.`;
-        saveState();
+        state.lockReason = `🎯 Target Take Profit achieved (+$${state.dailyPnl.toFixed(2)}). Trading locked.`;
+        state.active = false;
         return true;
     }
 
-    if (state.dailyPnl <= -slLimit) {
+    if (CONFIG.STOP_LOSS > 0 && state.dailyPnl <= -Math.abs(CONFIG.STOP_LOSS)) {
         state.locked = true;
-        state.dailyLimitReached = true;
-        state.lockReason = `🛑 Daily Loss Limit Breached: -$${Math.abs(state.dailyPnl).toFixed(2)} (${CONFIG.SL_PERCENT}%). Trading paused.`;
-        saveState();
+        state.lockReason = `🛑 Daily Stop Loss hit (-$${Math.abs(state.dailyPnl).toFixed(2)}). Trading locked.`;
+        state.active = false;
         return true;
     }
 
     return false;
 }
 
+/**
+ * Syncs cumulative PnL for today from Supabase ledger
+ */
+async function syncDailyPnlFromDB() {
+    try {
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+
+        const { data, error } = await supabase
+            .from('trading_ledger')
+            .select('profit_loss')
+            .gte('created_at', todayStart.toISOString());
+
+        if (error) throw error;
+
+        const sum = data.reduce((acc, row) => acc + (row.profit_loss || 0), 0);
+        state.dailyPnl = sum;
+        checkDailyLimits();
+    } catch (err) {
+        console.error('❌ Failed to sync daily PnL from DB:', err.message);
+    }
+}
+
+/**
+ * Persists session state to JSON file
+ */
+function saveState() {
+    try {
+        const dir = path.dirname(STATE_FILE);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+        const snapshot = {
+            sessionPnl: state.sessionPnl,
+            totalWins: state.totalWins,
+            totalLosses: state.totalLosses,
+            consecutiveLosses: state.consecutiveLosses,
+            locked: state.locked,
+            lockReason: state.lockReason
+        };
+
+        fs.writeFileSync(STATE_FILE, JSON.stringify(snapshot, null, 2));
+    } catch (err) {
+        console.error('Failed to save state:', err.message);
+    }
+}
+
+/**
+ * Loads session state from JSON file
+ */
+function loadState() {
+    try {
+        if (fs.existsSync(STATE_FILE)) {
+            const raw = fs.readFileSync(STATE_FILE, 'utf8');
+            const data = JSON.parse(raw);
+            Object.assign(state, data);
+            console.log('📂 Restored previous session state.');
+        }
+    } catch (err) {
+        console.error('Failed to load state file:', err.message);
+    }
+}
+
+// Load state on startup
+loadState();
+
 module.exports = {
     CONFIG,
     state,
-    saveState,
-    loadState,
     getFullState,
-    startMidnightHeartbeat,
-    checkStrategy,
+    checkDailyLimits,
     syncDailyPnlFromDB,
-    checkDailyLimits
+    saveState,
+    loadState
 };
