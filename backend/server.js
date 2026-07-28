@@ -8,7 +8,7 @@ const logger = require('./logger');
 const app = express();
 app.use(express.json());
 
-// Serve static frontend from public/
+// Serve static frontend from ../public
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // SSE endpoint
@@ -26,7 +26,7 @@ app.get('/api/logs', (req, res) => {
 
   const onChange = () => {
     const payload = store.getStatePayload();
-    if (payload.logs.length > 0 || true) {
+    if (payload.logs.length > 0) {
       res.write(`data: ${JSON.stringify(payload)}\n\n`);
     }
   };
@@ -37,9 +37,8 @@ app.get('/api/logs', (req, res) => {
   });
 });
 
-// Dummy state updates every 3 seconds to simulate ticks
+// Dummy updates for testing
 setInterval(() => {
-  // update some random price
   const metrics = store.state.marketMetrics;
   const sym = 'R_75';
   const old = metrics[sym].price;
