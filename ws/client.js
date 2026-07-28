@@ -10,8 +10,16 @@ let sseBroadcastLoop = null;
 let watchdogTimer = null;
 let settlementTimer = null;
 let pendingTrade = null;
+let reqIdCounter = 1;
 
 const subscribedSymbols = new Set();
+
+/**
+ * Generates a unique request ID for WebSocket calls
+ */
+function getNextReqId() {
+    return reqIdCounter++;
+}
 
 /**
  * Cleanly disconnects WebSocket and wipes all active intervals/timeouts
@@ -146,10 +154,45 @@ function handleIncomingMessage(data) {
             }
             break;
 
+        case 'proposal':
+            if (data.error) {
+                console.error('[WS] Proposal Error:', data.error.message);
+                state.tradeInProgress = false;
+                state.activeRealTrade = null;
+                return;
+            }
+
+            // Route manual trades triggered from routes.js
+            if (state.tradeInProgress && state.activeRealTrade && !state.activeRealTrade.contractId) {
+                const proposalId = data.proposal.id;
+                console.log(`[TRADE] Proposal received for manual trade. Executing buy ID: ${proposalId}...`);
+                
+                sendWS({
+                    buy: proposalId,
+                    price: state.activeRealTrade.stake
+                });
+
+                // Calculate duration seconds for the settlement timer buffer
+                let durationSecs = state.activeRealTrade.duration;
+                if (state.activeRealTrade.durationUnit === 't') durationSecs = state.activeRealTrade.duration * 1.5;
+                if (state.activeRealTrade.durationUnit === 'm') durationSecs = state.activeRealTrade.duration * 60;
+
+                pendingTrade = {
+                    preBalance: state.balance,
+                    stake: state.activeRealTrade.stake,
+                    durationSeconds: durationSecs,
+                    awaitingSettlement: false,
+                    contractId: null
+                };
+            }
+            break;
+
         case 'buy':
             if (data.error) {
                 console.error('[TRADE] Purchase Error:', data.error.message);
                 state.isTrading = false;
+                state.tradeInProgress = false;
+                state.activeRealTrade = null;
                 pendingTrade = null;
                 return;
             }
@@ -166,8 +209,24 @@ function handleIncomingMessage(data) {
 
         case 'tick':
             if (data.tick) {
-                state.lastTick = parseFloat(data.tick.quote);
-                state.lastDigit = parseInt(data.tick.quote.toString().slice(-1), 10);
+                const quote = parseFloat(data.tick.quote);
+                
+                // Safely extract the last digit. 
+                // Note: Consider using data.tick.pip_size to format the string strictly if trailing zeros are ever dropped.
+                const digitString = data.tick.quote.toString();
+                const digit = parseInt(digitString.slice(-1), 10);
+
+                state.lastTick = quote;
+                state.lastDigit = digit;
+                
+                // Rolling history for automated digit analysis
+                if (!state.digitHistory) state.digitHistory = [];
+                state.digitHistory.push(digit);
+                
+                // Keep the last 100 ticks in memory for bot statistical math
+                if (state.digitHistory.length > 100) {
+                    state.digitHistory.shift();
+                }
             }
             break;
 
@@ -184,9 +243,9 @@ function handleIncomingMessage(data) {
 }
 
 /**
- * Initiates a Trade with Math/Account Tracking
+ * Initiates a Trade with Math/Account Tracking (Usually called by Automated Bot)
  */
-function executeTrade({ contractType, amount, symbol, duration, durationUnit }) {
+function executeTrade({ contractType, amount, symbol, duration, durationUnit, barrier }) {
     if (state.isTrading) {
         console.warn('[TRADE] Blocked: A trade is already in progress.');
         return false;
@@ -197,7 +256,7 @@ function executeTrade({ contractType, amount, symbol, duration, durationUnit }) 
     // Estimate duration in seconds for settlement buffer calculation
     let durationSeconds = duration;
     if (durationUnit === 't') {
-        durationSeconds = duration * 1; // Approx 1s per tick on Synthetic Indices
+        durationSeconds = duration * 1.5; // Buffered slightly for tick variance
     }
 
     // Capture initial account balance BEFORE trade execution
@@ -209,21 +268,30 @@ function executeTrade({ contractType, amount, symbol, duration, durationUnit }) 
         contractId: null
     };
 
-    console.log(`[TRADE] Initiating ${contractType} | Stake: $${amount} | Pre-Balance: $${state.balance}`);
+    const barrierLog = barrier !== undefined ? ` | Barrier: ${barrier}` : '';
+    console.log(`[TRADE] Initiating ${contractType}${barrierLog} | Stake: $${amount} | Pre-Balance: $${state.balance}`);
 
-    // Send Deriv Buy Order
+    // Construct parameters payload
+    const parameters = {
+        amount: amount,
+        basis: 'stake',
+        contract_type: contractType,
+        currency: state.currency || 'USD',
+        duration: duration,
+        duration_unit: durationUnit,
+        symbol: symbol
+    };
+
+    // Inject barrier if defined (crucial for digit matches, differs, over, under)
+    if (barrier !== undefined && barrier !== null) {
+        parameters.barrier = barrier.toString();
+    }
+
+    // Send Deriv Buy Order directly via parameters
     sendWS({
         buy: 1,
         price: amount,
-        parameters: {
-            amount: amount,
-            basis: 'stake',
-            contract_type: contractType,
-            currency: state.currency || 'USD',
-            duration: duration,
-            duration_unit: durationUnit,
-            symbol: symbol
-        }
+        parameters: parameters
     });
 
     return true;
@@ -266,17 +334,21 @@ function verifyTradeSettlement(currentBalance) {
     const isWin = netProfit > 0;
 
     if (isWin) {
-        state.consecutiveLosses = 0; // Fixed: Mutates state property directly
+        state.consecutiveLosses = 0; 
         state.totalWins = (state.totalWins || 0) + 1;
         console.log(`[SETTLEMENT] WIN! Net Profit: +$${netProfit.toFixed(2)} | Balance: $${currentBalance.toFixed(2)}`);
     } else {
-        state.consecutiveLosses = (state.consecutiveLosses || 0) + 1; // Fixed: Mutates state property directly
+        state.consecutiveLosses = (state.consecutiveLosses || 0) + 1; 
         state.totalLosses = (state.totalLosses || 0) + 1;
         console.log(`[SETTLEMENT] LOSS! Net Loss: -$${pendingTrade.stake.toFixed(2)} | Consecutive Losses: ${state.consecutiveLosses}`);
     }
 
     state.totalProfit = (state.totalProfit || 0) + netProfit;
     state.isTrading = false;
+    
+    // Clear manual trade states if they were set
+    state.tradeInProgress = false;
+    state.activeRealTrade = null;
 
     // Reset pending trade
     pendingTrade = null;
@@ -300,5 +372,7 @@ module.exports = {
     connectDeriv,
     disconnectDeriv,
     executeTrade,
-    sendWS
+    sendWS,
+    send: sendWS, // Alias for routes.js compatibility
+    getNextReqId
 };
