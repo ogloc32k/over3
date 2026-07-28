@@ -67,6 +67,8 @@ document.addEventListener('DOMContentLoaded', function() {
             setTimeout(() => {
                 renderCharts();
                 timeframePreset(document.getElementById('p-session'), 'session');
+                // Update analytics stats when tab opens
+                updateAnalyticsStats();
             }, 100);
         }
         if (tabId === 'digits') {
@@ -141,6 +143,10 @@ document.addEventListener('DOMContentLoaded', function() {
         if (document.getElementById('tab-digits').classList.contains('active')) {
             renderDigitsTab();
         }
+        // Update analytics stats if visible
+        if (document.getElementById('tab-analytics').classList.contains('active')) {
+            updateAnalyticsStats();
+        }
     };
 
     function getAssetLabel(name, isMobile) {
@@ -158,6 +164,37 @@ document.addEventListener('DOMContentLoaded', function() {
             'Volatility 100 (1s) Index': 'V100 (1s)'
         };
         return shortMap[name] || name;
+    }
+
+    // =========================================================================
+    // UPDATE ANALYTICS STATS (S/R & Rise/Fall)
+    // =========================================================================
+    function updateAnalyticsStats() {
+        const metric = globalState?.marketMetrics?.[currentFocus] || null;
+        const supportEl = document.getElementById('stat-support');
+        const resistanceEl = document.getElementById('stat-resistance');
+        const riseEl = document.getElementById('stat-rise');
+        const fallEl = document.getElementById('stat-fall');
+
+        if (!supportEl || !resistanceEl || !riseEl || !fallEl) return;
+
+        if (!metric) {
+            supportEl.textContent = '--%';
+            resistanceEl.textContent = '--%';
+            riseEl.textContent = '--%';
+            fallEl.textContent = '--%';
+            return;
+        }
+
+        const supportPct = metric.supportPct !== undefined ? Math.round(metric.supportPct) : null;
+        const resistancePct = metric.resistancePct !== undefined ? Math.round(metric.resistancePct) : null;
+        const risePct = metric.risePct !== undefined ? Math.round(metric.risePct) : null;
+        const fallPct = metric.fallPct !== undefined ? Math.round(metric.fallPct) : null;
+
+        supportEl.textContent = supportPct !== null ? supportPct + '%' : '--%';
+        resistanceEl.textContent = resistancePct !== null ? resistancePct + '%' : '--%';
+        riseEl.textContent = risePct !== null ? risePct + '%' : '--%';
+        fallEl.textContent = fallPct !== null ? fallPct + '%' : '--%';
     }
 
     // =========================================================================
@@ -180,31 +217,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 chipsContainer.appendChild(chip);
             });
         }
-
-        // Rise/Fall stats
-        const risePct = activeMetric.risePct || 0;
-        const fallPct = activeMetric.fallPct || 0;
-        const riseBar = document.getElementById('riseBar');
-        const fallBar = document.getElementById('fallBar');
-        if (riseBar) {
-            const total = risePct + fallPct || 1;
-            const riseWidth = (risePct / total) * 100;
-            riseBar.style.width = riseWidth + '%';
-            riseBar.textContent = 'Rise ' + riseWidth.toFixed(1) + '%';
-        }
-        if (fallBar) {
-            const total = risePct + fallPct || 1;
-            const fallWidth = (fallPct / total) * 100;
-            fallBar.style.width = fallWidth + '%';
-            fallBar.textContent = 'Fall ' + fallWidth.toFixed(1) + '%';
-        }
-
-        // S/R Position
-        const srPos = activeMetric.srPositionPct || 50;
-        const srValue = document.getElementById('srPositionValue');
-        if (srValue) srValue.textContent = srPos.toFixed(1) + '%';
-        const srFill = document.getElementById('srPositionFill');
-        if (srFill) srFill.style.width = Math.min(100, Math.max(0, srPos)) + '%';
 
         // Digit Matrix
         const matrix = activeMetric.digitMatrix || [];
@@ -233,31 +245,23 @@ document.addEventListener('DOMContentLoaded', function() {
     // CONTROL FUNCTIONS
     // =========================================================================
     window.sendControl = function(action) {
-        fetch('/api/control', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action })
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (data.error) alert('Error: ' + data.error);
-            else if (data.message) console.log(data.message);
-        })
-        .catch(err => console.error('Control error:', err));
+        fetch('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) alert('Error: ' + data.error);
+                else if (data.message) console.log(data.message);
+            })
+            .catch(err => console.error('Control error:', err));
     };
 
     window.swapEnvironment = function() {
         const targetMode = serverMode === 'demo' ? 'real' : 'demo';
-        fetch('/api/control', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'set_mode', mode: targetMode })
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (data.error) alert('Error: ' + data.error);
-        })
-        .catch(err => console.error('Swap error:', err));
+        fetch('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'set_mode', mode: targetMode }) })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) alert('Error: ' + data.error);
+            })
+            .catch(err => console.error('Swap error:', err));
     };
 
     window.fireManual = function(type) {
@@ -271,37 +275,31 @@ document.addEventListener('DOMContentLoaded', function() {
         fetch('/api/manual-trade', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                symbol: currentFocus,
-                contractType: type,
-                duration: duration,
-                durationUnit: unit,
-                price: price
-            })
+            body: JSON.stringify({ symbol: currentFocus, contractType: type, duration: duration, durationUnit: unit, price: price })
         })
-        .then(async (response) => {
-            const text = await response.text();
-            if (!response.ok) {
-                let errMsg;
-                try {
-                    const errData = JSON.parse(text);
-                    errMsg = errData.error || 'Server error';
-                } catch (e) {
-                    errMsg = `Server responded with ${response.status}: ${text.slice(0, 100)}`;
+            .then(async (response) => {
+                const text = await response.text();
+                if (!response.ok) {
+                    let errMsg;
+                    try {
+                        const errData = JSON.parse(text);
+                        errMsg = errData.error || 'Server error';
+                    } catch (e) {
+                        errMsg = `Server responded with ${response.status}: ${text.slice(0, 100)}`;
+                    }
+                    throw new Error(errMsg);
                 }
-                throw new Error(errMsg);
-            }
-            const data = JSON.parse(text);
-            if (data.error) {
-                alert('Manual trade failed: ' + data.error);
-            } else {
-                console.log('Manual trade request sent:', data.message);
-            }
-        })
-        .catch(err => {
-            alert('Network error: ' + err.message);
-            console.error('Manual trade fetch error:', err);
-        });
+                const data = JSON.parse(text);
+                if (data.error) {
+                    alert('Manual trade failed: ' + data.error);
+                } else {
+                    console.log('Manual trade request sent:', data.message);
+                }
+            })
+            .catch(err => {
+                alert('Network error: ' + err.message);
+                console.error('Manual trade fetch error:', err);
+            });
     };
 
     window.clearLogs = function() {
@@ -337,7 +335,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 }
                 renderUI(data.state);
-                // If digits tab is active, update it
+                // Update analytics stats if analytics tab is active
+                if (document.getElementById('tab-analytics').classList.contains('active')) {
+                    updateAnalyticsStats();
+                }
                 if (document.getElementById('tab-digits').classList.contains('active')) {
                     renderDigitsTab();
                 }
@@ -400,7 +401,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // =========================================================================
-    // RENDER UI (with crash‑proof checks)
+    // RENDER UI
     // =========================================================================
     function renderUI(state) {
         try {
@@ -469,7 +470,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('f-vol').textContent = 'Vol: —';
             }
 
-            // ---- Data table (with safe checks) ----
+            // ---- Data table ----
             const tbody = document.getElementById('tableBody');
             if (!tbody) return;
             tbody.innerHTML = '';
@@ -496,7 +497,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     priceDisplay = metric.formattedPrice || formatPrice(sym, metric.price) || '—';
                     step = metric.step || 0;
 
-                    // Breakout
                     const price = metric.price;
                     const sup = metric.support;
                     const res = metric.resistance;
@@ -510,7 +510,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     }
 
-                    // Step label
                     if (step === 3) { stepLabel = 'ENTRY'; stepClass = 'step-3'; }
                     else if (step === 2) { stepLabel = 'NEAR'; stepClass = 'step-2'; }
                     else if (step === 1) { stepLabel = 'LEVEL'; stepClass = 'step-1'; }
@@ -523,7 +522,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     else if (metric.rsi !== undefined && metric.rsi < 30) rsiClass = 'oversold';
                     vol = metric.volatility !== undefined ? Number(metric.volatility).toFixed(2) + '%' : '—';
 
-                    // BB Squeeze
                     if (metric.bandwidth !== null && metric.bandwidth !== undefined) {
                         squeezeDisplay = metric.bandwidth.toFixed(2) + '%';
                         if (metric.bandwidth < 2.0) {
@@ -531,7 +529,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                     }
 
-                    // Micro Trend
                     if (metric.tickDirections && metric.tickDirections.length > 0) {
                         const dirs = metric.tickDirections.slice(-5);
                         trendHtml = dirs.map(d => {
@@ -572,7 +569,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // ---- Mobile Market View (with safe checks) ----
+    // ---- Mobile Market View ----
     function renderMobileView(state) {
         try {
             const safeState = state || {};
@@ -678,7 +675,7 @@ document.addEventListener('DOMContentLoaded', function() {
     renderUI({});
 
     // =========================================================================
-    // SETTINGS (safe)
+    // SETTINGS
     // =========================================================================
     window.loadConfig = async function() {
         try {
