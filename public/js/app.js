@@ -166,6 +166,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const activeMetric = globalState?.marketMetrics?.[currentFocus] || null;
         if (!activeMetric) return;
 
+        // Asset selector chips
         const chipsContainer = document.getElementById('digitsAssetChips');
         if (chipsContainer) {
             chipsContainer.innerHTML = '';
@@ -179,6 +180,7 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
 
+        // ---- Digit Matrix (0-9) ----
         const matrix = activeMetric.digitMatrix || [];
         const tbody = document.getElementById('digitsTableBody');
         if (tbody) {
@@ -198,6 +200,25 @@ document.addEventListener('DOMContentLoaded', function() {
                 `;
                 tbody.appendChild(tr);
             });
+        }
+
+        // ---- Last 10 Digits Stream ----
+        const streamContainer = document.getElementById('digitsStreamDigits');
+        if (streamContainer) {
+            const lastPrices = activeMetric.lastPrices || [];
+            if (lastPrices.length > 0) {
+                // We need raw price strings; if not available, fallback to formatted price
+                const rawPrices = activeMetric.rawPrices || lastPrices.map(p => p.toString());
+                const lastTen = rawPrices.slice(-10);
+                const digitsHtml = lastTen.map(raw => {
+                    const str = raw.toString();
+                    const digit = str[str.length - 1] || '?';
+                    return `<span class="stream-digit">${digit}</span>`;
+                }).join('');
+                streamContainer.innerHTML = digitsHtml || '—';
+            } else {
+                streamContainer.innerHTML = '—';
+            }
         }
     }
 
@@ -272,48 +293,76 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // =========================================================================
-    // SSE CONNECTION
+    // SSE (with auto-reconnect)
     // =========================================================================
-    const sse = new EventSource('/api/logs');
-    sse.onopen = function() { console.log('✅ SSE connected'); };
-    sse.onerror = function(err) { console.error('❌ SSE error:', err); };
-    sse.onmessage = function(e) {
-        try {
-            const data = JSON.parse(e.data);
-            if (data.event === 'analytics_delta') {
-                handleAnalyticsDelta(data.data);
-                return;
-            }
-            if (data.state) {
-                globalState = data.state;
-                if (data.state.marketMetrics) {
-                    for (const sym in data.state.marketMetrics) {
-                        const metric = data.state.marketMetrics[sym];
-                        if (metric && metric.price !== undefined) {
-                            window.currentMarketPrices[sym] = metric.price;
+    let sse = null;
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 10;
+
+    function connectSSE() {
+        if (sse) {
+            sse.close();
+            sse = null;
+        }
+        sse = new EventSource('/api/logs');
+
+        sse.onopen = function() {
+            console.log('✅ SSE connected');
+            reconnectAttempts = 0;
+        };
+
+        sse.onerror = function(err) {
+            console.warn('⚠️ SSE error:', err);
+            if (sse) sse.close();
+            const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 10000);
+            setTimeout(() => {
+                reconnectAttempts++;
+                if (reconnectAttempts <= maxReconnectAttempts) {
+                    connectSSE();
+                } else {
+                    console.error('❌ SSE max retries reached.');
+                }
+            }, delay);
+        };
+
+        sse.onmessage = function(e) {
+            try {
+                const data = JSON.parse(e.data);
+                if (data.event === 'analytics_delta') {
+                    handleAnalyticsDelta(data.data);
+                    return;
+                }
+                if (data.state) {
+                    globalState = data.state;
+                    if (data.state.marketMetrics) {
+                        for (const sym in data.state.marketMetrics) {
+                            const metric = data.state.marketMetrics[sym];
+                            if (metric && metric.price !== undefined) {
+                                window.currentMarketPrices[sym] = metric.price;
+                            }
                         }
                     }
+                    renderUI(data.state);
+                    if (document.getElementById('tab-digits').classList.contains('active')) {
+                        renderDigitsTab();
+                    }
                 }
-                renderUI(data.state);
-                if (document.getElementById('tab-digits').classList.contains('active')) {
-                    renderDigitsTab();
+                if (data.logs && data.logs.length > 0) {
+                    const box = document.getElementById('log-stream');
+                    data.logs.forEach(log => {
+                        const r = document.createElement('div');
+                        r.className = 'log-entry';
+                        r.innerHTML = `<span class="ts">[${new Date(log.time).toLocaleTimeString()}]</span><span class="msg">${log.message}</span>`;
+                        box.appendChild(r);
+                    });
+                    while (box.children.length > 200) box.removeChild(box.firstChild);
+                    box.scrollTop = box.scrollHeight;
                 }
+            } catch(err) {
+                console.error('❌ Error parsing SSE:', err);
             }
-            if (data.logs && data.logs.length > 0) {
-                const box = document.getElementById('log-stream');
-                data.logs.forEach(log => {
-                    const r = document.createElement('div');
-                    r.className = 'log-entry';
-                    r.innerHTML = `<span class="ts">[${new Date(log.time).toLocaleTimeString()}]</span><span class="msg">${log.message}</span>`;
-                    box.appendChild(r);
-                });
-                while (box.children.length > 200) box.removeChild(box.firstChild);
-                box.scrollTop = box.scrollHeight;
-            }
-        } catch(err) {
-            console.error('❌ Error parsing SSE:', err);
-        }
-    };
+        };
+    }
 
     // ---- Analytics delta handler ----
     let currentAnalyticsData = null;
@@ -357,12 +406,12 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // =========================================================================
-    // RENDER UI (throttled, with new columns)
+    // RENDER UI (throttled, no Digit column)
     // =========================================================================
     let lastRenderTime = 0;
 
     function renderUI(state) {
-        // Throttle: max 4 updates per second (250ms)
+        // Throttle: max 4 updates per second
         const now = Date.now();
         if (now - lastRenderTime < 250) return;
         lastRenderTime = now;
@@ -433,7 +482,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('f-vol').textContent = 'Vol: —';
             }
 
-            // ---- Data table (new columns) ----
+            // ---- Data table (no Digit column) ----
             const tbody = document.getElementById('tableBody');
             if (!tbody) return;
             tbody.innerHTML = '';
@@ -453,7 +502,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 let squeezeDisplay = '—';
                 let squeezeClass = '';
                 let trendHtml = '';
-                let digit = '—';
 
                 // New percentage values
                 let supportPct = null, resistancePct = null, risePct = null, fallPct = null;
@@ -504,8 +552,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         trendHtml = '—';
                     }
 
-                    digit = metric.lastDigit !== undefined && metric.lastDigit !== null ? metric.lastDigit : '—';
-
                     // ---- S/R % and R/F % ----
                     supportPct = metric.supportPct !== undefined ? Math.round(metric.supportPct) : null;
                     resistancePct = metric.resistancePct !== undefined ? Math.round(metric.resistancePct) : null;
@@ -533,7 +579,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td class="col-rsi ${rsiClass}">${rsiVal}</td>
                     <td class="col-bb-squeeze"><span class="${squeezeClass}">${squeezeDisplay}</span></td>
                     <td class="col-trend">${trendHtml}</td>
-                    <td class="col-digit">${digit}</td>
                 `;
                 tbody.appendChild(tr);
             }
@@ -546,7 +591,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // ---- Mobile Market View ----
+    // ---- Mobile Market View (no Digit) ----
     function renderMobileView(state) {
         try {
             const safeState = state || {};
@@ -1120,6 +1165,9 @@ document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.tab-bar .tab-item').forEach(b => b.classList.remove('active'));
     const defaultBarBtn = document.querySelector('.tab-bar .tab-item[data-tab="dashboard"]');
     if (defaultBarBtn) defaultBarBtn.classList.add('active');
+
+    // Start SSE connection
+    connectSSE();
 
     console.log('🚀 QUANTCORE Terminal v6.0 loaded');
 });
