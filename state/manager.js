@@ -38,19 +38,24 @@ const state = {
     totalLosses: 0,
     consecutiveLosses: 0,
 
-    // Real-Time Digit & Market Feed
-    lastTick: 0,
-    lastDigit: null,
-    digitHistory: [],           // Array of last N digits (e.g., max 100)
-    marketMetrics: {
+    // Real-Time Market Data (populated by engine from ticks)
+    marketMetrics: {},         // Per-symbol metrics: { R_75: { price, rsi, support, resistance, ... } }
+
+    // Digit Statistics (separate from market metrics)
+    digitStats: {
         digitCounts: { 0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0, 7:0, 8:0, 9:0 },
         digitPercentages: { 0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0, 7:0, 8:0, 9:0 },
         evenPercent: 50,
         oddPercent: 50,
-        overPercent: 50,        // Over 4 (5-9)
-        underPercent: 50,       // Under 5 (0-4)
+        overPercent: 50,
+        underPercent: 50,
         sampleSize: 0
     },
+
+    // Tick history (for sparklines)
+    lastTick: 0,
+    lastDigit: null,
+    digitHistory: [],
 
     // In-memory System Logs
     logs: []
@@ -58,18 +63,22 @@ const state = {
 
 /**
  * Recalculates digit distribution statistics from digitHistory
+ * (Separate from market metrics – does NOT overwrite them)
  */
-function updateMarketMetrics() {
+function updateDigitStats() {
     const history = state.digitHistory || [];
     const total = history.length;
 
-    if (total === 0) return;
+    if (total === 0) {
+        state.digitStats.sampleSize = 0;
+        return;
+    }
 
     const counts = { 0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0, 7:0, 8:0, 9:0 };
     let evens = 0;
     let odds = 0;
-    let overs = 0;   // 5, 6, 7, 8, 9
-    let unders = 0;  // 0, 1, 2, 3, 4
+    let overs = 0;
+    let unders = 0;
 
     history.forEach(d => {
         if (counts[d] !== undefined) counts[d]++;
@@ -82,7 +91,7 @@ function updateMarketMetrics() {
         percentages[i] = parseFloat(((counts[i] / total) * 100).toFixed(1));
     }
 
-    state.marketMetrics = {
+    state.digitStats = {
         digitCounts: counts,
         digitPercentages: percentages,
         evenPercent: parseFloat(((evens / total) * 100).toFixed(1)),
@@ -95,10 +104,10 @@ function updateMarketMetrics() {
 
 /**
  * Returns a comprehensive, serialized snapshot of the state
- * (Calculates live market metrics right before returning for SSE emission)
+ * Includes both marketMetrics (per-symbol) and digitStats
  */
 function getFullState() {
-    updateMarketMetrics();
+    updateDigitStats();
 
     return {
         isConnected: state.isConnected,
@@ -120,8 +129,9 @@ function getFullState() {
         consecutiveLosses: state.consecutiveLosses,
         lastTick: state.lastTick,
         lastDigit: state.lastDigit,
-        digitHistory: state.digitHistory.slice(-20), // Send last 20 ticks for UI sparklines
-        marketMetrics: state.marketMetrics,
+        digitHistory: state.digitHistory.slice(-20),
+        marketMetrics: state.marketMetrics,      // Per-symbol market data
+        digitStats: state.digitStats,             // Digit frequency statistics
         config: CONFIG
     };
 }
