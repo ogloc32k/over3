@@ -327,13 +327,22 @@ router.post('/control', (req, res) => {
 // =====================================================================
 router.post('/manual-trade', async (req, res) => {
     try {
-        const { symbol, contractType, duration, durationUnit, price } = req.body;
+        const { symbol, contractType, duration, durationUnit, barrier } = req.body;
 
         if (!symbol || !MARKETS[symbol]) {
             return res.status(400).json({ error: 'Invalid or missing symbol.' });
         }
-        if (!['CALL', 'PUT'].includes(contractType)) {
-            return res.status(400).json({ error: 'Invalid contract type. Use "CALL" or "PUT".' });
+
+        // Expanded allowed contract types
+        const validContracts = [
+            'CALL', 'PUT', 
+            'DIGITMATCH', 'DIGITDIFF', 
+            'DIGITOVER', 'DIGITUNDER', 
+            'DIGITEVEN', 'DIGITODD'
+        ];
+
+        if (!validContracts.includes(contractType)) {
+            return res.status(400).json({ error: `Invalid contract type. Use one of: ${validContracts.join(', ')}` });
         }
 
         if (state.locked) {
@@ -348,14 +357,35 @@ router.post('/manual-trade', async (req, res) => {
 
         let dur = parseInt(duration) || CONFIG.DURATION;
         let unit = durationUnit || 's';
-        if (unit === 't') { if (dur < 1) dur = 1; if (dur > 10) dur = 10; }
-        if (unit === 's') { if (dur < 5) dur = 5; if (dur > 600) dur = 600; }
-        if (unit === 'm') { if (dur < 1) dur = 1; if (dur > 10) dur = 10; }
+        const isDigitContract = contractType.startsWith('DIGIT');
+
+        // Enforce specific duration limits based on contract type
+        if (isDigitContract) {
+            if (unit !== 't') {
+                return res.status(400).json({ error: 'Digit contracts only support ticks (t) as the duration unit.' });
+            }
+            if (dur < 1 || dur > 10) {
+                return res.status(400).json({ error: 'Digit contracts require a duration between 1 and 10 ticks.' });
+            }
+        } else {
+            // Limits for standard Rise/Fall
+            if (unit === 't') { if (dur < 1) dur = 1; if (dur > 10) dur = 10; }
+            if (unit === 's') { if (dur < 5) dur = 5; if (dur > 600) dur = 600; }
+            if (unit === 'm') { if (dur < 1) dur = 1; if (dur > 10) dur = 10; }
+        }
+
+        // Validate Barriers for Digits
+        if (['DIGITMATCH', 'DIGITDIFF', 'DIGITOVER', 'DIGITUNDER'].includes(contractType)) {
+            if (barrier === undefined || barrier === null || isNaN(barrier) || barrier < 0 || barrier > 9) {
+                return res.status(400).json({ error: 'A valid barrier digit (0-9) is required for this contract.' });
+            }
+        }
 
         const rawStake = Math.max(CONFIG.MIN_STAKE, state.balance * (CONFIG.RISK_PERCENT / 100));
         state.currentStake = Math.round(Math.min(rawStake, state.balance) * 100) / 100;
 
         state.tradeInProgress = true;
+        
         state.activeRealTrade = {
             symbol,
             stake: state.currentStake,
@@ -363,7 +393,7 @@ router.post('/manual-trade', async (req, res) => {
             contractType,
             duration: dur,
             durationUnit: unit,
-            barrier: null,
+            barrier: isDigitContract ? barrier : null, 
             direction: contractType,
             entryPrice: null,
             executionTime: Date.now(),
@@ -372,7 +402,8 @@ router.post('/manual-trade', async (req, res) => {
             contractId: null
         };
 
-        send({
+        // Construct standard proposal payload
+        const proposalReq = {
             proposal: 1,
             amount: state.currentStake,
             basis: 'stake',
@@ -382,9 +413,17 @@ router.post('/manual-trade', async (req, res) => {
             duration_unit: unit,
             underlying_symbol: symbol,
             req_id: getNextReqId()
-        });
+        };
 
-        addLog(`📤 Manual ${contractType} request for ${symbol} (${dur} ${unit === 't' ? 'ticks' : unit === 's' ? 'seconds' : 'minutes'})...`);
+        // Append barrier for specific digit contracts
+        if (['DIGITMATCH', 'DIGITDIFF', 'DIGITOVER', 'DIGITUNDER'].includes(contractType)) {
+            proposalReq.barrier = barrier.toString(); // Deriv expects barrier as a string representation
+        }
+
+        send(proposalReq);
+
+        const barrierMsg = proposalReq.barrier ? ` (Barrier: ${proposalReq.barrier})` : '';
+        addLog(`📤 Manual ${contractType} request for ${symbol} | ${dur} ${unit}${barrierMsg}...`);
 
         return res.json({ success: true, message: 'Proposal requested.' });
     } catch (err) {
