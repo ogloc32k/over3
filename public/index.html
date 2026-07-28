@@ -9,152 +9,149 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <link rel="stylesheet" href="css/styles.css?v=2">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
-  <!-- ====== HEADER ====== -->
-  <header class="app-header" id="appHeader">
+  <!-- ============================================================
+     APP HEADER
+     ============================================================ -->
+  <header class="app-header">
     <div class="left">
-      <div class="app-brand">QUANTCORE<span>//</span>TERMINAL <small>v6.0</small></div>
-      <div class="header-tabs" id="headerTabs">
-        <button class="nav-tab active" data-tab="tab-dashboard">DASHBOARD</button>
-        <button class="nav-tab" data-tab="tab-logs">LOGS</button>
-        <button class="nav-tab" data-tab="tab-analytics">ANALYTICS</button>
-        <button class="nav-tab" data-tab="tab-digits">DIGITS</button>
-        <button class="nav-tab" data-tab="tab-settings">SETTINGS</button>
+      <div class="app-brand">
+        QUANTCORE<span>//</span>TERMINAL <small>v6.0</small>
       </div>
+      <nav class="header-tabs">
+        <button class="nav-tab active" data-tab="tab-dashboard">Dashboard</button>
+        <button class="nav-tab" data-tab="tab-analytics">Analytics</button>
+        <button class="nav-tab" data-tab="tab-digits">Digits</button>
+        <button class="nav-tab" data-tab="tab-logs">Logs</button>
+        <button class="nav-tab" data-tab="tab-settings">Settings</button>
+      </nav>
     </div>
     <div class="header-right">
-      <span class="header-status" id="header-status">● IDLE</span>
-      <div class="header-clock"><span id="clock-display">00:00:00</span> EAT</div>
-      <button class="theme-toggle" id="themeToggle" title="Toggle theme">🌙</button>
+      <!-- Simple vs Advanced Mode Toggle for Beginners -->
+      <button class="btn" id="modeToggleBtn" style="font-size: 11px; padding: 4px 8px;">👶 Easy Mode</button>
+      <div id="connectionStatus" class="header-status off">
+        <span class="dot"></span> Offline
+      </div>
+      <div class="header-clock" id="liveClock"><span>00:00:00</span></div>
+      <button class="theme-toggle" id="themeToggleBtn" title="Toggle Theme">🌙</button>
     </div>
   </header>
 
-  <!-- ====== BODY ====== -->
-  <div class="app-body" id="appBody">
-
-    <!-- SIDEBAR -->
+  <!-- ============================================================
+     APP BODY (SIDEBAR + MAIN)
+     ============================================================ -->
+  <div class="app-body">
+    
+    <!-- SIDEBAR CONTROLS -->
     <aside class="app-sidebar" id="appSidebar">
-      <div class="sidebar-content">
-        <div class="sidebar-metrics">
-          <div class="metric"><div class="lbl">Profile</div><div class="val blue" id="m-profile">—</div></div>
-          <div class="metric"><div class="lbl">Balance</div><div class="val blue" id="m-balance">—</div></div>
-          <div class="metric"><div class="lbl">Session</div><div class="val green" id="m-session">$0.00</div></div>
-          <div class="metric"><div class="lbl">Daily</div><div class="val green" id="m-daily">$0.00</div></div>
-          <div class="metric" style="grid-column: span 2;"><div class="lbl">Risk</div><div class="val orange" id="m-stake">$0.00</div></div>
+      <div class="sidebar-section">
+        <div class="sidebar-title">Connection</div>
+        <div class="sidebar-card">
+          <div class="form-group">
+            <label for="apiTokenInput">API Token</label>
+            <input type="password" id="apiTokenInput" placeholder="Enter Deriv Token">
+          </div>
+          <button class="btn btn-primary btn-block" id="connectBtn">Connect</button>
         </div>
-        <div class="sidebar-controls">
-          <div class="row">
-            <button class="btn start" onclick="sendControl('start')">▶ Start</button>
-            <button class="btn stop" onclick="sendControl('stop')">⏹ Stop</button>
-            <button class="btn swap" onclick="swapEnvironment()">🔄</button>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-title">Strategy Configuration</div>
+        <div class="sidebar-card">
+          <div class="form-group">
+            <label for="contractTypeSelect">Contract Type</label>
+            <select id="contractTypeSelect">
+              <option value="DIGITMATCH">Digit Match</option>
+              <option value="DIGITDIFF">Digit Differs</option>
+              <option value="DIGITOVER">Digit Over</option>
+              <option value="DIGITUNDER">Digit Under</option>
+              <option value="RISE">Rise</option>
+              <option value="FALL">Fall</option>
+            </select>
+          </div>
+
+          <!-- Dynamic Digit Prediction Input -->
+          <div class="form-group" id="digitPredictionGroup">
+            <label for="predictionInput">Target Digit Prediction (0-9)</label>
+            <input type="number" id="predictionInput" min="0" max="9" value="5">
+          </div>
+
+          <div class="form-group">
+            <label for="stakeInput">Base Stake ($)</label>
+            <input type="number" id="stakeInput" value="1.00" step="0.5">
+          </div>
+          <div class="form-group">
+            <label for="targetProfitInput">Take Profit ($)</label>
+            <input type="number" id="targetProfitInput" value="10.00" step="1.0">
+          </div>
+          <div class="form-group">
+            <label for="stopLossInput">Stop Loss ($)</label>
+            <input type="number" id="stopLossInput" value="20.00" step="1.0">
           </div>
         </div>
-        <div class="sidebar-duration">
-          <label>Dur</label>
-          <input type="number" id="manual-duration" value="7" min="1" max="10">
-          <select id="manual-unit">
-            <option value="t" selected>Ticks</option>
-            <option value="s">Sec</option>
-            <option value="m">Min</option>
-          </select>
-        </div>
-        <div class="sidebar-trade-btns">
-          <button class="btn call" onclick="fireManual('CALL')">📈 CALL</button>
-          <button class="btn put" onclick="fireManual('PUT')">📉 PUT</button>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-title">Controls</div>
+        <div class="sidebar-card">
+          <button class="btn btn-success btn-block" id="startBotBtn">Start Bot</button>
+          <button class="btn btn-danger btn-block" id="stopBotBtn" disabled>Stop Bot</button>
         </div>
       </div>
     </aside>
 
-    <!-- FIXED SIDEBAR TOGGLE -->
-    <button class="sidebar-toggle-fixed" id="sidebarToggleFixed">◀</button>
-
-    <!-- MAIN CONTENT -->
+    <!-- MAIN VIEW CONTAINER -->
     <main class="app-main">
-
-      <!-- FOCUS BAR (hidden on Analytics & Digits) -->
-      <div class="focus-bar" id="focusBar">
-        <div class="left">
-          <span class="name" id="f-name">Volatility 75 Index</span>
-          <span class="price" id="f-price">—</span>
-          <span class="sr" id="f-sr"><span class="s">S: —</span> <span class="r">R: —</span></span>
-        </div>
-        <div class="right">
-          <span id="f-breakout-badge" class="badge idle">IDLE</span>
-          <span id="f-rsi">RSI: —</span>
-          <span id="f-vol">Vol: —</span>
-        </div>
-      </div>
-
-      <!-- ====== TAB PAGES ====== -->
-
-      <!-- DASHBOARD TAB -->
-      <div id="tab-dashboard" class="tab-page active">
-        <div class="table-container desktop-table">
-          <table class="data-table" id="dataTable">
-            <thead>
-              <tr>
-                <th class="col-asset">Asset</th>
-                <th class="col-price">Price</th>
-                <th class="col-sr">S/R</th>
-                <th class="col-sr-pct">S/R %</th>
-                <th class="col-rf-pct">Rise/Fall %</th>
-                <th class="col-status">Breakout</th>
-                <th class="col-rsi">RSI</th>
-                <th class="col-bb-squeeze">BB Squeeze</th>
-                <th class="col-trend">Micro Trend</th>
-              </tr>
-            </thead>
-            <tbody id="tableBody"></tbody>
-          </table>
-        </div>
-
-        <!-- MOBILE MARKET VIEW -->
-        <div class="mobile-market-view">
-          <div class="asset-carousel" id="assetCarousel"></div>
-          <div class="asset-detail-card" id="assetDetailCard">
-            <div class="detail-header">
-              <span class="asset-name" id="mobile-asset-name">Volatility 75 Index</span>
-              <span class="asset-price" id="mobile-asset-price">—</span>
-              <span class="asset-change" id="mobile-asset-change">—</span>
+      
+      <!-- TAB 1: DASHBOARD -->
+      <section id="tab-dashboard" class="tab-page active">
+        <div class="sidebar-title" style="margin-bottom: 6px;">Live Digit & Price Feed Monitor</div>
+        
+        <!-- Easy/Child-Friendly Visual Dashboard Container -->
+        <div class="sidebar-card" style="flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 16px;">
+          
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <span style="font-size: 12px; color: var(--text-secondary);">Current Last Digit:</span>
+              <div id="liveDigitDisplay" style="font-size: 42px; font-weight: 700; color: var(--neon-blue); font-family: monospace;">-</div>
             </div>
-            <div class="detail-levels">
-              <div class="level-item"><span class="label">Support</span><span class="value" id="mobile-support">—</span></div>
-              <div class="level-item"><span class="label">Resistance</span><span class="value" id="mobile-resistance">—</span></div>
-              <div class="level-item"><span class="label">Breakout</span><span class="value" id="mobile-breakout">—</span></div>
-            </div>
-            <div class="detail-indicators">
-              <div class="indicator-item">
-                <span class="label">RSI (14)</span>
-                <div class="rsi-gauge" id="mobile-rsi-gauge"><div class="rsi-fill" style="width:50%;"></div></div>
-                <span class="value" id="mobile-rsi-value">50.0</span>
-              </div>
-              <div class="indicator-item">
-                <span class="label">Volatility</span>
-                <span class="value" id="mobile-volatility">—</span>
-              </div>
-            </div>
-            <div class="detail-tick-stream">
-              <div class="tick-label">Last Ticks</div>
-              <div class="tick-digits" id="mobile-tick-digits"></div>
+            <div style="text-align: right;">
+              <span style="font-size: 12px; color: var(--text-secondary);">Session Net Profit:</span>
+              <div id="sessionProfitDisplay" style="font-size: 24px; font-weight: 700; color: var(--green-profit);">$0.00</div>
             </div>
           </div>
-        </div>
-      </div>
 
-      <!-- LOGS TAB -->
-      <div id="tab-logs" class="tab-page">
-        <div class="log-header">
-          <span class="title">📋 Live System Audit Log</span>
-          <button class="clear-btn" onclick="clearLogs()">🗑️ Clear</button>
-        </div>
-        <div class="log-stream" id="log-stream"></div>
-      </div>
+          <!-- Interactive Clickable Digit Grid for Beginners -->
+          <div style="margin-top: 10px;">
+            <label style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px; display: block;">Tap a Target Digit to Quick-Select:</label>
+            <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;" id="digitSelectorGrid">
+              <button class="btn digit-btn" data-digit="0">0</button>
+              <button class="btn digit-btn" data-digit="1">1</button>
+              <button class="btn digit-btn" data-digit="2">2</button>
+              <button class="btn digit-btn" data-digit="3">3</button>
+              <button class="btn digit-btn" data-digit="4">4</button>
+              <button class="btn digit-btn" data-digit="5">5</button>
+              <button class="btn digit-btn" data-digit="6">6</button>
+              <button class="btn digit-btn" data-digit="7">7</button>
+              <button class="btn digit-btn" data-digit="8">8</button>
+              <button class="btn digit-btn" data-digit="9">9</button>
+            </div>
+          </div>
 
-      <!-- ANALYTICS TAB -->
-      <div id="tab-analytics" class="tab-page">
+          <div style="flex: 1; background: var(--bg-terminal); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 1px dashed var(--border-subtle);">
+            <p id="beginnerHelperText" style="color: var(--text-secondary); font-size: 13px; text-align: center;">Bot is paused. Hit <strong>Start Bot</strong> on the left panel to begin analysis.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: ANALYTICS -->
+      <section id="tab-analytics" class="tab-page">
         <div class="analytics-container">
           <div class="analytics-filter-bar">
             <span class="page-title">Session Analytics</span>
@@ -193,10 +190,10 @@
             <div class="chart-box"><div class="ch-label">Equity Curve</div><div class="ch-wrap"><canvas id="chart-line"></canvas></div></div>
           </div>
         </div>
-      </div>
+      </section>
 
-      <!-- DIGITS TAB -->
-      <div id="tab-digits" class="tab-page">
+      <!-- TAB 3: DIGITS -->
+      <section id="tab-digits" class="tab-page">
         <div class="digits-container">
           <div class="digits-asset-selector">
             <span class="digits-label">Asset:</span>
@@ -223,10 +220,19 @@
             </table>
           </div>
         </div>
-      </div>
+      </section>
 
-      <!-- SETTINGS TAB -->
-      <div id="tab-settings" class="tab-page">
+      <!-- TAB 4: LOGS -->
+      <section id="tab-logs" class="tab-page">
+        <div class="log-header">
+          <span class="title">📋 Live System Audit Log</span>
+          <button class="clear-btn" onclick="clearLogs()">🗑️ Clear</button>
+        </div>
+        <div class="log-stream" id="log-stream"></div>
+      </section>
+
+      <!-- TAB 5: SETTINGS -->
+      <section id="tab-settings" class="tab-page">
         <div class="settings-grid">
           <div class="settings-section">
             <h4>📊 Breakout Parameters</h4>
@@ -271,19 +277,36 @@
           <button class="btn-save" onclick="saveSettings()">Apply Settings</button>
           <span class="settings-status" id="settings-status"></span>
         </div>
-      </div>
+      </section>
 
     </main>
   </div>
 
-  <!-- BOTTOM TAB BAR (Mobile) -->
-  <div class="tab-bar" id="tabBar">
-    <button class="nav-tab active" data-tab="tab-dashboard"><span class="icon">📊</span><span class="label">Markets</span></button>
-    <button class="nav-tab" data-tab="tab-logs"><span class="icon">📋</span><span class="label">Logs</span></button>
-    <button class="nav-tab" data-tab="tab-analytics"><span class="icon">📈</span><span class="label">Analytics</span></button>
-    <button class="nav-tab" data-tab="tab-digits"><span class="icon">🔢</span><span class="label">Digits</span></button>
-    <button class="nav-tab" data-tab="tab-settings"><span class="icon">⚙️</span><span class="label">Settings</span></button>
-  </div>
+  <!-- ============================================================
+     BOTTOM TAB BAR (MOBILE VIEW)
+     ============================================================ -->
+  <nav class="tab-bar">
+    <button class="nav-tab active" data-tab="tab-dashboard">
+      <span class="icon">🏠</span>
+      <span>Dashboard</span>
+    </button>
+    <button class="nav-tab" data-tab="tab-analytics">
+      <span class="icon">📈</span>
+      <span>Analytics</span>
+    </button>
+    <button class="nav-tab" data-tab="tab-digits">
+      <span class="icon">🔢</span>
+      <span>Digits</span>
+    </button>
+    <button class="nav-tab" data-tab="tab-logs">
+      <span class="icon">📋</span>
+      <span>Logs</span>
+    </button>
+    <button class="nav-tab" data-tab="tab-settings">
+      <span class="icon">⚙️</span>
+      <span>Settings</span>
+    </button>
+  </nav>
 
   <!-- CACHE‑BUSTED SCRIPT -->
   <script src="js/app.js?v=2"></script>
