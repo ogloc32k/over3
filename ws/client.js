@@ -16,6 +16,11 @@ const subscribedSymbols = new Set();
 
 const engine = new MultiMarketPipeline(Object.keys(MARKETS));
 
+// ---- Expose engine globally for Digits tab ----
+if (typeof window !== 'undefined') {
+    window.engine = engine;
+}
+
 // ---- Protected send ----
 function send(msg) {
     if (derivWs && derivWs.readyState === WebSocket.OPEN) {
@@ -150,9 +155,8 @@ function handleMessage(msg) {
     if (msg.msg_type === 'history') {
         const symbol = msg.echo_req.ticks_history;
         const prices = msg.history.prices.map(p => parseFloat(p));
-        // We don't have raw prices for history, but we can store only numbers.
-        // For digits, we'll rely on the raw price from live ticks.
-        prices.forEach(p => engine.feed(symbol, p, p.toString())); // pass raw as string
+        // Pass raw price as string (though history ticks are older)
+        prices.forEach(p => engine.feed(symbol, p, p.toString()));
         addLog(`✅ History synchronized for ${symbol}`);
         return;
     }
