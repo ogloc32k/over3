@@ -1,5 +1,5 @@
 const { CONFIG } = require('../state/manager');
-const { formatMarketPrice } = require('../markets/definitions');
+const { formatMarketPrice, extractLastDigit } = require('../markets/definitions');
 
 const BUFFER_CAPACITY = 2000;
 const BUFFER_CLEANUP_THRESHOLD = 2200;
@@ -12,8 +12,7 @@ class MultiMarketPipeline {
         this.diffHistory = {};
         this.rsiState = {};
         this.computeDigits = false;
-        // Cache for digit stats to avoid recomputation
-        this.digitStatsCache = {};
+
         for (const symbol of symbols) {
             this.buffers[symbol] = [];
             this.rawBuffers[symbol] = [];
@@ -23,74 +22,73 @@ class MultiMarketPipeline {
         }
     }
 
+    // ---------- Mathematical Helpers ----------
     _sma(arr, period) {
         if (arr.length < period) return null;
-        const slice = arr.slice(-period);
-        return slice.reduce((a,b) => a+b, 0) / period;
+        let sum = 0;
+        for (let i = arr.length - period; i < arr.length; i++) sum += arr[i];
+        return sum / period;
     }
 
-    _stdDev(arr, period) {
-        if (arr.length < period) return 0;
-        const slice = arr.slice(-period);
-        const mean = slice.reduce((a,b) => a+b, 0) / period;
-        const squaredDiffs = slice.map(x => Math.pow(x - mean, 2));
-        return Math.sqrt(squaredDiffs.reduce((a,b) => a+b, 0) / period);
+    _stdDev(arr, period, mean) {
+        if (arr.length < period || mean === null) return 0;
+        let sumSq = 0;
+        for (let i = arr.length - period; i < arr.length; i++) {
+            sumSq += Math.pow(arr[i] - mean, 2);
+        }
+        return Math.sqrt(sumSq / period);
     }
 
     _rsi(arr, period, symbol) {
         if (arr.length < period + 1) return 50;
         const state = this.rsiState[symbol];
-        const slice = arr.slice(-period - 1);
 
         if (!state.initialized) {
             let gains = 0, losses = 0;
-            for (let i = 1; i < slice.length; i++) {
-                const diff = slice[i] - slice[i-1];
+            const startIdx = arr.length - period - 1;
+            for (let i = startIdx + 1; i < arr.length; i++) {
+                const diff = arr[i] - arr[i - 1];
                 if (diff >= 0) gains += diff;
                 else losses += Math.abs(diff);
             }
             state.avgGain = gains / period;
             state.avgLoss = losses / period;
             state.initialized = true;
-            if (state.avgLoss === 0) return 100;
-            const rs = state.avgGain / state.avgLoss;
-            return 100 - (100 / (1 + rs));
+        } else {
+            const diff = arr[arr.length - 1] - arr[arr.length - 2];
+            const gain = diff >= 0 ? diff : 0;
+            const loss = diff < 0 ? Math.abs(diff) : 0;
+
+            const alpha = 1 / period;
+            state.avgGain = (state.avgGain * (1 - alpha)) + (gain * alpha);
+            state.avgLoss = (state.avgLoss * (1 - alpha)) + (loss * alpha);
         }
-
-        const lastPrice = arr[arr.length - 2];
-        const currentPrice = arr[arr.length - 1];
-        const diff = currentPrice - lastPrice;
-        let gain = 0, loss = 0;
-        if (diff >= 0) gain = diff;
-        else loss = Math.abs(diff);
-
-        const alpha = 1 / period;
-        state.avgGain = (state.avgGain * (1 - alpha)) + (gain * alpha);
-        state.avgLoss = (state.avgLoss * (1 - alpha)) + (loss * alpha);
 
         if (state.avgLoss === 0) return 100;
         const rs = state.avgGain / state.avgLoss;
         return 100 - (100 / (1 + rs));
     }
 
-    _bollinger(arr, period, stdDev) {
+    _bollinger(arr, period, stdDevMultiplier) {
         const middle = this._sma(arr, period);
         if (middle === null) return { upper: null, lower: null, middle: null };
-        const std = this._stdDev(arr, period);
+        const std = this._stdDev(arr, period, middle);
         return {
-            upper: middle + (stdDev * std),
-            lower: middle - (stdDev * std),
-            middle: middle
+            upper: middle + (stdDevMultiplier * std),
+            lower: middle - (stdDevMultiplier * std),
+            middle
         };
     }
 
     _volatility(arr, period) {
         if (arr.length < period) return 0;
-        const slice = arr.slice(-period);
-        const min = Math.min(...slice);
-        const max = Math.max(...slice);
-        if (min === 0) return 0;
-        return (max - min) / min * 100;
+        let min = Infinity, max = -Infinity;
+        for (let i = arr.length - period; i < arr.length; i++) {
+            const val = arr[i];
+            if (val < min) min = val;
+            if (val > max) max = val;
+        }
+        return min === 0 ? 0 : ((max - min) / min) * 100;
     }
 
     _findSupportResistance(window) {
@@ -98,72 +96,66 @@ class MultiMarketPipeline {
             const price = window[window.length - 1];
             return { support: price * 0.98, resistance: price * 1.02 };
         }
-        const min = Math.min(...window);
-        const max = Math.max(...window);
+        let min = Infinity, max = -Infinity;
+        for (let i = 0; i < window.length; i++) {
+            const val = window[i];
+            if (val < min) min = val;
+            if (val > max) max = val;
+        }
         return { support: min, resistance: max };
     }
 
-    // ---- Helper: symbol decimals ----
-    _getSymbolDecimals(symbol) {
-        const map = {
-            'R_10': 2, '1HZ10V': 2,
-            'R_25': 3, '1HZ25V': 2,
-            'R_50': 4, '1HZ50V': 2,
-            'R_75': 4, '1HZ75V': 2,
-            'R_100': 2, '1HZ100V': 2
-        };
-        return map[symbol] !== undefined ? map[symbol] : 2;
-    }
-
-    // ---- Safe digit extraction from price (number or string) ----
-    _extractSafeDigit(price, symbol) {
-        if (price === null || price === undefined) return 0;
-        const decimals = this._getSymbolDecimals(symbol);
-        const formatted = Number(price).toFixed(decimals);
-        const lastChar = formatted.slice(-1);
-        const digit = parseInt(lastChar, 10);
-        return isNaN(digit) ? 0 : digit;
-    }
-
-    // ---- Compute digit stats from buffer ----
+    // ---------- High-Performance Digit Statistics ($O(N)$ Single Pass) ----------
     getDigitStats(symbol) {
         const buf = this.buffers[symbol];
-        if (!buf || buf.length === 0) {
-            return null;
-        }
+        if (!buf || buf.length === 0) return null;
+
         const total = buf.length;
-        const digits = buf.map(price => this._extractSafeDigit(price, symbol));
+        const counts = new Array(10).fill(0);
 
-        const counts = Array(10).fill(0);
-        digits.forEach(d => counts[d]++);
+        // Pass 1: Tally counts ($O(N)$)
+        for (let i = 0; i < total; i++) {
+            const digit = extractLastDigit(symbol, buf[i]);
+            counts[digit]++;
+        }
 
-        const matches = counts.map(c => ((c / total) * 100).toFixed(1) + '%');
-        const differs = counts.map(c => (((total - c) / total) * 100).toFixed(1) + '%');
+        const matches = new Array(10);
+        const differs = new Array(10);
+        const over = new Array(10);
+        const under = new Array(10);
 
-        const over = Array(10).fill(0);
-        const under = Array(10).fill(0);
+        // Cumulative counts for fast probability lookup
+        let cumulativeUnder = 0;
         for (let d = 0; d <= 9; d++) {
-            const overCount = digits.filter(val => val > d).length;
-            const underCount = digits.filter(val => val < d).length;
-            over[d] = ((overCount / total) * 100).toFixed(1) + '%';
-            under[d] = ((underCount / total) * 100).toFixed(1) + '%';
+            under[d] = ((cumulativeUnder / total) * 100).toFixed(1) + '%';
+            cumulativeUnder += counts[d];
+
+            const matchPct = (counts[d] / total) * 100;
+            matches[d] = matchPct.toFixed(1) + '%';
+            differs[d] = (100 - matchPct).toFixed(1) + '%';
+        }
+
+        let cumulativeOver = 0;
+        for (let d = 9; d >= 0; d--) {
+            over[d] = ((cumulativeOver / total) * 100).toFixed(1) + '%';
+            cumulativeOver += counts[d];
         }
 
         return { over, under, matches, differs };
     }
 
-    // ---- feed() ----
+    // ---------- Main Feed Method ----------
     feed(symbol, price, rawPrice) {
         const buf = this.buffers[symbol];
         buf.push(price);
 
-        // Store raw price strings (keep last 10)
         const rawBuf = this.rawBuffers[symbol];
         if (rawPrice !== undefined) {
             rawBuf.push(rawPrice);
             if (rawBuf.length > 10) rawBuf.shift();
         }
 
+        // Buffer memory maintenance
         if (buf.length > BUFFER_CLEANUP_THRESHOLD) {
             this.buffers[symbol] = buf.slice(-BUFFER_CAPACITY);
         }
@@ -171,48 +163,33 @@ class MultiMarketPipeline {
         this.lastPrices[symbol] = price;
 
         const analysisWindow = Math.min(CONFIG.ANALYSIS_WINDOW, buf.length);
+        
+        // Warmup check
         if (analysisWindow < 50) {
-            const result = {
+            return {
                 symbol, price,
-                rawPrice: rawPrice,
+                rawPrice,
                 rawPrices: rawBuf.slice(),
                 formattedPrice: formatMarketPrice(symbol, price),
                 risePct: 0, fallPct: 0,
-                supportPct: 50, resistancePct: 50,
-                rsi: 50,
-                bbUpper: null, bbLower: null, bbMiddle: null,
-                bandwidth: null,
-                support: null, resistance: null,
-                isBreakout: false, isBreakdown: false,
-                step: 0, score: 0,
-                volatility: 0,
-                lastPrices: buf.slice(-5),
-                tickDirections: [],
-                lastDigit: null,
-                digitMatrix: null,
-                conditions: { breakout: false, rsi: false, bollinger: false, volatility: false, ma: false },
-                maDiff: 0,
-                maDiffExpanding: false,
-                maDiffTwoTicksAgo: 0,
-                maDiffExpanding2Tick: false
+                rsi: 50, volatility: 0,
+                lastDigit: rawPrice ? parseInt(rawPrice.slice(-1), 10) : extractLastDigit(symbol, price),
+                digitStats: this.computeDigits ? this.getDigitStats(symbol) : null
             };
-            // Also attach digitStats if computed
-            if (this.computeDigits) {
-                const stats = this.getDigitStats(symbol);
-                if (stats) result.digitStats = stats;
-            }
-            return result;
         }
 
         const window = buf.slice(-analysisWindow);
+        
+        // Price direction counts
         let rises = 0, falls = 0;
         for (let i = 1; i < window.length; i++) {
-            if (window[i] > window[i-1]) rises++;
-            else if (window[i] < window[i-1]) falls++;
+            if (window[i] > window[i - 1]) rises++;
+            else if (window[i] < window[i - 1]) falls++;
         }
         const risePct = (rises / window.length) * 100;
         const fallPct = (falls / window.length) * 100;
 
+        // Indicators
         const fastMA = this._sma(buf, 8);
         const slowMA = this._sma(buf, 21);
         const vol = this._volatility(buf, 20);
@@ -220,171 +197,86 @@ class MultiMarketPipeline {
         const rsi = this._rsi(buf, CONFIG.RSI_PERIOD, symbol);
         const sr = this._findSupportResistance(window);
 
-        // ---- Bandwidth ----
         let bandwidth = null;
-        if (bb.middle !== null && bb.middle !== 0) {
-            bandwidth = ((bb.upper - bb.lower) / bb.middle) * 100;
-        }
+        if (bb.middle) bandwidth = ((bb.upper - bb.lower) / bb.middle) * 100;
 
-        // ---- S/R Position % ----
-        let supportPct = 50;
-        let resistancePct = 50;
-        if (sr.support !== null && sr.resistance !== null && sr.resistance !== sr.support) {
-            supportPct = ((price - sr.support) / (sr.resistance - sr.support)) * 100;
-            supportPct = Math.min(100, Math.max(0, supportPct));
-            resistancePct = 100 - supportPct;
-        }
-
-        // ---- MA diff ----
         let maDiff = 0;
-        if (fastMA !== null && slowMA !== null) {
-            maDiff = ((fastMA - slowMA) / price) * 100;
-        }
+        if (fastMA !== null && slowMA !== null) maDiff = ((fastMA - slowMA) / price) * 100;
+
         const history = this.diffHistory[symbol] || [];
         history.push(maDiff);
         if (history.length > 3) history.shift();
         this.diffHistory[symbol] = history;
 
-        let maDiffTwoTicksAgo = 0;
-        let maDiffExpanding2Tick = false;
-        if (history.length >= 3) {
-            const twoTicksAgo = history[history.length - 3];
-            maDiffTwoTicksAgo = twoTicksAgo;
-            if (Math.abs(maDiff) > Math.abs(twoTicksAgo)) {
-                maDiffExpanding2Tick = true;
-            }
-        }
+        const maDiffExpanding = history.length >= 2 && Math.abs(maDiff) > Math.abs(history[history.length - 2]);
 
-        let maDiffExpanding = false;
-        if (history.length >= 2) {
-            const prev = history[history.length - 2];
-            if (Math.abs(maDiff) > Math.abs(prev)) {
-                maDiffExpanding = true;
-            }
-        }
+        // Last digit extraction (prefer raw string over float)
+        const lastDigit = rawPrice ? parseInt(rawPrice.slice(-1), 10) : extractLastDigit(symbol, price);
 
-        // ---- Tick directions (last 5) ----
-        const lastPrices = buf.slice(-6);
-        const tickDirections = [];
-        if (lastPrices.length >= 2) {
-            for (let i = 1; i < lastPrices.length; i++) {
-                const diff = lastPrices[i] - lastPrices[i-1];
-                if (diff > 0) tickDirections.push(1);
-                else if (diff < 0) tickDirections.push(-1);
-                else tickDirections.push(0);
-            }
-            while (tickDirections.length > 5) tickDirections.shift();
-        }
-
-        // ---- Last digit from raw string ----
-        const lastDigit = rawPrice ? parseInt(rawPrice[rawPrice.length - 1]) : null;
-
-        // ---- Digit Matrix (only if enabled) ----
+        // Digit Matrix calculation ($O(N)$ pass)
         let digitMatrix = null;
         let digitStats = null;
         if (this.computeDigits) {
-            // Compute matrix from window (array of numbers)
-            const digitCounts = Array(10).fill(0);
-            window.forEach(p => {
-                const d = this._extractSafeDigit(p, symbol);
-                digitCounts[d]++;
-            });
-            const totalTicks = window.length;
-            digitMatrix = [];
-            for (let d = 0; d <= 9; d++) {
-                const matches = (digitCounts[d] / totalTicks) * 100;
-                const differs = 100 - matches;
-                let overCount = 0, underCount = 0;
-                window.forEach(p => {
-                    const digit = this._extractSafeDigit(p, symbol);
-                    if (digit > d) overCount++;
-                    else if (digit < d) underCount++;
-                });
-                const overPct = (overCount / totalTicks) * 100;
-                const underPct = (underCount / totalTicks) * 100;
-                digitMatrix.push({
-                    digit: d,
-                    matches: matches,
-                    differs: differs,
-                    over: overPct,
-                    under: underPct
-                });
-            }
-            // Also get the stats object
             digitStats = this.getDigitStats(symbol);
+            
+            const counts = new Array(10).fill(0);
+            for (let i = 0; i < window.length; i++) {
+                counts[extractLastDigit(symbol, window[i])]++;
+            }
+
+            digitMatrix = [];
+            const totalTicks = window.length;
+            let cumulativeUnder = 0;
+
+            for (let d = 0; d <= 9; d++) {
+                const matches = (counts[d] / totalTicks) * 100;
+                const differs = 100 - matches;
+                const underPct = (cumulativeUnder / totalTicks) * 100;
+                cumulativeUnder += counts[d];
+
+                digitMatrix.push({ digit: d, matches, differs, under: underPct, over: 0 });
+            }
+
+            let cumulativeOver = 0;
+            for (let d = 9; d >= 0; d--) {
+                digitMatrix[d].over = (cumulativeOver / totalTicks) * 100;
+                cumulativeOver += counts[d];
+            }
         }
 
-        // ---- Breakout conditions ----
+        // Trading Signals
         const isBreakout = sr.resistance ? price > sr.resistance * 1.001 : false;
         const isBreakdown = sr.support ? price < sr.support * 0.999 : false;
 
-        const condBreakout = isBreakout;
         const condRSI = rsi >= 50 && rsi <= 85;
         const condBollinger = bb.upper !== null && price >= bb.upper * 0.999;
         const condVolatility = vol >= CONFIG.MIN_VOLATILITY_PERCENT;
+        const condMA = maDiffExpanding && Math.abs(maDiff) >= (CONFIG.MA_DIFF_THRESHOLD || 0.08);
 
-        const condBreakdown = isBreakdown;
-        const condRSIPut = rsi >= 15 && rsi <= 50;
-        const condBollingerPut = bb.lower !== null && price <= bb.lower * 1.001;
-        const condVolatilityPut = vol >= CONFIG.MIN_VOLATILITY_PERCENT;
+        const callReady = isBreakout && condRSI && condBollinger && condVolatility && condMA;
+        const putReady = isBreakdown && (rsi >= 15 && rsi <= 50) && (bb.lower !== null && price <= bb.lower * 1.001) && condVolatility && condMA;
 
-        const callReady = condBreakout && condRSI && condBollinger && condVolatility;
-        const putReady = condBreakdown && condRSIPut && condBollingerPut && condVolatilityPut;
-
-        let step = 0, score = 0;
-        if (callReady || putReady) {
-            step = 3;
-            score = vol;
-        } else if ((condBreakout || condBreakdown) && (condRSI || condRSIPut) && (condBollinger || condBollingerPut)) {
-            step = 2;
-            score = vol * 0.5;
-        } else if (sr.support || sr.resistance) {
-            step = 1;
-            score = vol * 0.3;
-        }
-
-        const result = {
+        return {
             symbol, price,
-            rawPrice: rawPrice,
+            rawPrice,
             rawPrices: rawBuf.slice(),
             formattedPrice: formatMarketPrice(symbol, price),
             risePct, fallPct,
-            supportPct, resistancePct,
-            rsi,
-            bbUpper: bb.upper,
-            bbLower: bb.lower,
-            bbMiddle: bb.middle,
-            bandwidth: bandwidth,
-            support: sr.support,
-            resistance: sr.resistance,
+            rsi, volatility: vol,
+            bbUpper: bb.upper, bbLower: bb.lower, bbMiddle: bb.middle, bandwidth,
+            support: sr.support, resistance: sr.resistance,
             isBreakout, isBreakdown,
-            step, score,
-            volatility: vol,
-            lastPrices: buf.slice(-5),
-            tickDirections: tickDirections,
-            lastDigit: lastDigit,
-            digitMatrix: digitMatrix,
-            digitStats: digitStats,
-            conditions: {
-                breakout: condBreakout || condBreakdown,
-                rsi: condRSI || condRSIPut,
-                bollinger: condBollinger || condBollingerPut,
-                volatility: condVolatility || condVolatilityPut,
-                ma: true
-            },
-            condValues: {
-                rsiValue: rsi,
-                volValue: vol,
-                maValue: maDiff
-            },
+            lastDigit, digitMatrix, digitStats,
             callReady, putReady,
-            maDiff: maDiff,
-            maDiffExpanding: maDiffExpanding,
-            maDiffTwoTicksAgo: maDiffTwoTicksAgo,
-            maDiffExpanding2Tick: maDiffExpanding2Tick
+            maDiff, maDiffExpanding,
+            conditions: {
+                breakout: isBreakout || isBreakdown,
+                rsi: condRSI,
+                bollinger: condBollinger,
+                volatility: condVolatility,
+                ma: condMA
+            }
         };
-
-        return result;
     }
 }
 
