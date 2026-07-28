@@ -1,11 +1,14 @@
+console.log('[WS] client.js loaded'); // <-- Add this at the very top
+
 const WebSocket = require('ws');
 const { state, CONFIG, getFullState } = require('../state/manager');
 const { broadcastSSE } = require('../api/sse');
 const { MARKETS } = require('../markets/definitions');
 const MultiMarketPipeline = require('../pipeline/engine');
 
-// ---- Engine instance ----
+console.log('[WS] Creating engine...');
 const engine = new MultiMarketPipeline(Object.keys(MARKETS));
+console.log('[WS] Engine created.');
 
 // ---- Module state ----
 let derivWs = null;
@@ -32,6 +35,7 @@ function sendWS(payload) {
 
 // ---- Disconnect & cleanup ----
 function disconnectDeriv() {
+    console.log('[WS] disconnectDeriv() called');
     state.isConnected = false;
     if (keepAliveLoop) clearInterval(keepAliveLoop);
     if (sseBroadcastLoop) clearInterval(sseBroadcastLoop);
@@ -48,6 +52,7 @@ function disconnectDeriv() {
 
 // ---- Connect to Deriv ----
 function connectDeriv() {
+    console.log('[WS] connectDeriv() called');
     disconnectDeriv();
     const appId = CONFIG.APP_ID || 'missing';
     console.log(`[WS] Connecting to Deriv with App ID: ${appId}`);
@@ -70,7 +75,6 @@ function connectDeriv() {
     derivWs.on('message', (raw) => {
         try {
             const data = JSON.parse(raw);
-            // Log all messages for debugging (only if not ping)
             if (data.msg_type !== 'ping') {
                 console.log(`[WS] Received: ${data.msg_type}`);
             }
@@ -145,14 +149,12 @@ function handleMessage(data) {
                 const symbol = data.tick.symbol;
                 const price = parseFloat(data.tick.quote);
                 console.log(`[TICK] ${symbol} @ ${price}`);
-                // Feed the engine and update market metrics
                 const metric = engine.feed(symbol, price);
                 if (metric) {
                     state.marketMetrics[symbol] = metric;
                 } else {
                     console.warn(`[TICK] engine.feed returned null for ${symbol}`);
                 }
-                // Broadcast state update on each tick (throttled by interval anyway)
             }
             break;
 
@@ -163,7 +165,6 @@ function handleMessage(data) {
                 state.activeRealTrade = null;
                 return;
             }
-            // Manual trade flow (from routes)
             if (state.tradeInProgress && state.activeRealTrade && !state.activeRealTrade.contractId) {
                 const proposalId = data.proposal.id;
                 console.log(`[TRADE] Executing buy for proposal ${proposalId}`);
@@ -200,7 +201,6 @@ function handleMessage(data) {
             break;
 
         case 'ping':
-            // ignore
             break;
 
         default:
@@ -249,7 +249,7 @@ function verifyTradeSettlement(currentBalance) {
     broadcastSSE({ state: getFullState() });
 }
 
-// ---- Execute a trade (called by bot or manual) ----
+// ---- Execute a trade ----
 function executeTrade({ contractType, amount, symbol, duration, durationUnit, barrier }) {
     if (state.isTrading) {
         console.warn('[TRADE] Already in progress.');
