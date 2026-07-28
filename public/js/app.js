@@ -67,8 +67,6 @@ document.addEventListener('DOMContentLoaded', function() {
             setTimeout(() => {
                 renderCharts();
                 timeframePreset(document.getElementById('p-session'), 'session');
-                // Update analytics stats when tab opens
-                updateAnalyticsStats();
             }, 100);
         }
         if (tabId === 'digits') {
@@ -139,13 +137,8 @@ document.addEventListener('DOMContentLoaded', function() {
         document.querySelectorAll('.asset-chip').forEach(el => el.classList.remove('active'));
         const chip = document.querySelector(`.asset-chip[data-symbol="${sym}"]`);
         if (chip) chip.classList.add('active');
-        // Also update digits tab if visible
         if (document.getElementById('tab-digits').classList.contains('active')) {
             renderDigitsTab();
-        }
-        // Update analytics stats if visible
-        if (document.getElementById('tab-analytics').classList.contains('active')) {
-            updateAnalyticsStats();
         }
     };
 
@@ -167,44 +160,12 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // =========================================================================
-    // UPDATE ANALYTICS STATS (S/R & Rise/Fall)
-    // =========================================================================
-    function updateAnalyticsStats() {
-        const metric = globalState?.marketMetrics?.[currentFocus] || null;
-        const supportEl = document.getElementById('stat-support');
-        const resistanceEl = document.getElementById('stat-resistance');
-        const riseEl = document.getElementById('stat-rise');
-        const fallEl = document.getElementById('stat-fall');
-
-        if (!supportEl || !resistanceEl || !riseEl || !fallEl) return;
-
-        if (!metric) {
-            supportEl.textContent = '--%';
-            resistanceEl.textContent = '--%';
-            riseEl.textContent = '--%';
-            fallEl.textContent = '--%';
-            return;
-        }
-
-        const supportPct = metric.supportPct !== undefined ? Math.round(metric.supportPct) : null;
-        const resistancePct = metric.resistancePct !== undefined ? Math.round(metric.resistancePct) : null;
-        const risePct = metric.risePct !== undefined ? Math.round(metric.risePct) : null;
-        const fallPct = metric.fallPct !== undefined ? Math.round(metric.fallPct) : null;
-
-        supportEl.textContent = supportPct !== null ? supportPct + '%' : '--%';
-        resistanceEl.textContent = resistancePct !== null ? resistancePct + '%' : '--%';
-        riseEl.textContent = risePct !== null ? risePct + '%' : '--%';
-        fallEl.textContent = fallPct !== null ? fallPct + '%' : '--%';
-    }
-
-    // =========================================================================
     // DIGITS TAB RENDER
     // =========================================================================
     function renderDigitsTab() {
         const activeMetric = globalState?.marketMetrics?.[currentFocus] || null;
         if (!activeMetric) return;
 
-        // Update asset chips
         const chipsContainer = document.getElementById('digitsAssetChips');
         if (chipsContainer) {
             chipsContainer.innerHTML = '';
@@ -218,7 +179,6 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
 
-        // Digit Matrix
         const matrix = activeMetric.digitMatrix || [];
         const tbody = document.getElementById('digitsTableBody');
         if (tbody) {
@@ -335,10 +295,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 }
                 renderUI(data.state);
-                // Update analytics stats if analytics tab is active
-                if (document.getElementById('tab-analytics').classList.contains('active')) {
-                    updateAnalyticsStats();
-                }
                 if (document.getElementById('tab-digits').classList.contains('active')) {
                     renderDigitsTab();
                 }
@@ -401,9 +357,16 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // =========================================================================
-    // RENDER UI
+    // RENDER UI (throttled, with new columns)
     // =========================================================================
+    let lastRenderTime = 0;
+
     function renderUI(state) {
+        // Throttle: max 4 updates per second (250ms)
+        const now = Date.now();
+        if (now - lastRenderTime < 250) return;
+        lastRenderTime = now;
+
         try {
             const safeState = state || {};
             const tradingMode = safeState.tradingMode || 'demo';
@@ -420,12 +383,12 @@ document.addEventListener('DOMContentLoaded', function() {
             serverMode = tradingMode;
 
             const header = document.getElementById('header-status');
-            const now = Date.now();
+            const nowTime = Date.now();
             if (locked) {
                 if (active) { header.textContent = '● PAUSED'; header.className = 'header-status paused'; }
                 else { header.textContent = '● LOCKED'; header.className = 'header-status off'; }
             } else if (active) {
-                const remaining = Math.max(0, Math.ceil((lastTriggerTime + 30000 - now) / 1000));
+                const remaining = Math.max(0, Math.ceil((lastTriggerTime + 30000 - nowTime) / 1000));
                 let cooldownText = remaining > 0 ? `⏳${remaining}s` : '';
                 let lockText = tradeInProgress ? '🔒' : '';
                 header.innerHTML = `● ARMED ${cooldownText ? `<span class="cooldown">${cooldownText}</span>` : ''} ${lockText ? `<span class="lock">${lockText}</span>` : ''}`;
@@ -470,7 +433,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('f-vol').textContent = 'Vol: —';
             }
 
-            // ---- Data table ----
+            // ---- Data table (new columns) ----
             const tbody = document.getElementById('tableBody');
             if (!tbody) return;
             tbody.innerHTML = '';
@@ -487,11 +450,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 let breakoutLabel = '⚪ RANGE';
                 let breakoutClass = 'badge-range';
                 let rsiVal = '—', rsiClass = '';
-                let vol = '—';
                 let squeezeDisplay = '—';
                 let squeezeClass = '';
                 let trendHtml = '';
                 let digit = '—';
+
+                // New percentage values
+                let supportPct = null, resistancePct = null, risePct = null, fallPct = null;
 
                 if (metric) {
                     priceDisplay = metric.formattedPrice || formatPrice(sym, metric.price) || '—';
@@ -520,7 +485,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     rsiVal = metric.rsi !== undefined ? Number(metric.rsi).toFixed(1) : '—';
                     if (metric.rsi !== undefined && metric.rsi > 70) rsiClass = 'overbought';
                     else if (metric.rsi !== undefined && metric.rsi < 30) rsiClass = 'oversold';
-                    vol = metric.volatility !== undefined ? Number(metric.volatility).toFixed(2) + '%' : '—';
 
                     if (metric.bandwidth !== null && metric.bandwidth !== undefined) {
                         squeezeDisplay = metric.bandwidth.toFixed(2) + '%';
@@ -541,7 +505,20 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
 
                     digit = metric.lastDigit !== undefined && metric.lastDigit !== null ? metric.lastDigit : '—';
+
+                    // ---- S/R % and R/F % ----
+                    supportPct = metric.supportPct !== undefined ? Math.round(metric.supportPct) : null;
+                    resistancePct = metric.resistancePct !== undefined ? Math.round(metric.resistancePct) : null;
+                    risePct = metric.risePct !== undefined ? Math.round(metric.risePct) : null;
+                    fallPct = metric.fallPct !== undefined ? Math.round(metric.fallPct) : null;
                 }
+
+                const srPctDisplay = (supportPct !== null && resistancePct !== null)
+                    ? `<span style="color:#10b981;">${supportPct}%</span> / <span style="color:#ef4444;">${resistancePct}%</span>`
+                    : '—';
+                const rfPctDisplay = (risePct !== null && fallPct !== null)
+                    ? `<span style="color:#10b981;">${risePct}%</span> / <span style="color:#ef4444;">${fallPct}%</span>`
+                    : '—';
 
                 const tr = document.createElement('tr');
                 tr.className = `${isActive ? 'active' : ''} ${stepClass}`;
@@ -550,13 +527,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td class="col-asset">${MARKETS_CFG[sym]}</td>
                     <td class="col-price">${priceDisplay}</td>
                     <td class="col-sr"><span class="s">${support}</span> / <span class="r">${resistance}</span></td>
+                    <td class="col-sr-pct">${srPctDisplay}</td>
+                    <td class="col-rf-pct">${rfPctDisplay}</td>
                     <td class="col-status"><span class="${breakoutClass}">${breakoutLabel}</span></td>
                     <td class="col-rsi ${rsiClass}">${rsiVal}</td>
                     <td class="col-bb-squeeze"><span class="${squeezeClass}">${squeezeDisplay}</span></td>
                     <td class="col-trend">${trendHtml}</td>
                     <td class="col-digit">${digit}</td>
-                    <td class="col-vol">${vol}</td>
-                    <td class="col-step"><span class="step-badge ${stepClass}">${stepLabel}</span></td>
                 `;
                 tbody.appendChild(tr);
             }
