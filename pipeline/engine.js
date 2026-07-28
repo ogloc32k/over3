@@ -8,11 +8,13 @@ class MultiMarketPipeline {
     constructor(symbols) {
         this.buffers = {};
         this.lastPrices = {};
-        this.diffHistory = {};   // store last 3 MA diffs per symbol
+        this.diffHistory = {};
+        this.rsiState = {};
         for (const symbol of symbols) {
             this.buffers[symbol] = [];
             this.lastPrices[symbol] = null;
             this.diffHistory[symbol] = [];
+            this.rsiState[symbol] = { avgGain: 0, avgLoss: 0, initialized: false };
         }
     }
 
@@ -30,19 +32,39 @@ class MultiMarketPipeline {
         return Math.sqrt(squaredDiffs.reduce((a,b) => a+b, 0) / period);
     }
 
-    _rsi(arr, period) {
+    _rsi(arr, period, symbol) {
         if (arr.length < period + 1) return 50;
+        const state = this.rsiState[symbol];
         const slice = arr.slice(-period - 1);
-        let gains = 0, losses = 0;
-        for (let i = 1; i < slice.length; i++) {
-            const diff = slice[i] - slice[i-1];
-            if (diff >= 0) gains += diff;
-            else losses += Math.abs(diff);
+
+        if (!state.initialized) {
+            let gains = 0, losses = 0;
+            for (let i = 1; i < slice.length; i++) {
+                const diff = slice[i] - slice[i-1];
+                if (diff >= 0) gains += diff;
+                else losses += Math.abs(diff);
+            }
+            state.avgGain = gains / period;
+            state.avgLoss = losses / period;
+            state.initialized = true;
+            if (state.avgLoss === 0) return 100;
+            const rs = state.avgGain / state.avgLoss;
+            return 100 - (100 / (1 + rs));
         }
-        const avgGain = gains / period;
-        const avgLoss = losses / period;
-        if (avgLoss === 0) return 100;
-        const rs = avgGain / avgLoss;
+
+        const lastPrice = arr[arr.length - 2];
+        const currentPrice = arr[arr.length - 1];
+        const diff = currentPrice - lastPrice;
+        let gain = 0, loss = 0;
+        if (diff >= 0) gain = diff;
+        else loss = Math.abs(diff);
+
+        const alpha = 1 / period;
+        state.avgGain = (state.avgGain * (1 - alpha)) + (gain * alpha);
+        state.avgLoss = (state.avgLoss * (1 - alpha)) + (loss * alpha);
+
+        if (state.avgLoss === 0) return 100;
+        const rs = state.avgGain / state.avgLoss;
         return 100 - (100 / (1 + rs));
     }
 
@@ -67,14 +89,12 @@ class MultiMarketPipeline {
     }
 
     _findSupportResistance(window) {
-        const lookback = Math.min(50, window.length);
-        if (lookback < 10) {
+        if (window.length < 10) {
             const price = window[window.length - 1];
             return { support: price * 0.98, resistance: price * 1.02 };
         }
-        const recent = window.slice(-lookback);
-        const min = Math.min(...recent);
-        const max = Math.max(...recent);
+        const min = Math.min(...window);
+        const max = Math.max(...window);
         return { support: min, resistance: max };
     }
 
@@ -96,12 +116,14 @@ class MultiMarketPipeline {
                 risePct: 0, fallPct: 0,
                 rsi: 50,
                 bbUpper: null, bbLower: null, bbMiddle: null,
+                bandwidth: null,
                 support: null, resistance: null,
-                fastMA: null, slowMA: null,
                 isBreakout: false, isBreakdown: false,
                 step: 0, score: 0,
                 volatility: 0,
                 lastPrices: buf.slice(-5),
+                tickDirections: [],
+                lastDigit: null,
                 conditions: { breakout: false, rsi: false, bollinger: false, volatility: false, ma: false },
                 maDiff: 0,
                 maDiffExpanding: false,
@@ -124,34 +146,35 @@ class MultiMarketPipeline {
         const slowMA = this._sma(buf, 21);
         const vol = this._volatility(buf, 20);
         const bb = this._bollinger(buf, CONFIG.BOLLINGER_PERIOD, CONFIG.BOLLINGER_STD);
-        const rsi = this._rsi(buf, CONFIG.RSI_PERIOD);
+        const rsi = this._rsi(buf, CONFIG.RSI_PERIOD, symbol);
         const sr = this._findSupportResistance(window);
 
-        // ---- Compute MA diff and store history ----
-        let maDiff = 0;
-        if (fastMA !== null && slowMA !== null) {
-            maDiff = ((fastMA - slowMA) / price) * 100; // percentage
+        // ---- Bandwidth (BB SQUEEZE) ----
+        let bandwidth = null;
+        if (bb.middle !== null && bb.middle !== 0) {
+            bandwidth = ((bb.upper - bb.lower) / bb.middle) * 100;
         }
 
-        // Store diff in history (keep last 3)
+        // ---- MA diff for strategy (internal) ----
+        let maDiff = 0;
+        if (fastMA !== null && slowMA !== null) {
+            maDiff = ((fastMA - slowMA) / price) * 100;
+        }
         const history = this.diffHistory[symbol] || [];
         history.push(maDiff);
         if (history.length > 3) history.shift();
         this.diffHistory[symbol] = history;
 
-        // Determine expansion vs 2 ticks ago
         let maDiffTwoTicksAgo = 0;
         let maDiffExpanding2Tick = false;
         if (history.length >= 3) {
             const twoTicksAgo = history[history.length - 3];
             maDiffTwoTicksAgo = twoTicksAgo;
-            // Current diff > diff from 2 ticks ago (absolute)
             if (Math.abs(maDiff) > Math.abs(twoTicksAgo)) {
                 maDiffExpanding2Tick = true;
             }
         }
 
-        // Legacy expansion (1 tick)
         let maDiffExpanding = false;
         if (history.length >= 2) {
             const prev = history[history.length - 2];
@@ -160,10 +183,28 @@ class MultiMarketPipeline {
             }
         }
 
+        // ---- Tick directions (last 5 ticks) ----
+        const lastPrices = buf.slice(-6);
+        const tickDirections = [];
+        if (lastPrices.length >= 2) {
+            for (let i = 1; i < lastPrices.length; i++) {
+                const diff = lastPrices[i] - lastPrices[i-1];
+                if (diff > 0) tickDirections.push(1);
+                else if (diff < 0) tickDirections.push(-1);
+                else tickDirections.push(0);
+            }
+            while (tickDirections.length > 5) tickDirections.shift();
+        }
+
+        // ---- Last digit ----
+        const priceStr = price.toString();
+        const lastDigit = parseInt(priceStr[priceStr.length - 1]) || 0;
+
+        // ---- Breakout conditions ----
         const isBreakout = sr.resistance ? price > sr.resistance * 1.001 : false;
         const isBreakdown = sr.support ? price < sr.support * 0.999 : false;
 
-        // ---- Legacy conditions ----
+        // ---- Legacy step ----
         const condBreakout = isBreakout;
         const condRSI = rsi >= 50 && rsi <= 85;
         const condBollinger = bb.upper !== null && price >= bb.upper * 0.999;
@@ -194,13 +235,18 @@ class MultiMarketPipeline {
             formattedPrice: formatMarketPrice(symbol, price),
             risePct, fallPct,
             rsi,
-            bbUpper: bb.upper, bbLower: bb.lower, bbMiddle: bb.middle,
-            fastMA, slowMA,
-            support: sr.support, resistance: sr.resistance,
+            bbUpper: bb.upper,
+            bbLower: bb.lower,
+            bbMiddle: bb.middle,
+            bandwidth: bandwidth,
+            support: sr.support,
+            resistance: sr.resistance,
             isBreakout, isBreakdown,
             step, score,
             volatility: vol,
             lastPrices: buf.slice(-5),
+            tickDirections: tickDirections,
+            lastDigit: lastDigit,
             conditions: {
                 breakout: condBreakout || condBreakdown,
                 rsi: condRSI || condRSIPut,
@@ -214,7 +260,6 @@ class MultiMarketPipeline {
                 maValue: maDiff
             },
             callReady, putReady,
-            // New strategy fields
             maDiff: maDiff,
             maDiffExpanding: maDiffExpanding,
             maDiffTwoTicksAgo: maDiffTwoTicksAgo,
