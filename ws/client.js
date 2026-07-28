@@ -1,4 +1,4 @@
-console.log('[WS] client.js loaded'); // <-- Add this at the very top
+console.log('[WS] client.js loaded');
 
 const WebSocket = require('ws');
 const { state, CONFIG, getFullState } = require('../state/manager');
@@ -28,6 +28,7 @@ function getNextReqId() {
 function sendWS(payload) {
     if (derivWs && derivWs.readyState === WebSocket.OPEN) {
         derivWs.send(JSON.stringify(payload));
+        console.log(`[WS] Sent: ${payload.msg_type || 'request'}`);
     } else {
         console.warn('[WS] Cannot send: socket not open.');
     }
@@ -54,16 +55,20 @@ function disconnectDeriv() {
 function connectDeriv() {
     console.log('[WS] connectDeriv() called');
     disconnectDeriv();
+
     const appId = CONFIG.APP_ID || 'missing';
-    console.log(`[WS] Connecting to Deriv with App ID: ${appId}`);
+    console.log(`[WS] App ID: ${appId}`);
+    const token = CONFIG.API_TOKEN || 'missing';
+    console.log(`[WS] Token: ${token.slice(0, 4)}...${token.slice(-4)}`);
+
     const wsUrl = `wss://ws.derivws.com/websockets/v3?app_id=${appId}`;
+    console.log(`[WS] Connecting to ${wsUrl}`);
+    
     derivWs = new WebSocket(wsUrl);
 
     derivWs.on('open', () => {
         console.log('[WS] Socket open. Authorizing...');
         state.isConnected = true;
-        const token = CONFIG.API_TOKEN || 'missing';
-        console.log(`[WS] Using token: ${token.slice(0, 4)}...${token.slice(-4)}`);
         sendWS({ authorize: CONFIG.API_TOKEN });
 
         keepAliveLoop = setInterval(() => sendWS({ ping: 1 }), 30000);
@@ -88,8 +93,8 @@ function connectDeriv() {
         console.error('[WS] Socket error:', err.message);
     });
 
-    derivWs.on('close', () => {
-        console.warn('[WS] Connection closed. Reconnecting in 5s...');
+    derivWs.on('close', (code, reason) => {
+        console.warn(`[WS] Connection closed (code: ${code}, reason: ${reason || 'none'}). Reconnecting in 5s...`);
         disconnectDeriv();
         setTimeout(connectDeriv, 5000);
     });
@@ -112,11 +117,13 @@ function handleMessage(data) {
         case 'authorize':
             if (data.error) {
                 console.error('[WS] Auth failed:', data.error.message);
+                state.isConnected = false;
                 return;
             }
             console.log(`[WS] Authorized as ${data.authorize.email}`);
             state.balance = parseFloat(data.authorize.balance);
             state.currency = data.authorize.currency;
+            state.isConnected = true;
 
             // Subscribe to balance updates
             sendWS({ balance: 1, subscribe: 1 });
@@ -165,6 +172,7 @@ function handleMessage(data) {
                 state.activeRealTrade = null;
                 return;
             }
+            // Manual trade flow (from routes)
             if (state.tradeInProgress && state.activeRealTrade && !state.activeRealTrade.contractId) {
                 const proposalId = data.proposal.id;
                 console.log(`[TRADE] Executing buy for proposal ${proposalId}`);
@@ -249,8 +257,8 @@ function verifyTradeSettlement(currentBalance) {
     broadcastSSE({ state: getFullState() });
 }
 
-// ---- Execute a trade ----
-function executeTrade({ contractType, amount, symbol, duration, durationUnit, barrier }) {
+// ---- Execute a trade (called by bot or manual) ----
+function executeTrade({ contractType, amount, symbol, duration, durationUnit }) {
     if (state.isTrading) {
         console.warn('[TRADE] Already in progress.');
         return false;
@@ -277,9 +285,6 @@ function executeTrade({ contractType, amount, symbol, duration, durationUnit, ba
         duration_unit: durationUnit,
         underlying_symbol: symbol
     };
-    if (barrier !== undefined && barrier !== null) {
-        params.barrier = barrier.toString();
-    }
 
     sendWS({ buy: 1, price: amount, parameters: params });
     return true;
