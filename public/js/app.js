@@ -70,6 +70,10 @@ document.addEventListener('DOMContentLoaded', function() {
             }, 100);
         }
         if (tabId === 'digits') {
+            // ---- Enable digit matrix computation ----
+            if (window.engine) {
+                window.engine.computeDigits = true;
+            }
             setTimeout(() => {
                 renderDigitsTab();
             }, 100);
@@ -205,19 +209,17 @@ document.addEventListener('DOMContentLoaded', function() {
         // ---- Last 10 Digits Stream ----
         const streamContainer = document.getElementById('digitsStreamDigits');
         if (streamContainer) {
-            const lastPrices = activeMetric.lastPrices || [];
-            if (lastPrices.length > 0) {
-                // We need raw price strings; if not available, fallback to formatted price
-                const rawPrices = activeMetric.rawPrices || lastPrices.map(p => p.toString());
+            const rawPrices = activeMetric.rawPrices || activeMetric.lastPrices.map(p => p.toString());
+            if (rawPrices.length > 0) {
                 const lastTen = rawPrices.slice(-10);
                 const digitsHtml = lastTen.map(raw => {
                     const str = raw.toString();
                     const digit = str[str.length - 1] || '?';
                     return `<span class="stream-digit">${digit}</span>`;
                 }).join('');
-                streamContainer.innerHTML = digitsHtml || '—';
+                streamContainer.innerHTML = digitsHtml || '<span class="stream-digit">—</span>';
             } else {
-                streamContainer.innerHTML = '—';
+                streamContainer.innerHTML = '<span class="stream-digit">—</span>';
             }
         }
     }
