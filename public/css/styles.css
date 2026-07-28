@@ -1,14 +1,13 @@
 /* ============================================================
-   ROOT & RESET – SOFTER PALETTE
+   ROOT & RESET – SOFTER PALETTE (FIXED FOR MOBILE)
    ============================================================ */
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body {
+html, body {
   background: #0b0e14;
   color: #d1d4dc;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
+  height: 100%;
+  height: 100svh;
   overflow: hidden;
   padding: 0;
   margin: 0;
@@ -358,6 +357,15 @@ body.light {
 .focus-bar .right .badge.breakout { background: rgba(16,185,129,0.12); color: var(--green-profit); border: 1px solid var(--green-profit); }
 .focus-bar .right .badge.breakdown { background: rgba(239,68,68,0.12); color: var(--red-loss); border: 1px solid var(--red-loss); }
 .focus-bar .right .badge.idle { background: rgba(120,123,134,0.08); color: var(--text-secondary); border: 1px solid var(--border-subtle); }
+
+.tab-pages {
+  flex: 1;
+  display: none;
+  overflow-y: auto;
+  padding: 6px 0;
+  position: relative;
+}
+.tab-pages.active { display: block; }
 
 /* ============================================================
    TAB VISIBILITY (CRITICAL FIX)
@@ -928,6 +936,28 @@ body.light {
   background: var(--bg-surface);
 }
 
+/* ---- Interactive Digit Buttons (NEW) ---- */
+.digit-btn {
+  font-size: 16px;
+  font-weight: 700;
+  padding: 12px 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-primary);
+  transition: all 0.2s;
+}
+.digit-btn:hover {
+  background: var(--bg-card);
+  border-color: var(--neon-blue);
+}
+.digit-btn.selected {
+  background: var(--neon-blue);
+  color: #fff;
+  border-color: var(--neon-blue);
+}
+
 .digits-stream {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
@@ -1047,7 +1077,7 @@ body.light {
 .log-header .clear-btn:active { transform: scale(0.95); }
 
 /* ============================================================
-   BOTTOM TAB BAR (Mobile)
+   BOTTOM TAB BAR (Mobile) – FIXED
    ============================================================ */
 .tab-bar {
   display: none;
@@ -1056,8 +1086,11 @@ body.light {
   flex-shrink: 0;
   height: var(--tab-height);
   min-height: var(--tab-height);
-  position: relative;
-  z-index: 10;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  z-index: 1000;
   padding-bottom: env(safe-area-inset-bottom, 0);
   transition: background 0.3s, border-color 0.3s;
 }
@@ -1118,7 +1151,11 @@ body.analytics-active .app-main {
    RESPONSIVE – MOBILE
    ============================================================ */
 @media (max-width: 768px) {
-  .app-body { flex-direction: column; }
+  .app-body { 
+    flex-direction: column; 
+    height: calc(100svh - var(--header-height) - var(--tab-height));
+  }
+  
   .app-sidebar {
     width: 100%;
     border-right: none;
@@ -1150,7 +1187,8 @@ body.analytics-active .app-main {
   .header-tabs .nav-tab,
   .filter-bar input,
   .btn-date-toggle,
-  .digits-chip {
+  .digits-chip,
+  .digit-btn {
     min-height: 44px !important;
     min-width: 44px !important;
     padding: 8px 12px !important;
@@ -1352,6 +1390,11 @@ body.analytics-active .app-main {
     display: none !important;
   }
 
+  /* ---- FORCE BOTTOM TAB BAR ON MOBILE ---- */
+  .tab-bar {
+    display: flex !important;
+  }
+
   /* Font sizes for mobile readability */
   .app-brand { font-size: 14px; }
   .header-status { font-size: 12px; }
@@ -1390,6 +1433,7 @@ body.analytics-active .app-main {
   .digits-label { font-size: 11px; }
   .digits-table th { font-size: 9px; }
   .digits-table td { font-size: 11px; }
+  .digit-btn { font-size: 14px; padding: 10px 0; }
 
   .tab-bar { display: flex; }
   .app-main { padding: 6px; }
