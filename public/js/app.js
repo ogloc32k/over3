@@ -31,7 +31,7 @@ document.addEventListener('DOMContentLoaded', function() {
     toggleFixed.textContent = sidebar.classList.contains('collapsed') ? '▶' : '◀';
 
     // =========================================================================
-    // TAB SWITCHING (with analytics-active & dashboard-active classes)
+    // TAB SWITCHING (with analytics fixes)
     // =========================================================================
     window.switchTab = function(tabId) {
         document.querySelectorAll('.tab-pages').forEach(p => p.classList.remove('active'));
@@ -54,18 +54,26 @@ document.addEventListener('DOMContentLoaded', function() {
             focusBar.style.display = 'flex';
         }
 
-        // Toggle body classes for mobile controls
+        // --- FIX 1: Auto-collapse sidebar on Analytics ---
         const body = document.body;
         body.classList.remove('analytics-active', 'dashboard-active');
         if (tabId === 'analytics') {
             body.classList.add('analytics-active');
-        } else if (tabId === 'dashboard') {
-            body.classList.add('dashboard-active');
+            // Force sidebar collapsed on Analytics
+            sidebar.classList.add('collapsed');
+            toggleFixed.textContent = '▶';
+        } else {
+            // Restore sidebar on other tabs (if user wants it)
+            // But don't force it open – let the toggle control it
+            if (tabId === 'dashboard') {
+                body.classList.add('dashboard-active');
+            }
         }
 
         if (tabId === 'analytics') {
             setTimeout(() => {
                 renderCharts();
+                // Load default view (session) when analytics tab opens
                 timeframePreset(document.getElementById('p-session'), 'session');
             }, 100);
         }
@@ -842,8 +850,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         ticks: {
                             font: { size: 7 },
                             color: '#9ca3af',
+                            // --- FIX 5: Currency formatting ---
                             callback: function(value) {
-                                return (value >= 0 ? '+$' : '-$') + Math.abs(value);
+                                return (value >= 0 ? '+' : '-') + '$' + Math.abs(value).toFixed(2);
                             }
                         }
                     }
@@ -908,28 +917,44 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // ---- FIX 3: Chart empty state ----
+    function showChartEmptyState(containerId, message) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        // Check if empty state already exists
+        let empty = container.parentElement.querySelector('.chart-empty-state');
+        if (!empty) {
+            empty = document.createElement('div');
+            empty.className = 'chart-empty-state';
+            empty.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:13px;text-align:center;padding:20px;';
+            container.parentElement.style.position = 'relative';
+            container.parentElement.appendChild(empty);
+        }
+        empty.textContent = message || 'No trade history recorded for this period';
+        container.style.display = 'none';
+    }
+
+    function hideChartEmptyState(containerId) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        container.style.display = 'block';
+        const parent = container.parentElement;
+        const empty = parent.querySelector('.chart-empty-state');
+        if (empty) empty.remove();
+    }
+
     function renderEquityCurve(equityData, startingBalance, timeframe) {
         if (!equityChartInstance) return;
 
+        // --- FIX 3: Empty state ---
         if (!equityData || equityData.length < 2) {
+            showChartEmptyState('chart-line', 'No trade history recorded for this period');
             equityChartInstance.data.labels = [];
             equityChartInstance.data.datasets[0].data = [];
             equityChartInstance.update('none');
-            const parent = document.getElementById('chart-line').parentElement;
-            const existing = parent.querySelector('.empty-state');
-            if (!existing) {
-                const empty = document.createElement('div');
-                empty.className = 'empty-state';
-                empty.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#787b86;font-size:12px;';
-                empty.textContent = 'No trade history found for selected date range';
-                parent.appendChild(empty);
-            }
             return;
         }
-
-        const parent = document.getElementById('chart-line').parentElement;
-        const existing = parent.querySelector('.empty-state');
-        if (existing) existing.remove();
+        hideChartEmptyState('chart-line');
 
         const labels = equityData.map(point => formatEquityLabel(point.timestamp, timeframe));
         const values = equityData.map(point => point.equity);
@@ -966,11 +991,14 @@ document.addEventListener('DOMContentLoaded', function() {
         equityChartInstance.update('none');
     }
 
+    // ---- FIX 2: ALL metrics read from API payload ----
     function updateMetrics(data) {
+        // Net Profit
         const profitEl = document.getElementById('meta-profit');
         profitEl.textContent = `$${data.totalProfit.toFixed(2)}`;
         profitEl.className = 'val ' + (data.totalProfit >= 0 ? 'positive' : 'negative');
 
+        // Strike Rate
         const total = data.tradeCount || 0;
         const wins = data.winCount || 0;
         const strike = total > 0 ? (wins / total) * 100 : 0;
@@ -978,6 +1006,7 @@ document.addEventListener('DOMContentLoaded', function() {
         strikeEl.innerHTML = `${strike.toFixed(1)}% <small style="display:block;font-size:8px;color:#787b86;font-weight:400;">${total} trades total</small>`;
         strikeEl.className = 'val';
 
+        // Profit Factor
         const grossProfit = data.grossProfit || 0;
         const grossLoss = data.grossLoss || 0;
         let pf;
@@ -988,11 +1017,13 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         document.getElementById('meta-pf').textContent = pf;
 
+        // Max Drawdown
         const maxDD = data.maxDrawdown || 0;
         const ddEl = document.getElementById('meta-dd');
         ddEl.textContent = `-${maxDD.toFixed(2)}%`;
         ddEl.className = 'val negative';
 
+        // Secondary metrics
         const losses = data.lossCount || 0;
         const avgWin = wins > 0 ? grossProfit / wins : 0;
         const avgLoss = losses > 0 ? grossLoss / losses : 0;
@@ -1044,6 +1075,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (mode === 'clear') {
             renderAssetBarChart([]);
             renderEquityCurve([], 0);
+            // Reset KPI cards
             document.getElementById('meta-profit').textContent = '$0.00';
             document.getElementById('meta-strike').innerHTML = '0.0% <small style="display:block;font-size:8px;color:#787b86;">0 trades total</small>';
             document.getElementById('meta-pf').textContent = '0.00';
