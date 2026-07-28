@@ -10,6 +10,7 @@ class MultiMarketPipeline {
         this.lastPrices = {};
         this.diffHistory = {};
         this.rsiState = {};
+        this.computeDigits = false; // default off (only for Digits tab)
         for (const symbol of symbols) {
             this.buffers[symbol] = [];
             this.lastPrices[symbol] = null;
@@ -157,7 +158,7 @@ class MultiMarketPipeline {
             bandwidth = ((bb.upper - bb.lower) / bb.middle) * 100;
         }
 
-        // ---- S/R Position % (Support % = distance from Support) ----
+        // ---- S/R Position % ----
         let supportPct = 50;
         let resistancePct = 50;
         if (sr.support !== null && sr.resistance !== null && sr.resistance !== sr.support) {
@@ -211,43 +212,45 @@ class MultiMarketPipeline {
         const priceStr = price.toString();
         const lastDigit = parseInt(priceStr[priceStr.length - 1]) || 0;
 
-        // ---- Digit Matrix (0-9) ----
-        const digitCounts = Array(10).fill(0);
-        window.forEach(p => {
-            const str = p.toString();
-            const d = parseInt(str[str.length - 1]);
-            if (!isNaN(d)) digitCounts[d]++;
-        });
-        const totalTicks = window.length;
-        const digitMatrix = [];
-        for (let d = 0; d <= 9; d++) {
-            const matches = (digitCounts[d] / totalTicks) * 100;
-            const differs = 100 - matches;
-            let overCount = 0, underCount = 0;
+        // ---- Digit Matrix (only if enabled) ----
+        let digitMatrix = null;
+        if (this.computeDigits) {
+            const digitCounts = Array(10).fill(0);
             window.forEach(p => {
                 const str = p.toString();
-                const digit = parseInt(str[str.length - 1]);
-                if (!isNaN(digit)) {
-                    if (digit > d) overCount++;
-                    else if (digit < d) underCount++;
-                }
+                const d = parseInt(str[str.length - 1]);
+                if (!isNaN(d)) digitCounts[d]++;
             });
-            const overPct = (overCount / totalTicks) * 100;
-            const underPct = (underCount / totalTicks) * 100;
-            digitMatrix.push({
-                digit: d,
-                matches: matches,
-                differs: differs,
-                over: overPct,
-                under: underPct
-            });
+            const totalTicks = window.length;
+            digitMatrix = [];
+            for (let d = 0; d <= 9; d++) {
+                const matches = (digitCounts[d] / totalTicks) * 100;
+                const differs = 100 - matches;
+                let overCount = 0, underCount = 0;
+                window.forEach(p => {
+                    const str = p.toString();
+                    const digit = parseInt(str[str.length - 1]);
+                    if (!isNaN(digit)) {
+                        if (digit > d) overCount++;
+                        else if (digit < d) underCount++;
+                    }
+                });
+                const overPct = (overCount / totalTicks) * 100;
+                const underPct = (underCount / totalTicks) * 100;
+                digitMatrix.push({
+                    digit: d,
+                    matches: matches,
+                    differs: differs,
+                    over: overPct,
+                    under: underPct
+                });
+            }
         }
 
         // ---- Breakout conditions ----
         const isBreakout = sr.resistance ? price > sr.resistance * 1.001 : false;
         const isBreakdown = sr.support ? price < sr.support * 0.999 : false;
 
-        // ---- Legacy step ----
         const condBreakout = isBreakout;
         const condRSI = rsi >= 50 && rsi <= 85;
         const condBollinger = bb.upper !== null && price >= bb.upper * 0.999;
