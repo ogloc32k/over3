@@ -1,12 +1,11 @@
 // services/deriv.js
 const WebSocket = require('ws');
 
-// Load env vars directly – no config file needed
 const DERIV_APP_ID = process.env.DERIV_APP_ID;
 const DERIV_PAT = process.env.DERIV_PAT;
 
 if (!DERIV_APP_ID || !DERIV_PAT) {
-  console.error('❌ DERIV_APP_ID or DERIV_PAT missing in environment');
+  console.error('❌ DERIV_APP_ID or DERIV_PAT missing');
 }
 
 class DerivClient {
@@ -66,7 +65,7 @@ class DerivClient {
       if (!target) throw new Error('No accounts available');
       this.accountId = target.loginid;
 
-      // ✅ Instant balance from account list
+      // Emit immediate balance from accounts list
       this._emit('balance', {
         balance: target.balance,
         currency: target.currency || 'USD',
@@ -121,14 +120,14 @@ class DerivClient {
       console.log('🔌 WebSocket connected (authenticated)');
       this.pingInterval = setInterval(() => this.send({ ping: 1 }), 30000);
       this._emit('authorized', { loginid: this.accountId });
-      this.send({ balance: 1, subscribe: 1 });
+      // Fetch balance only once – no subscription
+      this.send({ balance: 1 });
       this._subscribeTicks();
     });
 
     this.ws.on('message', (data) => {
       try {
         const msg = JSON.parse(data);
-        console.log('📩 WS msg keys:', Object.keys(msg).join(', '));
         this._handleMessage(msg);
       } catch (e) {
         console.error('❌ WS parse error:', e);
