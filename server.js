@@ -19,17 +19,17 @@ app.use(express.json());
 app.use((req,res,next) => { console.log(`📡 ${req.method} ${req.url}`); next(); });
 app.use(express.static(path.join(__dirname, 'public')));
 
-// SSE
+// SSE – now sends state on every change (not just when logs exist)
 app.get('/api/logs', (req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
   res.write('\n');
   const initial = store.getStatePayload();
   res.write(`data: ${JSON.stringify(initial)}\n\n`);
+
   const onChange = () => {
-    try {
-      const payload = store.getStatePayload();
-      if (payload.logs.length > 0) res.write(`data: ${JSON.stringify(payload)}\n\n`);
-    } catch(e) {}
+    const payload = store.getStatePayload();
+    // Always send the state, even if logs are empty
+    res.write(`data: ${JSON.stringify(payload)}\n\n`);
   };
   store.on('stateChanged', onChange);
   req.on('close', () => store.removeListener('stateChanged', onChange));
