@@ -1,6 +1,13 @@
 // services/deriv.js
 const WebSocket = require('ws');
-const config = require('../config');
+
+// Load env vars directly – no config file needed
+const DERIV_APP_ID = process.env.DERIV_APP_ID;
+const DERIV_PAT = process.env.DERIV_PAT;
+
+if (!DERIV_APP_ID || !DERIV_PAT) {
+  console.error('❌ DERIV_APP_ID or DERIV_PAT missing in environment');
+}
 
 class DerivClient {
   constructor() {
@@ -10,7 +17,7 @@ class DerivClient {
     this.pingInterval = null;
     this.isDemo = true;
     this._store = null;
-    this._connecting = false;       // prevent overlapping connections
+    this._connecting = false;
   }
 
   setStore(storeInstance) { this._store = storeInstance; }
@@ -26,7 +33,6 @@ class DerivClient {
       })
       .finally(() => {
         this._connecting = false;
-        // schedule retry only if still not connected
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
           setTimeout(() => this.connect(), 5000);
         }
@@ -36,7 +42,9 @@ class DerivClient {
   setMode(mode) {
     console.log(`🔵 setMode(${mode})`);
     this.isDemo = (mode === 'real') ? false : true;
-    if (this._store) this._store.updateState({ tradingMode: this.isDemo ? 'demo' : 'real' });
+    if (this._store) {
+      this._store.updateState({ tradingMode: this.isDemo ? 'demo' : 'real' });
+    }
     this._disconnect();
     this.accountId = null;
     this.connect();
@@ -58,7 +66,7 @@ class DerivClient {
       if (!target) throw new Error('No accounts available');
       this.accountId = target.loginid;
 
-      // ✅ Emit instant balance from account list
+      // ✅ Instant balance from account list
       this._emit('balance', {
         balance: target.balance,
         currency: target.currency || 'USD',
@@ -71,8 +79,8 @@ class DerivClient {
     const otpResp = await fetch(otpUrl, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${config.derivToken}`,
-        'Deriv-App-ID': config.derivAppId,
+        'Authorization': `Bearer ${DERIV_PAT}`,
+        'Deriv-App-ID': DERIV_APP_ID,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({})
@@ -91,7 +99,7 @@ class DerivClient {
   async _fetchAccounts() {
     const url = 'https://api.derivws.com/trading/v1/options/accounts';
     const resp = await fetch(url, {
-      headers: { 'Authorization': `Bearer ${config.derivToken}`, 'Deriv-App-ID': config.derivAppId }
+      headers: { 'Authorization': `Bearer ${DERIV_PAT}`, 'Deriv-App-ID': DERIV_APP_ID }
     });
     const text = await resp.text();
     if (!resp.ok || text.startsWith('<!DOCTYPE')) throw new Error(`Accounts failed: ${resp.status}`);
@@ -131,7 +139,6 @@ class DerivClient {
       console.log(`⚠️ WS closed (${code}). Reason: ${reason?.toString()}`);
       clearInterval(this.pingInterval);
       this.ws = null;
-      // reconnect after 5 sec if not already connecting
       if (!this._connecting) setTimeout(() => this.connect(), 5000);
     });
 
@@ -141,17 +148,12 @@ class DerivClient {
   _handleMessage(msg) {
     if (msg.error) return console.error('Deriv error:', msg.error);
 
-    // Balance (nested format: { balance: { balance: ..., currency: ... } })
-    if (msg.balance) {
-      this._emit('balance', msg.balance);
-      return;
-    }
+    if (msg.balance) { this._emit('balance', msg.balance); return; }
     if (msg.tick) { this._emit('tick', msg.tick); return; }
     if (msg.proposal_open_contract) { this._emit('contract_result', msg.proposal_open_contract); return; }
     if (msg.buy) { this._emit('buy_result', msg.buy); return; }
     if (msg.history) { this._emit('history', msg.history); return; }
 
-    // Legacy msg_type
     if (msg.msg_type) {
       switch (msg.msg_type) {
         case 'balance': this._emit('balance', msg.balance); break;
@@ -169,12 +171,24 @@ class DerivClient {
     console.log('📊 Subscribed to ticks');
   }
 
-  requestHistory(symbol, start, end, count) { /* unchanged */ }
-  buyContract(params) { /* unchanged */ }
-
-  send(data) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(data));
+  requestHistory(symbol, start, end, count) {
+    const req = { ticks_history: symbol, adjust_start_time: 1, style: 'ticks', granularity: 1 };
+    if (count) req.count = count;
+    else { req.start = start || Math.floor(Date.now()/1000)-3600; req.end = end || Math.floor(Date.now()/1000); }
+    this.send(req);
   }
+
+  buyContract(params) {
+    this.send({
+      buy: params.contractId || 1, price: params.stake,
+      parameters: {
+        amount: params.stake, basis: 'stake', contract_type: params.contractType,
+        currency: 'USD', duration: params.duration, duration_unit: params.durationUnit || 't', symbol: params.symbol
+      }
+    });
+  }
+
+  send(data) { if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(data)); }
   on(e, cb) { if (!this.listeners[e]) this.listeners[e] = []; this.listeners[e].push(cb); }
   off(e, cb) { if (!this.listeners[e]) return; this.listeners[e] = this.listeners[e].filter(c => c !== cb); }
   _emit(e, d) { (this.listeners[e] || []).forEach(cb => cb(d)); }
