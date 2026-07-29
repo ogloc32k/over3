@@ -4,11 +4,12 @@ const express = require('express');
 const path = require('path');
 const store = require('./store');
 const logger = require('./logger');
+const derivClient = require('./services/deriv');
 
 const app = express();
 app.use(express.json());
 
-// Serve static frontend from public/ (same directory)
+// Serve static frontend
 app.use(express.static(path.join(__dirname, 'public')));
 
 // SSE endpoint
@@ -20,7 +21,6 @@ app.get('/api/logs', (req, res) => {
   });
   res.write('\n');
 
-  // send initial state
   const initial = store.getStatePayload();
   res.write(`data: ${JSON.stringify(initial)}\n\n`);
 
@@ -37,18 +37,7 @@ app.get('/api/logs', (req, res) => {
   });
 });
 
-// Dummy updates for testing
-setInterval(() => {
-  const metrics = store.state.marketMetrics;
-  const sym = 'R_75';
-  const old = metrics[sym].price;
-  const newPrice = old + (Math.random() - 0.5) * 10;
-  metrics[sym].price = newPrice;
-  store.updateState({ marketMetrics: metrics });
-  store.addLog('info', `Tick ${sym}: ${newPrice.toFixed(4)}`);
-}, 3000);
-
-// Fallback: serve index.html for any unknown route (SPA)
+// Fallback for SPA
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -56,4 +45,27 @@ app.get('*', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`);
+
+  // Connect to Deriv
+  derivClient.connect();
+
+  // When balance arrives, update the store (and the frontend)
+  derivClient.on('balance', (data) => {
+    const balance = data?.balance?.balance;
+    const currency = data?.balance?.currency || 'USD';
+    const loginid = data?.balance?.loginid || '';
+
+    if (balance !== undefined) {
+      store.updateState({
+        balance: parseFloat(balance),
+        currency,
+        loginid
+      });
+      logger.info(`Balance updated: ${currency} ${balance}`);
+    }
+  });
+
+  derivClient.on('authorized', (data) => {
+    logger.info(`Authorized as ${data.loginid}`);
+  });
 });
