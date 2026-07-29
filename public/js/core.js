@@ -70,7 +70,7 @@
     try {
       const safeState = state || {};
       const tradingMode = safeState.tradingMode || 'demo';
-      const balance = safeState.balance || null;
+      const balance = safeState.balance ?? null;   // ✅ FIX: use ?? instead of || to preserve 0
       const sessionPnl = safeState.sessionPnl || 0;
       const dailyPnl = safeState.dailyPnl || 0;
       const currentStake = safeState.currentStake || 0.35;
@@ -367,7 +367,7 @@
       try {
         const data = JSON.parse(e.data);
 
-        // Analytics delta (trade closed) -> delegate to analytics module
+        // Analytics delta -> delegate to analytics module
         if (data.event === 'analytics_delta') {
           eventBus.emit('analytics_delta', data.data);
           return;
