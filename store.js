@@ -1,14 +1,13 @@
-// backend/store.js
+// store.js
 const EventEmitter = require('events');
 const logger = require('./logger');
-const config = require('./config');
 
 class Store extends EventEmitter {
   constructor() {
     super();
     this.state = {
       tradingMode: 'demo',
-      balance: 10000.00,
+      balance: null,                     // ← was 10000.00, now null
       sessionPnl: 0,
       dailyPnl: 0,
       currentStake: 0.35,
@@ -16,28 +15,31 @@ class Store extends EventEmitter {
       active: false,
       lastTriggerTime: Date.now(),
       tradeInProgress: false,
-      marketMetrics: this._initMetrics(),
-      loginid: 'CR000000',
-      currency: 'USD'
+      loginid: '',
+      currency: 'USD',
+      marketMetrics: this._initMetrics()
     };
-    this._logBuffer = [];
+    this.config = {};                    // will hold settings later
   }
 
   _initMetrics() {
-    const symbols = ['R_10','R_25','R_50','R_75','R_100','1HZ10V','1HZ25V','1HZ50V','1HZ75V','1HZ100V'];
+    const symbols = [
+      'R_10', 'R_25', 'R_50', 'R_75', 'R_100',
+      '1HZ10V', '1HZ25V', '1HZ50V', '1HZ75V', '1HZ100V'
+    ];
     const metrics = {};
     symbols.forEach(s => {
       metrics[s] = {
-        price: 1000 + Math.random() * 500,
-        step: Math.floor(Math.random() * 4),
+        price: 0,
+        step: 0,
         support: null,
         resistance: null,
         isBreakout: false,
         isBreakdown: false,
-        rsi: 50 + Math.random() * 20 - 10,
-        volatility: Math.random() * 0.5,
-        score: Math.random() * 100,
-        bandwidth: Math.random() * 4,
+        rsi: 50,
+        volatility: 0,
+        score: 0,
+        bandwidth: 0,
         tickDirections: [],
         supportPct: null,
         resistancePct: null,
@@ -55,11 +57,11 @@ class Store extends EventEmitter {
   }
 
   addLog(level, message) {
-    logger[level](message); // writes to console + buffer
+    logger[level](message);
   }
 
   getStatePayload() {
-    const logs = logger.drainLogs(); // get buffered logs
+    const logs = logger.drainLogs();
     return { state: this.state, logs };
   }
 }
