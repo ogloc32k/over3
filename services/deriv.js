@@ -107,10 +107,12 @@ class DerivClient {
       this.accountId = target.loginid;
       this.activeAccountId = target.loginid;
 
+      // ✅ Include isDemo in the balance event so server.js can set mode atomically
       this._emit('balance', {
         balance: target.balance,
         currency: target.currency || 'USD',
-        loginid: target.loginid
+        loginid: target.loginid,
+        isDemo: this.isDemo
       });
       console.log(`🔑 Account: ${this.accountId} balance=${target.balance} (activeAccountId=${this.activeAccountId})`);
     }
