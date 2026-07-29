@@ -2,15 +2,13 @@
 const config = {
   derivAppId: process.env.DERIV_APP_ID,
   derivToken: process.env.DERIV_PAT,
+  derivRestUrl: 'https://api.deriv.com',         // REST base
   supabaseUrl: process.env.SUPABASE_URL,
   supabaseKey: process.env.SUPABASE_KEY,
   port: process.env.PORT || 3000
 };
 
-// Quick validation (won't crash, but logs warnings if missing)
-if (!config.derivAppId) console.warn('⚠️ DERIV_APP_ID not set');
-if (!config.derivToken) console.warn('⚠️ DERIV_PAT not set');
-if (!config.supabaseUrl) console.warn('⚠️ SUPABASE_URL not set');
-if (!config.supabaseKey) console.warn('⚠️ SUPABASE_KEY not set');
+console.log('DERIV_APP_ID:', config.derivAppId || '❌ MISSING');
+console.log('DERIV_PAT length:', config.derivToken ? config.derivToken.length : '❌ MISSING');
 
 module.exports = config;
