@@ -149,6 +149,25 @@ body.light {
 }
 .theme-toggle:hover { background: var(--bg-surface); color: var(--text-primary); }
 
+/* Mobile profile button */
+.mobile-profile-btn {
+  display: none;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 20px;
+  padding: 6px 14px;
+  cursor: pointer;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 13px;
+  transition: background 0.15s;
+}
+.mobile-profile-btn:hover { background: var(--bg-surface); }
+.mobile-profile-btn .profile-avatar { font-size: 18px; }
+.mobile-profile-btn .profile-mode { font-size: 11px; text-transform: uppercase; }
+
 /* ============================================================
    SIDEBAR
    ============================================================ */
@@ -349,12 +368,21 @@ body.light {
 .focus-bar .left .sr .r { color: var(--red-loss); }
 .focus-bar .right { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-secondary); flex-wrap: wrap; }
 
+/* ============================================================
+   TAB VISIBILITY — ✅ FIXED for scrolling
+   ============================================================ */
 .tab-page {
   display: none !important;
 }
 .tab-page.active {
-  display: block !important;
+  display: flex !important;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
+.table-container     { flex: 1; min-height: 0; }
+.analytics-container { flex: 1; min-height: 0; }
 
 /* ============================================================
    SETTINGS
@@ -539,7 +567,6 @@ body.light {
 .data-table .col-bb-squeeze { font-size: 12px; color: var(--text-secondary); }
 .data-table .col-trend { font-size: 14px; letter-spacing: 2px; }
 
-/* ---- Badge styles (kept for BB Squeeze only) ---- */
 .badge-squeeze {
   background: #fef3c7;
   color: #92400e;
@@ -853,5 +880,31 @@ body.analytics-active .app-main {
   .header-tabs { display: flex; }
   .mobile-market-view {
     display: none !important;
+  }
+  .mobile-profile-btn {
+    display: none;
+  }
+  /* Hide mobile-only tab pages on desktop */
+  #tab-markets,
+  #tab-manual,
+  #tab-bots {
+    display: none !important;
+  }
+  #tab-markets.active,
+  #tab-manual.active,
+  #tab-bots.active {
+    display: none !important;
+  }
+}
+
+/* ============================================================
+   MOBILE-ONLY RULES
+   ============================================================ */
+@media (max-width: 768px) {
+  .header-tabs {
+    display: none;
+  }
+  .mobile-profile-btn {
+    display: flex;
   }
 }
