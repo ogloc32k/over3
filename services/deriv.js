@@ -6,20 +6,18 @@ class DerivClient {
   constructor() {
     this.ws = null;
     this.listeners = {};
-    this.accountId = null;          // e.g. CR1234567 (demo or real)
-    this.activeToken = null;       // the PAT used for OTP request
+    this.accountId = null;
     this.wsUrl = null;
     this.pingInterval = null;
-    this.isDemo = true;            // default demo
+    this.isDemo = true;             // default: demo
   }
 
-  // ----- PUBLIC: start connection (async) -----
+  // ----- PUBLIC: start connection -----
   connect() {
     this._connectViaOtp()
       .then(() => console.log('✅ Connected to Deriv (new API)'))
       .catch(err => {
         console.error('❌ Deriv connection failed:', err.message);
-        // retry in 10 seconds
         setTimeout(() => this.connect(), 10000);
       });
   }
@@ -29,12 +27,11 @@ class DerivClient {
     if (mode === 'real') this.isDemo = false;
     else this.isDemo = true;
     console.log(`Mode set to ${this.isDemo ? 'demo' : 'real'}`);
-    // close current connection and reconnect with new account
     if (this.ws) {
       this.ws.close();
       this.ws = null;
     }
-    this.accountId = null;          // force re‑fetch account
+    this.accountId = null;
     this.connect();
   }
 
@@ -42,7 +39,6 @@ class DerivClient {
   //  OTP FLOW
   // -------------------------------------------------------------
   async _connectViaOtp() {
-    // 1. Fetch list of accounts (filter by demo/real)
     if (!this.accountId) {
       const accounts = await this._fetchAccounts();
       const target = accounts.find(a => a.is_virtual === this.isDemo);
@@ -51,7 +47,6 @@ class DerivClient {
       console.log(`🔑 Using account: ${this.accountId} (${this.isDemo ? 'demo' : 'real'})`);
     }
 
-    // 2. Request OTP (one‑time WebSocket URL)
     const otpUrl = `https://api.derivws.com/trading/v1/options/accounts/${this.accountId}/otp`;
     console.log(`🔐 Requesting OTP from: ${otpUrl}`);
 
@@ -59,15 +54,14 @@ class DerivClient {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${config.derivToken}`,
-        'Deriv-App-ID': config.derivAppId,        // alphanumeric
+        'Deriv-App-ID': config.derivAppId,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({})                    // no additional fields required
+      body: JSON.stringify({})
     });
 
     const otpText = await otpResp.text();
     console.log(`OTP response status: ${otpResp.status}`);
-    console.log(`OTP body (first 300 chars): ${otpText.slice(0, 300)}`);
 
     if (!otpResp.ok || otpText.startsWith('<!DOCTYPE')) {
       throw new Error(`OTP request failed with status ${otpResp.status}: ${otpText.slice(0, 100)}`);
@@ -80,11 +74,8 @@ class DerivClient {
       throw new Error('OTP response is not valid JSON: ' + otpText.slice(0, 100));
     }
 
-    if (data.errors) {
-      throw new Error('OTP API error: ' + JSON.stringify(data.errors));
-    }
+    if (data.errors) throw new Error('OTP API error: ' + JSON.stringify(data.errors));
 
-    // The OTP URL is returned in the `data.url` field (new API) or `websocket_url` (older docs)
     const wsUrl = data.data?.url || data.websocket_url;
     if (!wsUrl) throw new Error('No WebSocket URL in OTP response');
 
@@ -95,23 +86,51 @@ class DerivClient {
   async _fetchAccounts() {
     const url = 'https://api.derivws.com/trading/v1/options/accounts';
     console.log(`📋 Fetching accounts from ${url}`);
+
     const resp = await fetch(url, {
       headers: {
         'Authorization': `Bearer ${config.derivToken}`,
         'Deriv-App-ID': config.derivAppId
       }
     });
+
     const text = await resp.text();
     console.log(`Accounts status: ${resp.status}`);
-    console.log(`Accounts body (first 300 chars): ${text.slice(0, 300)}`);
 
     if (!resp.ok || text.startsWith('<!DOCTYPE')) {
       throw new Error(`Accounts request failed with status ${resp.status}: ${text.slice(0, 100)}`);
     }
-    const data = JSON.parse(text);
-    if (data.errors) throw new Error('Accounts API error: ' + JSON.stringify(data.errors));
-    const accounts = data.data?.accounts || data.accounts;
-    if (!accounts || accounts.length === 0) throw new Error('No accounts returned');
+
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch (e) {
+      throw new Error('Accounts response is not valid JSON: ' + text.slice(0, 100));
+    }
+
+    if (json.errors) throw new Error('Accounts API error: ' + JSON.stringify(json.errors));
+
+    // 🔍 FIX: accounts can be inside `json.data` or `json.accounts`
+    let accountsRaw = json.data || json.accounts;
+    console.log('🔍 accountsRaw type:', typeof accountsRaw, 'isArray:', Array.isArray(accountsRaw));
+    if (accountsRaw) {
+      console.log('🔍 accountsRaw sample:', JSON.stringify(accountsRaw).slice(0, 300));
+    } else {
+      console.log('🔍 Full JSON response:', JSON.stringify(json).slice(0, 500));
+    }
+
+    if (!accountsRaw || !Array.isArray(accountsRaw) || accountsRaw.length === 0) {
+      throw new Error('No accounts returned');
+    }
+
+    const accounts = accountsRaw.map(acc => ({
+      loginid: acc.account_id || acc.loginid,
+      is_virtual: (acc.account_type === 'demo') || acc.is_virtual,
+      balance: acc.balance,
+      currency: acc.currency,
+    }));
+
+    console.log(`✅ Found ${accounts.length} accounts`);
     return accounts;
   }
 
@@ -124,14 +143,9 @@ class DerivClient {
 
     this.ws.on('open', () => {
       console.log('🔌 WebSocket connected (authenticated)');
-      // start heartbeat
       this.pingInterval = setInterval(() => this.send({ ping: 1 }), 30000);
-
-      // Connection is already authorized – no need to send authorize
       this._emit('authorized', { loginid: this.accountId });
-
-      // Request balance and subscribe to ticks
-      this.send({ balance: 1, subscribe: 1 });   // subscribe:1 to get real‑time balance updates
+      this.send({ balance: 1, subscribe: 1 });
       this._subscribeTicks();
     });
 
@@ -165,9 +179,6 @@ class DerivClient {
     }
 
     switch (msg.msg_type) {
-      case 'authorize':
-        // (only for legacy; here we ignore because we are already authenticated)
-        break;
       case 'balance':
         this._emit('balance', msg.balance);
         break;
@@ -182,12 +193,6 @@ class DerivClient {
         break;
       case 'history':
         this._emit('history', msg.history);
-        break;
-      case 'transaction':
-        // (financial transaction, ignore for now)
-        break;
-      default:
-        // ignore other messages (pong, etc.)
         break;
     }
   }
@@ -204,18 +209,12 @@ class DerivClient {
     console.log('📊 Subscribed to tick streams');
   }
 
-  // Request historical tick data (past prices)
-  // Parameters:
-  //   symbol: e.g. 'R_75'
-  //   start: epoch seconds (default: 1 hour ago)
-  //   end:   epoch seconds (default: now)
-  //   count: number of ticks (if you don't want time range)
   requestHistory(symbol, start, end, count) {
     const req = {
       ticks_history: symbol,
       adjust_start_time: 1,
       style: 'ticks',
-      granularity: 1,             // 1 tick = 1 second for R_* indices
+      granularity: 1,
     };
     if (count) req.count = count;
     else {
@@ -241,6 +240,9 @@ class DerivClient {
     });
   }
 
+  // -------------------------------------------------------------
+  //  UTILITIES
+  // -------------------------------------------------------------
   send(data) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data));
@@ -262,5 +264,6 @@ class DerivClient {
   }
 }
 
+// Singleton
 const derivClient = new DerivClient();
 module.exports = derivClient;
