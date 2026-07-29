@@ -1,7 +1,8 @@
-// server.js – hardened with full debug logging & crash resilience
+// server.js – full integration with Deriv (OTP flow), frontend, and account switching
+require('dotenv').config();
 
 // ============================================================
-// 1. GLOBAL ERROR CATCHERS (must be first)
+// 1. GLOBAL ERROR CATCHERS
 // ============================================================
 process.on('uncaughtException', (err) => {
   console.error('🔥 UNCAUGHT EXCEPTION – server will exit');
@@ -15,17 +16,7 @@ process.on('unhandledRejection', (reason) => {
 });
 
 // ============================================================
-// 2. LOAD ENVIRONMENT VARIABLES
-// ============================================================
-try {
-  require('dotenv').config();
-  console.log('✅ dotenv loaded (local dev only, ignored on Render)');
-} catch (e) {
-  console.warn('⚠️ dotenv not available (this is fine on Render)');
-}
-
-// ============================================================
-// 3. SAFE MODULE LOADING WITH DETAILED LOGS
+// 2. MODULE LOADING
 // ============================================================
 let express, path, store, logger, derivClient;
 try {
@@ -37,7 +28,7 @@ try {
   process.exit(1);
 }
 
-// Load our custom modules (wrapped individually to pinpoint failures)
+// Load custom modules individually
 try {
   store = require('./store');
   console.log('✅ Store loaded');
@@ -57,31 +48,27 @@ try {
   console.log('✅ Deriv client loaded');
 } catch (err) {
   console.error('❌ Failed to load ./services/deriv:', err);
-  // We can continue without it, but trading won't work
-  derivClient = null;
+  derivClient = null; // continue without it
 }
 
 // ============================================================
-// 4. CREATE EXPRESS APP
+// 3. EXPRESS APP SETUP
 // ============================================================
 const app = express();
 app.use(express.json());
 
-// ----------------------------------------------------------
-// 4a. Request logging (basic)
+// Request logger
 app.use((req, res, next) => {
   console.log(`📡 ${req.method} ${req.url}`);
   next();
 });
 
-// ----------------------------------------------------------
-// 4b. Serve static frontend
+// Static files (frontend)
 const publicPath = path.join(__dirname, 'public');
 console.log(`📁 Static files served from: ${publicPath}`);
 app.use(express.static(publicPath));
 
-// ----------------------------------------------------------
-// 4c. Health endpoint (for Render & debugging)
+// Health check
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -93,8 +80,9 @@ app.get('/health', (req, res) => {
   });
 });
 
-// ----------------------------------------------------------
-// 4d. SSE endpoint
+// ============================================================
+// 4. SSE ENDPOINT (/api/logs)
+// ============================================================
 app.get('/api/logs', (req, res) => {
   console.log('🔗 SSE client connected');
   res.writeHead(200, {
@@ -104,6 +92,7 @@ app.get('/api/logs', (req, res) => {
   });
   res.write('\n');
 
+  // Send initial state
   try {
     const initial = store.getStatePayload();
     res.write(`data: ${JSON.stringify(initial)}\n\n`);
@@ -129,8 +118,85 @@ app.get('/api/logs', (req, res) => {
   });
 });
 
-// ----------------------------------------------------------
-// 4e. Fallback – serve index.html for everything else (SPA)
+// ============================================================
+// 5. REST API
+// ============================================================
+
+// Control endpoint (start, stop, set_mode)
+app.post('/api/control', (req, res) => {
+  const { action, mode } = req.body;
+  try {
+    if (action === 'start') {
+      // Placeholder for engine start
+      store.updateState({ active: true, locked: false });
+      logger.info('Bot started');
+      res.json({ message: 'Bot started' });
+    } else if (action === 'stop') {
+      store.updateState({ active: false });
+      logger.info('Bot stopped');
+      res.json({ message: 'Bot stopped' });
+    } else if (action === 'set_mode') {
+      if (derivClient) {
+        derivClient.setMode(mode); // 'demo' or 'real'
+        res.json({ message: `Switched to ${mode} mode` });
+      } else {
+        res.json({ error: 'Deriv client not available' });
+      }
+    } else {
+      res.json({ error: 'Unknown action' });
+    }
+  } catch (err) {
+    res.json({ error: err.message });
+  }
+});
+
+// Manual trade placeholder
+app.post('/api/trade/manual', (req, res) => {
+  try {
+    // Forward to derivClient.buyContract()
+    if (!derivClient) return res.json({ error: 'Deriv client not connected' });
+    derivClient.buyContract(req.body);
+    res.json({ message: 'Trade request sent' });
+  } catch (err) {
+    res.json({ error: err.message });
+  }
+});
+
+// Config endpoints (GET / POST)
+app.get('/api/config', (req, res) => {
+  // Return current config from store (placeholder)
+  res.json(store.config || {});
+});
+app.post('/api/config', (req, res) => {
+  try {
+    // Placeholder: update config in store
+    store.config = { ...store.config, ...req.body };
+    res.json({ success: true });
+  } catch (err) {
+    res.json({ error: err.message });
+  }
+});
+
+// Analytics (placeholder)
+app.get('/api/ledger/aggregated', (req, res) => {
+  // Return dummy data for now
+  res.json({
+    totalProfit: 0,
+    tradeCount: 0,
+    winCount: 0,
+    lossCount: 0,
+    grossProfit: 0,
+    grossLoss: 0,
+    maxDrawdown: 0,
+    totalDuration: 0,
+    assetContributions: [],
+    equityData: [{ timestamp: Date.now(), equity: store.state.balance || 0 }]
+  });
+});
+
+// ============================================================
+// 6. FALLBACK (SPA)
+// ============================================================
 app.get('*', (req, res) => {
   const indexPath = path.join(publicPath, 'index.html');
   console.log(`↩️  Fallback: sending ${indexPath}`);
@@ -143,36 +209,17 @@ app.get('*', (req, res) => {
 });
 
 // ============================================================
-// 5. START SERVER & OPTIONALLY CONNECT DERIV
+// 7. START SERVER & DERIV CONNECTION
 // ============================================================
 const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
   console.log(`🚀 Server listening on port ${PORT}`);
-
-  // ---- Dummy tick updates (optional – comment out when real ticks are ready) ----
-  // Uncomment the block below if you want to see live dummy prices until Deriv is connected.
-  /*
-  setInterval(() => {
-    try {
-      const metrics = store.state.marketMetrics;
-      const sym = 'R_75';
-      const old = metrics[sym].price;
-      const newPrice = old + (Math.random() - 0.5) * 10;
-      metrics[sym].price = newPrice;
-      store.updateState({ marketMetrics: metrics });
-      store.addLog('info', `Tick ${sym}: ${newPrice.toFixed(4)}`);
-    } catch (e) {
-      console.error('Dummy tick error:', e);
-    }
-  }, 3000);
-  */
 
   // ---- Deriv integration ----
   if (derivClient) {
     console.log('🔌 Attempting Deriv connection...');
     try {
       derivClient.connect();
-      console.log('✅ Deriv connect() called (async)');
     } catch (err) {
       console.error('❌ Deriv connect() threw:', err);
     }
@@ -181,14 +228,15 @@ const server = app.listen(PORT, () => {
       try {
         const balance = data?.balance?.balance;
         const currency = data?.balance?.currency || 'USD';
-        const loginid = data?.balance?.loginid || '';
+        const loginid = data?.balance?.loginid || derivClient.accountId;
         if (balance !== undefined) {
           store.updateState({
             balance: parseFloat(balance),
             currency,
-            loginid
+            loginid,
+            tradingMode: derivClient.isDemo ? 'demo' : 'real'
           });
-          console.log(`💰 Balance updated: ${currency} ${balance}`);
+          logger.info(`💰 Balance updated: ${currency} ${balance}`);
         }
       } catch (err) {
         console.error('Balance update error:', err);
@@ -196,16 +244,20 @@ const server = app.listen(PORT, () => {
     });
 
     derivClient.on('authorized', (data) => {
-      console.log(`🔐 Deriv authorized as ${data.loginid}`);
-      if (logger) logger.info(`Logged into Deriv as ${data.loginid}`);
+      logger.info(`🔐 Authorized as ${data.loginid || derivClient.accountId}`);
     });
 
     derivClient.on('tick', (tick) => {
-      // will be used by engine later
+      // This will be used by the engine later; for now log briefly
       console.log(`📈 Tick: ${tick.symbol} ${tick.quote}`);
     });
+
+    derivClient.on('history', (history) => {
+      logger.info(`📜 Received ${history.prices?.length || 0} historical prices`);
+    });
+
   } else {
-    console.warn('⚠️ Deriv client not loaded – skipping real-time features');
+    console.warn('⚠️ Deriv client not loaded – running without real data');
   }
 });
 
