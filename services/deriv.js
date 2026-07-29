@@ -83,13 +83,26 @@ class DerivClient {
 
   async _connectViaOtp() {
     if (!this.accountId) {
-      const accounts = await this._fetchAccounts();
-      console.log('🔍 Accounts fetched, isDemo =', this.isDemo);
-      accounts.forEach(a => console.log(`   ${a.loginid} is_virtual=${a.is_virtual}`));
+      let accounts;
+      try {
+        accounts = await this._fetchAccounts();
+      } catch (err) {
+        console.error('❌ Failed to fetch accounts:', err.message);
+        throw err;
+      }
 
-      const target = accounts.find(a => a.is_virtual === this.isDemo)
-                     || accounts.find(a => a.is_virtual === true);
-      if (!target) throw new Error('No accounts available');
+      console.log('🔍 Accounts received:', JSON.stringify(accounts));
+      console.log('🔍 Looking for is_virtual ===', this.isDemo);
+
+      const target = accounts.find(a => {
+        console.log(`   checking ${a.loginid}: is_virtual=${a.is_virtual} (want ${this.isDemo})`);
+        return a.is_virtual === this.isDemo;
+      });
+
+      if (!target) {
+        console.error('❌ No matching account found! Available:', accounts.map(a => `${a.loginid}:${a.is_virtual}`));
+        throw new Error(`No ${this.isDemo ? 'demo' : 'real'} account found`);
+      }
 
       this.accountId = target.loginid;
       this.activeAccountId = target.loginid;
