@@ -3,8 +3,8 @@
    ============================================================ */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
-  background: #0b0e14;
-  color: #d1d4dc;
+  background: var(--bg-terminal);
+  color: var(--text-primary);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   height: 100%;
   height: 100svh;
@@ -157,6 +157,8 @@ body.light {
   flex: 1;
   overflow: hidden;
   position: relative;
+  background: var(--bg-terminal);
+  transition: background 0.3s;
 }
 
 .app-sidebar {
@@ -169,7 +171,7 @@ body.light {
   padding: 8px 10px;
   overflow-y: auto;
   gap: 8px;
-  transition: width 0.25s ease, padding 0.25s ease, border 0.25s ease;
+  transition: width 0.25s ease, padding 0.25s ease, border 0.25s ease, background 0.3s;
   position: relative;
   z-index: 5;
 }
@@ -197,6 +199,7 @@ body.light {
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 8px 10px;
+  transition: background 0.3s, border-color 0.3s;
 }
 .sidebar-metrics .metric { text-align: center; padding: 4px 0; }
 .sidebar-metrics .metric .lbl { font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600; letter-spacing: 0.5px; }
@@ -266,6 +269,7 @@ body.light {
   border: 1px solid var(--border-subtle);
   border-radius: 4px;
   padding: 4px 8px;
+  transition: background 0.3s, border-color 0.3s;
 }
 .sidebar-duration label { font-size: 11px; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; white-space: nowrap; }
 .sidebar-duration input,
@@ -306,9 +310,6 @@ body.light {
   background: var(--bg-surface);
   color: var(--text-primary);
 }
-.app-sidebar.collapsed ~ .sidebar-toggle-fixed {
-  left: 8px;
-}
 
 /* ---- MAIN CONTENT ---- */
 .app-main {
@@ -347,29 +348,7 @@ body.light {
 .focus-bar .left .sr .s { color: var(--green-profit); }
 .focus-bar .left .sr .r { color: var(--red-loss); }
 .focus-bar .right { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-secondary); flex-wrap: wrap; }
-.focus-bar .right .badge {
-  padding: 4px 10px;
-  border-radius: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-  font-size: 11px;
-}
-.focus-bar .right .badge.breakout { background: rgba(16,185,129,0.12); color: var(--green-profit); border: 1px solid var(--green-profit); }
-.focus-bar .right .badge.breakdown { background: rgba(239,68,68,0.12); color: var(--red-loss); border: 1px solid var(--red-loss); }
-.focus-bar .right .badge.idle { background: rgba(120,123,134,0.08); color: var(--text-secondary); border: 1px solid var(--border-subtle); }
 
-.tab-pages {
-  flex: 1;
-  display: none;
-  overflow-y: auto;
-  padding: 6px 0;
-  position: relative;
-}
-.tab-pages.active { display: block; }
-
-/* ============================================================
-   TAB VISIBILITY
-   ============================================================ */
 .tab-page {
   display: none !important;
 }
@@ -405,13 +384,6 @@ body.light {
   grid-template-columns: 1fr 1fr;
   gap: 10px 16px;
 }
-@media (max-width: 768px) {
-  .settings-subgrid { grid-template-columns: 1fr; }
-}
-@media (min-width: 1024px) {
-  .settings-subgrid { grid-template-columns: 1fr 1fr 1fr; }
-}
-
 .setting-item {
   display: flex;
   flex-direction: column;
@@ -506,7 +478,7 @@ body.light {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
-  min-width: 650px;
+  min-width: 580px;
 }
 .data-table thead { position: sticky; top: 0; z-index: 2; }
 .data-table th {
@@ -561,96 +533,13 @@ body.light {
 .data-table .col-sr { font-size: 12px; color: var(--text-secondary); }
 .data-table .col-sr .s { color: var(--green-profit); }
 .data-table .col-sr .r { color: var(--red-loss); }
-.data-table .col-status { text-align: center; }
-.data-table .col-status .icon { font-size: 14px; }
 .data-table .col-rsi { font-weight: 600; }
 .data-table .col-rsi.overbought { color: var(--red-loss); }
 .data-table .col-rsi.oversold { color: var(--green-profit); }
 .data-table .col-bb-squeeze { font-size: 12px; color: var(--text-secondary); }
 .data-table .col-trend { font-size: 14px; letter-spacing: 2px; }
-.data-table .col-step { text-align: center; }
 
-/* ---- Soft badge styles for Breakout & Step ---- */
-.badge-up {
-  background: #ecfdf5;
-  color: #065f46;
-  border: 1px solid #a7f3d0;
-  padding: 4px 12px;
-  border-radius: 16px;
-  font-size: 11px;
-  font-weight: 600;
-  display: inline-block;
-}
-.badge-down {
-  background: #fff1f2;
-  color: #9f1239;
-  border: 1px solid #fecdd3;
-  padding: 4px 12px;
-  border-radius: 16px;
-  font-size: 11px;
-  font-weight: 600;
-  display: inline-block;
-}
-.badge-range {
-  background: #f1f5f9;
-  color: #475569;
-  border: 1px solid #e2e8f0;
-  padding: 4px 12px;
-  border-radius: 16px;
-  font-size: 11px;
-  font-weight: 600;
-  display: inline-block;
-}
-.badge-step-level {
-  background: #eff6ff;
-  color: #1e40af;
-  border: 1px solid #bfdbfe;
-  padding: 4px 12px;
-  border-radius: 16px;
-  font-size: 11px;
-  font-weight: 600;
-  display: inline-block;
-}
-.badge-step-trend {
-  background: #eef2ff;
-  color: #3730a3;
-  border: 1px solid #c7d2fe;
-  padding: 4px 12px;
-  border-radius: 16px;
-  font-size: 11px;
-  font-weight: 600;
-  display: inline-block;
-}
-.badge-step-spike {
-  background: #fffbeb;
-  color: #92400e;
-  border: 1px solid #fde68a;
-  padding: 4px 12px;
-  border-radius: 16px;
-  font-size: 11px;
-  font-weight: 600;
-  display: inline-block;
-}
-.badge-step-entry {
-  background: #ecfdf5;
-  color: #065f46;
-  border: 1px solid #6ee7b7;
-  padding: 4px 12px;
-  border-radius: 16px;
-  font-size: 11px;
-  font-weight: 700;
-  display: inline-block;
-}
-.badge-step-scan {
-  background: #f8fafc;
-  color: #64748b;
-  border: 1px solid #e2e8f0;
-  padding: 4px 12px;
-  border-radius: 16px;
-  font-size: 11px;
-  font-weight: 600;
-  display: inline-block;
-}
+/* ---- Badge styles (kept for BB Squeeze only) ---- */
 .badge-squeeze {
   background: #fef3c7;
   color: #92400e;
@@ -684,6 +573,7 @@ body.light {
   border-radius: 6px;
   padding: 6px 10px;
   flex-shrink: 0;
+  transition: background 0.3s, border-color 0.3s;
 }
 .analytics-filter-bar .page-title {
   font-size: 13px;
@@ -804,6 +694,7 @@ body.light {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  transition: background 0.3s, border-color 0.3s;
 }
 .metrics-secondary .metric-item .lbl {
   font-size: 8px;
@@ -835,6 +726,7 @@ body.light {
   flex-direction: column;
   min-height: 0;
   position: relative;
+  transition: background 0.3s, border-color 0.3s;
 }
 .chart-box .ch-label {
   font-size: 10px;
