@@ -19,7 +19,7 @@ app.use(express.json());
 app.use((req,res,next) => { console.log(`📡 ${req.method} ${req.url}`); next(); });
 app.use(express.static(path.join(__dirname, 'public')));
 
-// SSE – now sends state on every change (not just when logs exist)
+// SSE – pushes full state on every change
 app.get('/api/logs', (req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
   res.write('\n');
@@ -28,14 +28,13 @@ app.get('/api/logs', (req, res) => {
 
   const onChange = () => {
     const payload = store.getStatePayload();
-    // Always send the state, even if logs are empty
     res.write(`data: ${JSON.stringify(payload)}\n\n`);
   };
   store.on('stateChanged', onChange);
   req.on('close', () => store.removeListener('stateChanged', onChange));
 });
 
-// REST
+// REST API
 app.post('/api/control', (req, res) => {
   const { action, mode } = req.body;
   console.log('🟡 POST /api/control body:', req.body);
@@ -43,7 +42,7 @@ app.post('/api/control', (req, res) => {
     if (action === 'start') { store.updateState({ active: true, locked: false }); res.json({ message: 'Bot started' }); }
     else if (action === 'stop') { store.updateState({ active: false }); res.json({ message: 'Bot stopped' }); }
     else if (action === 'set_mode') {
-      derivClient?.setMode(mode);
+      if (derivClient) derivClient.setMode(mode);
       res.json({ message: `Switched to ${mode}` });
     }
     else res.json({ error: 'Unknown action' });
@@ -72,20 +71,30 @@ const server = app.listen(PORT, () => {
   console.log(`🚀 Server on port ${PORT}`);
 
   if (derivClient) {
+    // Balance event handler – only updates if loginid matches active account
     derivClient.on('balance', (data) => {
       console.log('🔍 RAW BALANCE EVENT:', JSON.stringify(data));
 
+      // Normalise the balance format (nested or flat)
       let balanceValue, currency, loginid;
-      if (typeof data.balance === 'string' || typeof data.balance === 'number') {
-        balanceValue = data.balance;
-        currency = data.currency || 'USD';
-        loginid = data.loginid || derivClient.accountId;
-      } else if (data.balance && typeof data.balance === 'object') {
-        balanceValue = data.balance.balance;
-        currency = data.balance.currency || 'USD';
-        loginid = data.balance.loginid || derivClient.accountId;
+      if (data.balance !== undefined) {
+        if (typeof data.balance === 'object') {
+          balanceValue = data.balance.balance;
+          currency = data.balance.currency || 'USD';
+          loginid = data.balance.loginid;
+        } else {
+          balanceValue = data.balance;
+          currency = data.currency || 'USD';
+          loginid = data.loginid;
+        }
       } else {
-        console.error('❌ Unknown balance format:', JSON.stringify(data));
+        console.error('❌ Unknown balance format');
+        return;
+      }
+
+      // Ignore stale events from old accounts
+      if (loginid && derivClient.accountId && loginid !== derivClient.accountId) {
+        console.log(`⏩ Ignoring balance for ${loginid} (active is ${derivClient.accountId})`);
         return;
       }
 
@@ -93,7 +102,7 @@ const server = app.listen(PORT, () => {
       store.updateState({
         balance: parseFloat(balanceValue),
         currency,
-        loginid,
+        loginid: derivClient.accountId,
         tradingMode: derivClient.isDemo ? 'demo' : 'real'
       });
       logger.info(`💰 Balance updated: ${currency} ${balanceValue}`);
@@ -104,9 +113,11 @@ const server = app.listen(PORT, () => {
     });
 
     derivClient.on('tick', (tick) => {
+      // Future: feed into trading engine
       console.log(`📈 Tick: ${tick.symbol} ${tick.quote}`);
     });
 
+    // Start initial connection
     derivClient.connect();
   }
 });
