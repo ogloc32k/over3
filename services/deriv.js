@@ -149,7 +149,7 @@ class DerivClient {
     if (!Array.isArray(raw) || raw.length === 0) throw new Error('No accounts');
     return raw.map(acc => ({
       loginid: acc.account_id || acc.loginid,
-      is_virtual: (acc.account_type === 'demo') || acc.is_virtual,
+      is_virtual: !!(acc.account_type === 'demo' || acc.is_virtual),
       balance: acc.balance,
       currency: acc.currency,
     }));
