@@ -70,7 +70,7 @@
     try {
       const safeState = state || {};
       const tradingMode = safeState.tradingMode || 'demo';
-      const balance = safeState.balance ?? null;   // ✅ FIX: use ?? instead of || to preserve 0
+      const balance = safeState.balance ?? null;   // ✅ preserves 0
       const sessionPnl = safeState.sessionPnl || 0;
       const dailyPnl = safeState.dailyPnl || 0;
       const currentStake = safeState.currentStake || 0.35;
@@ -125,16 +125,10 @@
         const s = focusMetric.support ? Number(focusMetric.support).toFixed(2) : '—';
         const r = focusMetric.resistance ? Number(focusMetric.resistance).toFixed(2) : '—';
         srEl.innerHTML = `<span class="s">S: ${s}</span> <span class="r">R: ${r}</span>`;
-        const badge = document.getElementById('f-breakout-badge');
-        if (focusMetric.isBreakout) { badge.textContent = '🚀 BREAKOUT'; badge.className = 'badge breakout'; }
-        else if (focusMetric.isBreakdown) { badge.textContent = '📉 BREAKDOWN'; badge.className = 'badge breakdown'; }
-        else { badge.textContent = 'IDLE'; badge.className = 'badge idle'; }
         document.getElementById('f-rsi').textContent = `RSI: ${focusMetric.rsi !== undefined ? Number(focusMetric.rsi).toFixed(1) : '—'}`;
         document.getElementById('f-vol').textContent = `Vol: ${focusMetric.volatility !== undefined ? Number(focusMetric.volatility).toFixed(2) + '%' : '—'}`;
       } else {
         srEl.innerHTML = '<span class="s">S: —</span> <span class="r">R: —</span>';
-        document.getElementById('f-breakout-badge').textContent = 'IDLE';
-        document.getElementById('f-breakout-badge').className = 'badge idle';
         document.getElementById('f-rsi').textContent = 'RSI: —';
         document.getElementById('f-vol').textContent = 'Vol: —';
       }
@@ -143,41 +137,20 @@
       const tbody = document.getElementById('tableBody');
       if (!tbody) return;
       tbody.innerHTML = '';
-      let bestScore = -Infinity, bestSym = null;
-      for (const sym in MARKETS_CFG) {
-        const m = marketMetrics[sym] || null;
-        if (m && m.score > bestScore) { bestScore = m.score; bestSym = sym; }
-      }
       for (const sym in MARKETS_CFG) {
         const metric = marketMetrics[sym] || null;
         const isActive = sym === currentFocus;
         let priceDisplay = '—', step = 0, stepLabel = 'SCAN', stepClass = 'step-0';
         let support = '—', resistance = '—';
-        let breakoutLabel = '⚪ RANGE';
-        let breakoutClass = 'badge-range';
         let rsiVal = '—', rsiClass = '';
         let squeezeDisplay = '—';
         let squeezeClass = '';
         let trendHtml = '';
-
         let supportPct = null, resistancePct = null, risePct = null, fallPct = null;
 
         if (metric) {
           priceDisplay = metric.formattedPrice || formatPrice(sym, metric.price) || '—';
           step = metric.step || 0;
-
-          const price = metric.price;
-          const sup = metric.support;
-          const res = metric.resistance;
-          if (sup !== null && res !== null) {
-            if (price > res) {
-              breakoutLabel = '🟢 UP';
-              breakoutClass = 'badge-up';
-            } else if (price < sup) {
-              breakoutLabel = '🔴 DOWN';
-              breakoutClass = 'badge-down';
-            }
-          }
 
           if (step === 3) { stepLabel = 'ENTRY'; stepClass = 'step-3'; }
           else if (step === 2) { stepLabel = 'NEAR'; stepClass = 'step-2'; }
@@ -192,9 +165,7 @@
 
           if (metric.bandwidth !== null && metric.bandwidth !== undefined) {
             squeezeDisplay = metric.bandwidth.toFixed(2) + '%';
-            if (metric.bandwidth < 2.0) {
-              squeezeClass = 'badge-squeeze';
-            }
+            if (metric.bandwidth < 2.0) squeezeClass = 'badge-squeeze';
           }
 
           if (metric.tickDirections && metric.tickDirections.length > 0) {
@@ -230,7 +201,6 @@
           <td class="col-sr"><span class="s">${support}</span> / <span class="r">${resistance}</span></td>
           <td class="col-sr-pct">${srPctDisplay}</td>
           <td class="col-rf-pct">${rfPctDisplay}</td>
-          <td class="col-status"><span class="${breakoutClass}">${breakoutLabel}</span></td>
           <td class="col-rsi ${rsiClass}">${rsiVal}</td>
           <td class="col-bb-squeeze"><span class="${squeezeClass}">${squeezeDisplay}</span></td>
           <td class="col-trend">${trendHtml}</td>
@@ -271,7 +241,6 @@
         document.getElementById('mobile-asset-price').textContent = '—';
         document.getElementById('mobile-support').textContent = '—';
         document.getElementById('mobile-resistance').textContent = '—';
-        document.getElementById('mobile-breakout').textContent = '—';
         document.getElementById('mobile-rsi-value').textContent = '—';
         document.getElementById('mobile-volatility').textContent = '—';
         document.getElementById('mobile-tick-digits').innerHTML = '<span class="tick-digit">—</span>';
@@ -285,8 +254,6 @@
       const resistance = metric.resistance ? Number(metric.resistance).toFixed(2) : '—';
       const rsi = metric.rsi !== undefined ? Number(metric.rsi).toFixed(1) : '—';
       const vol = metric.volatility !== undefined ? Number(metric.volatility).toFixed(2) + '%' : '—';
-      const breakout = metric.isBreakout ? '🚀 UP' : (metric.isBreakdown ? '📉 DOWN' : '—');
-      const breakoutClass = metric.isBreakout ? 'breakout' : (metric.isBreakdown ? 'breakdown' : '');
 
       const lastPrices = metric.lastPrices || [];
       let change = 0;
@@ -309,9 +276,6 @@
 
       document.getElementById('mobile-support').textContent = support;
       document.getElementById('mobile-resistance').textContent = resistance;
-      const breakoutEl = document.getElementById('mobile-breakout');
-      breakoutEl.textContent = breakout;
-      breakoutEl.className = 'value ' + breakoutClass;
 
       document.getElementById('mobile-rsi-value').textContent = rsi;
       const rsiFill = document.getElementById('mobile-rsi-gauge').querySelector('.rsi-fill');
@@ -422,7 +386,6 @@
     eventBus
   };
 
-  // Also expose setFocusMarket globally for onclick handlers
   window.setFocusMarket = setFocusMarket;
 
   console.log('🧠 core.js loaded');
