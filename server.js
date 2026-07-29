@@ -1,6 +1,6 @@
 // services/deriv.js
 const WebSocket = require('ws');
-const config = require('../config');
+const config = require('./config');
 
 class DerivClient {
   constructor() {
