@@ -31,28 +31,33 @@
       .catch(err => console.error('Swap error:', err));
   };
 
-  window.fireManual = function (type) {
-    const duration = parseInt(document.getElementById('manual-duration')?.value) || 7;
-    const unit = document.getElementById('manual-unit')?.value || 't';
-    const focusSym = QuantCore.getCurrentFocus();
-    const prices = QuantCore.getCurrentMarketPrices();
-    const price = prices ? prices[focusSym] : null;
+  // ✅ Updated fireManual – accepts optional overrides for mobile trade
+  window.fireManual = function (type, overrides) {
+    const duration  = overrides?.duration     ?? parseInt(document.getElementById('manual-duration')?.value) || 7;
+    const unit      = overrides?.durationUnit ?? document.getElementById('manual-unit')?.value ?? 't';
+    const focusSym  = overrides?.symbol       ?? QuantCore.getCurrentFocus();
+    const stake     = overrides?.stake;
+    const prices    = QuantCore.getCurrentMarketPrices();
+    const price     = prices ? prices[focusSym] : null;
 
     if (price === undefined || price === null) {
       alert('No price data available for ' + (focusSym || '') + '. Please wait for ticks.');
       return;
     }
 
+    const body = {
+      symbol: focusSym,
+      contractType: type,
+      duration: duration,
+      durationUnit: unit,
+      price: price
+    };
+    if (stake !== undefined) body.stake = stake;
+
     fetch('/api/trade/manual', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        symbol: focusSym,
-        contractType: type,
-        duration: duration,
-        durationUnit: unit,
-        price: price
-      })
+      body: JSON.stringify(body)
     })
       .then(async (response) => {
         const text = await response.text();
