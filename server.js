@@ -1,169 +1,183 @@
-// server.js – full integration with Deriv, frontend, account switching
-require('dotenv').config();
+// services/deriv.js
+const WebSocket = require('ws');
+const config = require('../config');
 
-// ============================================================
-// 1. GLOBAL ERROR CATCHERS
-// ============================================================
-process.on('uncaughtException', (err) => {
-  console.error('🔥 UNCAUGHT EXCEPTION – server will exit');
-  console.error(err);
-  process.exit(1);
-});
-process.on('unhandledRejection', (reason) => {
-  console.error('🔥 UNHANDLED REJECTION – server will exit');
-  console.error(reason);
-  process.exit(1);
-});
-
-// ============================================================
-// 2. MODULE LOADING
-// ============================================================
-let express, path, store, logger, derivClient;
-try {
-  express = require('express');
-  path = require('path');
-  console.log('✅ Core modules loaded (express, path)');
-} catch (err) {
-  console.error('❌ Failed to load core modules:', err);
-  process.exit(1);
-}
-
-try { store = require('./store'); console.log('✅ Store loaded'); } catch (e) { console.error('❌ store.js:', e); process.exit(1); }
-try { logger = require('./logger'); console.log('✅ Logger loaded'); } catch (e) { console.error('❌ logger.js:', e); process.exit(1); }
-try { derivClient = require('./services/deriv'); console.log('✅ Deriv client loaded'); } catch (e) { console.error('❌ deriv.js:', e); derivClient = null; }
-
-// Give Deriv client access to the store (needed for mode switch)
-if (derivClient) {
-  derivClient.setStore(store);
-}
-
-// ============================================================
-// 3. EXPRESS APP SETUP
-// ============================================================
-const app = express();
-app.use(express.json());
-app.use((req, res, next) => {
-  console.log(`📡 ${req.method} ${req.url}`);
-  next();
-});
-
-const publicPath = path.join(__dirname, 'public');
-app.use(express.static(publicPath));
-
-app.get('/health', (req, res) => res.json({ status: 'ok' }));
-
-// ============================================================
-// 4. SSE ENDPOINT
-// ============================================================
-app.get('/api/logs', (req, res) => {
-  console.log('🔗 SSE client connected');
-  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
-  res.write('\n');
-  try { res.write(`data: ${JSON.stringify(store.getStatePayload())}\n\n`); } catch(e) {}
-
-  const onChange = () => {
-    try {
-      const payload = store.getStatePayload();
-      if (payload.logs && payload.logs.length > 0) res.write(`data: ${JSON.stringify(payload)}\n\n`);
-    } catch(e) {}
-  };
-  store.on('stateChanged', onChange);
-  req.on('close', () => { store.removeListener('stateChanged', onChange); });
-});
-
-// ============================================================
-// 5. REST API
-// ============================================================
-app.post('/api/control', (req, res) => {
-  const { action, mode } = req.body;
-  try {
-    if (action === 'start') {
-      store.updateState({ active: true, locked: false });
-      logger.info('Bot started');
-      res.json({ message: 'Bot started' });
-    } else if (action === 'stop') {
-      store.updateState({ active: false });
-      logger.info('Bot stopped');
-      res.json({ message: 'Bot stopped' });
-    } else if (action === 'set_mode') {
-      derivClient?.setMode(mode);
-      res.json({ message: `Switched to ${mode}` });
-    } else {
-      res.json({ error: 'Unknown action' });
-    }
-  } catch (err) { res.json({ error: err.message }); }
-});
-
-app.post('/api/trade/manual', (req, res) => {
-  try {
-    derivClient?.buyContract(req.body);
-    res.json({ message: 'Trade request sent' });
-  } catch (err) { res.json({ error: err.message }); }
-});
-
-app.get('/api/config', (req, res) => res.json(store.config || {}));
-app.post('/api/config', (req, res) => {
-  store.config = { ...store.config, ...req.body };
-  res.json({ success: true });
-});
-
-app.get('/api/ledger/aggregated', (req, res) => {
-  res.json({
-    totalProfit: 0, tradeCount: 0, winCount: 0, lossCount: 0,
-    grossProfit: 0, grossLoss: 0, maxDrawdown: 0, totalDuration: 0,
-    assetContributions: [],
-    equityData: [{ timestamp: Date.now(), equity: store.state.balance || 0 }]
-  });
-});
-
-app.get('*', (req, res) => {
-  res.sendFile(path.join(publicPath, 'index.html'), (err) => err && res.status(500).send('Error'));
-});
-
-// ============================================================
-// 6. START SERVER & DERIV CONNECTION
-// ============================================================
-const PORT = process.env.PORT || 3000;
-const server = app.listen(PORT, () => {
-  console.log(`🚀 Server listening on port ${PORT}`);
-
-  if (derivClient) {
-    console.log('🔌 Attempting Deriv connection...');
-    try { derivClient.connect(); } catch (err) { console.error('Deriv connect error:', err); }
-
-    derivClient.on('balance', (data) => {
-      console.log('🔍 RAW BALANCE DATA:', JSON.stringify(data));
-      try {
-        // The balance data might be nested: data.balance or directly the object
-        const balanceObj = data?.balance || data;
-        const balance = balanceObj?.balance;
-        const currency = balanceObj?.currency || 'USD';
-        if (balance !== undefined) {
-          store.updateState({
-            balance: parseFloat(balance),
-            currency,
-            loginid: derivClient.accountId,
-            tradingMode: derivClient.isDemo ? 'demo' : 'real'
-          });
-          logger.info(`💰 Balance updated: ${currency} ${balance}`);
-        } else {
-          console.warn('⚠️ Balance field missing in data');
-        }
-      } catch (err) { console.error('Balance update error:', err); }
-    });
-
-    derivClient.on('authorized', (data) => {
-      logger.info(`🔐 Authorized as ${data.loginid || derivClient.accountId}`);
-    });
-
-    derivClient.on('tick', (tick) => {
-      console.log(`📈 Tick: ${tick.symbol} ${tick.quote}`);
-    });
-
-    derivClient.on('history', (history) => {
-      logger.info(`📜 Received ${history.prices?.length || 0} historical prices`);
-    });
+class DerivClient {
+  constructor() {
+    this.ws = null;
+    this.listeners = {};
+    this.accountId = null;
+    this.pingInterval = null;
+    this.isDemo = true;
+    this._store = null;
+    this._connecting = false;       // prevent overlapping connections
   }
-});
 
-process.on('SIGTERM', () => server.close(() => process.exit(0)));
+  setStore(storeInstance) { this._store = storeInstance; }
+
+  connect() {
+    if (this._connecting) return;
+    this._connecting = true;
+    console.log(`🔵 connect() – isDemo = ${this.isDemo}`);
+    this._connectViaOtp()
+      .then(() => console.log('✅ Connected to Deriv'))
+      .catch(err => {
+        console.error('❌ Deriv connection failed:', err.message);
+      })
+      .finally(() => {
+        this._connecting = false;
+        // schedule retry only if still not connected
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+          setTimeout(() => this.connect(), 5000);
+        }
+      });
+  }
+
+  setMode(mode) {
+    console.log(`🔵 setMode(${mode})`);
+    this.isDemo = (mode === 'real') ? false : true;
+    if (this._store) this._store.updateState({ tradingMode: this.isDemo ? 'demo' : 'real' });
+    this._disconnect();
+    this.accountId = null;
+    this.connect();
+  }
+
+  _disconnect() {
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+    clearInterval(this.pingInterval);
+  }
+
+  async _connectViaOtp() {
+    if (!this.accountId) {
+      const accounts = await this._fetchAccounts();
+      const target = accounts.find(a => a.is_virtual === this.isDemo)
+                     || accounts.find(a => a.is_virtual === true);
+      if (!target) throw new Error('No accounts available');
+      this.accountId = target.loginid;
+
+      // ✅ Emit instant balance from account list
+      this._emit('balance', {
+        balance: target.balance,
+        currency: target.currency || 'USD',
+        loginid: target.loginid
+      });
+      console.log(`🔑 Account: ${this.accountId} balance=${target.balance}`);
+    }
+
+    const otpUrl = `https://api.derivws.com/trading/v1/options/accounts/${this.accountId}/otp`;
+    const otpResp = await fetch(otpUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.derivToken}`,
+        'Deriv-App-ID': config.derivAppId,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({})
+    });
+
+    const otpText = await otpResp.text();
+    if (!otpResp.ok || otpText.startsWith('<!DOCTYPE')) throw new Error(`OTP failed: ${otpResp.status}`);
+    const data = JSON.parse(otpText);
+    if (data.errors) throw new Error('OTP API error: ' + JSON.stringify(data.errors));
+
+    const wsUrl = data.data?.url || data.websocket_url;
+    if (!wsUrl) throw new Error('No WebSocket URL');
+    this._openWebSocket(wsUrl);
+  }
+
+  async _fetchAccounts() {
+    const url = 'https://api.derivws.com/trading/v1/options/accounts';
+    const resp = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${config.derivToken}`, 'Deriv-App-ID': config.derivAppId }
+    });
+    const text = await resp.text();
+    if (!resp.ok || text.startsWith('<!DOCTYPE')) throw new Error(`Accounts failed: ${resp.status}`);
+    const json = JSON.parse(text);
+    if (json.errors) throw new Error('Accounts error: ' + JSON.stringify(json.errors));
+    const raw = json.data || json.accounts;
+    if (!Array.isArray(raw) || raw.length === 0) throw new Error('No accounts');
+    return raw.map(acc => ({
+      loginid: acc.account_id || acc.loginid,
+      is_virtual: (acc.account_type === 'demo') || acc.is_virtual,
+      balance: acc.balance,
+      currency: acc.currency,
+    }));
+  }
+
+  _openWebSocket(wsUrl) {
+    this.ws = new WebSocket(wsUrl);
+    this.ws.on('open', () => {
+      console.log('🔌 WebSocket connected (authenticated)');
+      this.pingInterval = setInterval(() => this.send({ ping: 1 }), 30000);
+      this._emit('authorized', { loginid: this.accountId });
+      this.send({ balance: 1, subscribe: 1 });
+      this._subscribeTicks();
+    });
+
+    this.ws.on('message', (data) => {
+      try {
+        const msg = JSON.parse(data);
+        console.log('📩 WS msg keys:', Object.keys(msg).join(', '));
+        this._handleMessage(msg);
+      } catch (e) {
+        console.error('❌ WS parse error:', e);
+      }
+    });
+
+    this.ws.on('close', (code, reason) => {
+      console.log(`⚠️ WS closed (${code}). Reason: ${reason?.toString()}`);
+      clearInterval(this.pingInterval);
+      this.ws = null;
+      // reconnect after 5 sec if not already connecting
+      if (!this._connecting) setTimeout(() => this.connect(), 5000);
+    });
+
+    this.ws.on('error', (err) => console.error('❌ WS error:', err.message));
+  }
+
+  _handleMessage(msg) {
+    if (msg.error) return console.error('Deriv error:', msg.error);
+
+    // Balance (nested format: { balance: { balance: ..., currency: ... } })
+    if (msg.balance) {
+      this._emit('balance', msg.balance);
+      return;
+    }
+    if (msg.tick) { this._emit('tick', msg.tick); return; }
+    if (msg.proposal_open_contract) { this._emit('contract_result', msg.proposal_open_contract); return; }
+    if (msg.buy) { this._emit('buy_result', msg.buy); return; }
+    if (msg.history) { this._emit('history', msg.history); return; }
+
+    // Legacy msg_type
+    if (msg.msg_type) {
+      switch (msg.msg_type) {
+        case 'balance': this._emit('balance', msg.balance); break;
+        case 'tick': this._emit('tick', msg.tick); break;
+        case 'proposal_open_contract': this._emit('contract_result', msg.proposal_open_contract); break;
+        case 'buy': this._emit('buy_result', msg.buy); break;
+        case 'history': this._emit('history', msg.history); break;
+      }
+    }
+  }
+
+  _subscribeTicks() {
+    const symbols = ['R_10','R_25','R_50','R_75','R_100','1HZ10V','1HZ25V','1HZ50V','1HZ75V','1HZ100V'];
+    symbols.forEach(s => this.send({ ticks: s, subscribe: 1 }));
+    console.log('📊 Subscribed to ticks');
+  }
+
+  requestHistory(symbol, start, end, count) { /* unchanged */ }
+  buyContract(params) { /* unchanged */ }
+
+  send(data) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(data));
+  }
+  on(e, cb) { if (!this.listeners[e]) this.listeners[e] = []; this.listeners[e].push(cb); }
+  off(e, cb) { if (!this.listeners[e]) return; this.listeners[e] = this.listeners[e].filter(c => c !== cb); }
+  _emit(e, d) { (this.listeners[e] || []).forEach(cb => cb(d)); }
+}
+
+module.exports = new DerivClient();
