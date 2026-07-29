@@ -48,7 +48,7 @@
   -webkit-overflow-scrolling: touch !important;
 }
 .data-table {
-  min-width: 650px !important;
+  min-width: 580px !important;
   font-size: 12px !important;
 }
 .col-sr, .col-sr-pct, .col-rf-pct, .col-bb-squeeze, .col-trend {
@@ -126,7 +126,7 @@
 
 .detail-levels {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 6px;
   background: var(--bg-surface);
   border-radius: 6px;
@@ -140,8 +140,6 @@
 }
 .level-item .label { font-size: 8px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600; }
 .level-item .value { font-size: 12px; font-weight: 700; font-family: 'Consolas', monospace; color: var(--text-primary); }
-.level-item .value.breakout { color: var(--green-profit); }
-.level-item .value.breakdown { color: var(--red-loss); }
 
 .detail-indicators {
   display: flex;
@@ -242,9 +240,6 @@
 .focus-bar .right { font-size: 12px; }
 .data-table th { font-size: 11px; }
 .data-table td { font-size: 12px; }
-.badge-up, .badge-down, .badge-range { font-size: 11px; }
-.badge-step-level, .badge-step-trend, .badge-step-spike, .badge-step-entry, .badge-step-scan { font-size: 11px; }
-.badge-squeeze { font-size: 10px; }
 .metric-card .lbl { font-size: 11px; }
 .metric-card .val { font-size: 15px; }
 .setting-item label { font-size: 11px; }
