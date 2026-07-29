@@ -74,7 +74,12 @@ const server = app.listen(PORT, () => {
     derivClient.on('balance', (data) => {
       console.log('🔍 RAW BALANCE EVENT:', JSON.stringify(data), '| activeAccountId:', derivClient.activeAccountId);
 
-      // Normalise balance format
+      // ✅ Block all events during transition
+      if (!derivClient.activeAccountId) {
+        console.log('⏩ Ignoring balance – no active account (transition in progress)');
+        return;
+      }
+
       let balanceValue, currency, loginid;
       if (data.balance !== undefined) {
         if (typeof data.balance === 'object') {
@@ -91,20 +96,23 @@ const server = app.listen(PORT, () => {
         return;
       }
 
-      // ✅ Ignore stale events from old connections
-      if (derivClient.activeAccountId && loginid && loginid !== derivClient.activeAccountId) {
+      // ✅ Ignore stale events from old accounts
+      if (loginid && loginid !== derivClient.activeAccountId) {
         console.log(`⏩ Ignoring balance for ${loginid} (active is ${derivClient.activeAccountId})`);
         return;
       }
 
-      console.log(`💰 Parsed balance: ${balanceValue} ${currency}`);
+      // ✅ Use the isDemo flag from the event if available, otherwise from derivClient
+      const mode = data.isDemo !== undefined ? (data.isDemo ? 'demo' : 'real') : (derivClient.isDemo ? 'demo' : 'real');
+
+      console.log(`💰 Parsed balance: ${balanceValue} ${currency} (mode: ${mode})`);
       store.updateState({
         balance: parseFloat(balanceValue),
         currency,
-        loginid: derivClient.activeAccountId,
-        tradingMode: derivClient.isDemo ? 'demo' : 'real'
+        loginid: derivClient.activeAccountId || loginid,
+        tradingMode: mode
       });
-      logger.info(`💰 Balance updated: ${currency} ${balanceValue}`);
+      logger.info(`💰 Balance updated: ${currency} ${balanceValue} (${mode})`);
     });
 
     derivClient.on('authorized', (data) => {
