@@ -12,20 +12,20 @@ class DerivClient {
   constructor() {
     this.ws = null;
     this.listeners = {};
-    this.accountId = null;           // active account loginid
+    this.accountId = null;
+    this.activeAccountId = null;      // used for balance filtering
     this.pingInterval = null;
     this.isDemo = true;
     this._store = null;
     this._connecting = false;
     this._reconnectTimer = null;
-    this._reconnectDelay = 1000;     // start at 1s
-    this._maxReconnectDelay = 30000; // max 30s
+    this._reconnectDelay = 1000;
+    this._maxReconnectDelay = 30000;
     this._retryCount = 0;
+    this._explicitClose = false;
   }
 
   setStore(storeInstance) { this._store = storeInstance; }
-
-  // ---------- PUBLIC API ----------
 
   connect() {
     if (this._connecting) return;
@@ -50,15 +50,19 @@ class DerivClient {
   setMode(mode) {
     console.log(`🔵 setMode(${mode})`);
     this.isDemo = (mode === 'real') ? false : true;
+
+    // Immediately invalidate the active account so stale events are ignored
+    this.activeAccountId = null;
+
     if (this._store) {
       this._store.updateState({ tradingMode: this.isDemo ? 'demo' : 'real' });
     }
-    this._disconnect(true);   // hard reset – cancel reconnect
+
+    this._disconnect(true);
     this.accountId = null;
     this.connect();
   }
 
-  // Request balance subscription (use when monitoring trades)
   subscribeBalance() {
     this.send({ balance: 1, subscribe: 1 });
     console.log('💰 Balance subscription requested');
@@ -67,7 +71,7 @@ class DerivClient {
   requestHistory(symbol, start, end, count) {
     const req = { ticks_history: symbol, adjust_start_time: 1, style: 'ticks', granularity: 1 };
     if (count) req.count = count;
-    else { req.start = start || Math.floor(Date.now()/1000)-3600; req.end = end || Math.floor(Date.now()/1000); }
+    else { req.start = start || Math.floor(Date.now() / 1000) - 3600; req.end = end || Math.floor(Date.now() / 1000); }
     this.send(req);
   }
 
@@ -86,18 +90,22 @@ class DerivClient {
   async _connectViaOtp() {
     if (!this.accountId) {
       const accounts = await this._fetchAccounts();
+      console.log('🔍 Accounts fetched, isDemo =', this.isDemo);
+      accounts.forEach(a => console.log(`   ${a.loginid} is_virtual=${a.is_virtual}`));
+
       const target = accounts.find(a => a.is_virtual === this.isDemo)
                      || accounts.find(a => a.is_virtual === true);
       if (!target) throw new Error('No accounts available');
-      this.accountId = target.loginid;
 
-      // Emit instant balance from account list (prevents UI flash)
+      this.accountId = target.loginid;
+      this.activeAccountId = target.loginid;   // ✅ activate for filtering
+
       this._emit('balance', {
         balance: target.balance,
         currency: target.currency || 'USD',
         loginid: target.loginid
       });
-      console.log(`🔑 Account: ${this.accountId} balance=${target.balance}`);
+      console.log(`🔑 Account: ${this.accountId} balance=${target.balance} (activeAccountId=${this.activeAccountId})`);
     }
 
     const otpUrl = `https://api.derivws.com/trading/v1/options/accounts/${this.accountId}/otp`;
@@ -141,16 +149,12 @@ class DerivClient {
   }
 
   _openWebSocket(wsUrl) {
-    // Remove any old connection
     this._disconnect(false);
     this.ws = new WebSocket(wsUrl);
     this.ws.on('open', () => {
       console.log('🔌 WebSocket connected (authenticated)');
       this.pingInterval = setInterval(() => this.send({ ping: 1 }), 30000);
       this._emit('authorized', { loginid: this.accountId });
-
-      // Do NOT request balance – already have it from accounts list.
-      // Subscribe to ticks only.
       this._subscribeTicks();
     });
 
@@ -167,7 +171,6 @@ class DerivClient {
       console.log(`⚠️ WS closed (${code}). Reason: ${reason?.toString()}`);
       clearInterval(this.pingInterval);
       this.ws = null;
-      // Only reconnect if not intentionally disconnected
       if (!this._explicitClose) {
         this._scheduleReconnect();
       }
@@ -180,7 +183,6 @@ class DerivClient {
   _disconnect(explicit = false) {
     this._explicitClose = explicit;
     if (this.ws) {
-      // Remove all listeners to prevent late events
       this.ws.removeAllListeners();
       this.ws.close();
       this.ws = null;
@@ -193,7 +195,7 @@ class DerivClient {
     if (this._reconnectTimer) return;
     this._retryCount++;
     const delay = Math.min(this._reconnectDelay * Math.pow(2, this._retryCount - 1), this._maxReconnectDelay);
-    console.log(`⏳ Reconnecting in ${delay/1000}s (attempt ${this._retryCount})`);
+    console.log(`⏳ Reconnecting in ${delay / 1000}s (attempt ${this._retryCount})`);
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;
       this.connect();
@@ -213,18 +215,14 @@ class DerivClient {
       return;
     }
 
-    // Respond to server pings to keep connection alive
+    // Respond to server pings
     if (msg.ping) {
       this.send({ pong: 1 });
       return;
     }
 
-    // Direct fields
     if (msg.balance) {
-      // Only accept balance if it matches our active account
-      if (msg.balance.loginid === this.accountId || !msg.balance.loginid) {
-        this._emit('balance', msg.balance);
-      }
+      this._emit('balance', msg.balance);
       return;
     }
     if (msg.tick) { this._emit('tick', msg.tick); return; }
@@ -232,13 +230,9 @@ class DerivClient {
     if (msg.buy) { this._emit('buy_result', msg.buy); return; }
     if (msg.history) { this._emit('history', msg.history); return; }
 
-    // Legacy msg_type
     if (msg.msg_type) {
       switch (msg.msg_type) {
-        case 'balance':
-          if (msg.balance && (msg.balance.loginid === this.accountId || !msg.balance.loginid))
-            this._emit('balance', msg.balance);
-          break;
+        case 'balance': this._emit('balance', msg.balance); break;
         case 'tick': this._emit('tick', msg.tick); break;
         case 'proposal_open_contract': this._emit('contract_result', msg.proposal_open_contract); break;
         case 'buy': this._emit('buy_result', msg.buy); break;
@@ -249,15 +243,15 @@ class DerivClient {
   }
 
   _subscribeTicks() {
-    const symbols = ['R_10','R_25','R_50','R_75','R_100','1HZ10V','1HZ25V','1HZ50V','1HZ75V','1HZ100V'];
+    const symbols = ['R_10', 'R_25', 'R_50', 'R_75', 'R_100', '1HZ10V', '1HZ25V', '1HZ50V', '1HZ75V', '1HZ100V'];
     symbols.forEach(s => this.send({ ticks: s, subscribe: 1 }));
     console.log('📊 Subscribed to ticks');
   }
 
-  // ---------- UTILS ----------
   send(data) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(data));
   }
+
   on(e, cb) { if (!this.listeners[e]) this.listeners[e] = []; this.listeners[e].push(cb); }
   off(e, cb) { if (!this.listeners[e]) return; this.listeners[e] = this.listeners[e].filter(c => c !== cb); }
   _emit(e, d) { (this.listeners[e] || []).forEach(cb => cb(d)); }
