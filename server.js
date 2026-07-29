@@ -1,71 +1,82 @@
-// server.js
-require('dotenv').config();
-const express = require('express');
-const path = require('path');
-const store = require('./store');
-const logger = require('./logger');
-const derivClient = require('./services/deriv');
+// services/deriv.js
+const WebSocket = require('ws');
+const config = require('../config');
 
-const app = express();
-app.use(express.json());
+class DerivClient {
+  constructor() {
+    this.ws = null;
+    this.listeners = {};
+  }
 
-// Serve static frontend
-app.use(express.static(path.join(__dirname, 'public')));
+  connect() {
+    const wsUrl = `wss://ws.binaryws.com/websockets/v3?app_id=${config.derivAppId}`;
+    this.ws = new WebSocket(wsUrl);
 
-// SSE endpoint
-app.get('/api/logs', (req, res) => {
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive'
-  });
-  res.write('\n');
+    this.ws.on('open', () => {
+      console.log('Deriv WebSocket connected');
+      // Authorize immediately
+      this.send({ authorize: config.derivToken });
+    });
 
-  const initial = store.getStatePayload();
-  res.write(`data: ${JSON.stringify(initial)}\n\n`);
+    this.ws.on('message', (data) => {
+      try {
+        const msg = JSON.parse(data);
+        this._handleMessage(msg);
+      } catch (e) {
+        console.error('Deriv parse error:', e);
+      }
+    });
 
-  const onChange = () => {
-    const payload = store.getStatePayload();
-    if (payload.logs.length > 0) {
-      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    this.ws.on('close', () => {
+      console.log('Deriv WebSocket closed – reconnecting in 5s');
+      setTimeout(() => this.connect(), 5000);
+    });
+
+    this.ws.on('error', (err) => {
+      console.error('Deriv WebSocket error:', err.message);
+    });
+  }
+
+  send(data) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(data));
     }
-  };
-  store.on('stateChanged', onChange);
+  }
 
-  req.on('close', () => {
-    store.removeListener('stateChanged', onChange);
-  });
-});
+  on(event, callback) {
+    if (!this.listeners[event]) this.listeners[event] = [];
+    this.listeners[event].push(callback);
+  }
 
-// Fallback for SPA
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+  off(event, callback) {
+    if (!this.listeners[event]) return;
+    this.listeners[event] = this.listeners[event].filter(cb => cb !== callback);
+  }
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  logger.info(`Server running on port ${PORT}`);
+  _emit(event, data) {
+    (this.listeners[event] || []).forEach(cb => cb(data));
+  }
 
-  // Connect to Deriv
-  derivClient.connect();
-
-  // When balance arrives, update the store (and the frontend)
-  derivClient.on('balance', (data) => {
-    const balance = data?.balance?.balance;
-    const currency = data?.balance?.currency || 'USD';
-    const loginid = data?.balance?.loginid || '';
-
-    if (balance !== undefined) {
-      store.updateState({
-        balance: parseFloat(balance),
-        currency,
-        loginid
-      });
-      logger.info(`Balance updated: ${currency} ${balance}`);
+  _handleMessage(msg) {
+    if (msg.error) {
+      console.error('Deriv error:', msg.error);
+      return;
     }
-  });
+    if (msg.authorize) {
+      console.log('Deriv authorized');
+      this._emit('authorized', msg.authorize);
+      // Request balance immediately after auth
+      this.send({ balance: 1 });
+    }
+    if (msg.balance) {
+      this._emit('balance', msg.balance);
+    }
+    if (msg.tick) {
+      this._emit('tick', msg.tick);
+    }
+    // (handle other messages later)
+  }
+}
 
-  derivClient.on('authorized', (data) => {
-    logger.info(`Authorized as ${data.loginid}`);
-  });
-});
+const derivClient = new DerivClient();
+module.exports = derivClient;
