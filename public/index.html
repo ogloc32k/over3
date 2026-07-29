@@ -5,23 +5,72 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>QUANTCORE // TERMINAL v6.0</title>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0">
-  <link rel="stylesheet" href="css/styles.css?v=2">
+  <link rel="stylesheet" href="css/styles.css?v=3">
+  <link rel="stylesheet" href="css/styles-mobile.css?v=3" media="(max-width: 768px)">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
+  <!-- ====== NAV DRAWER (Mobile) ====== -->
+  <div class="nav-drawer-overlay" id="navDrawerOverlay" onclick="closeNavDrawer()"></div>
+  <nav class="nav-drawer" id="navDrawer">
+    <div class="drawer-header">
+      <div class="drawer-profile">
+        <div class="drawer-avatar">👤</div>
+        <div class="drawer-profile-info">
+          <div class="drawer-mode" id="drawer-mode">DEMO</div>
+          <div class="drawer-balance" id="drawer-balance">$0.00</div>
+        </div>
+      </div>
+      <button class="drawer-close" onclick="closeNavDrawer()">✕</button>
+    </div>
+    <div class="drawer-nav">
+      <button class="drawer-nav-item active" data-tab="tab-home" onclick="switchTab('tab-home'); closeNavDrawer()">
+        <span class="dnav-icon">📊</span><span class="dnav-label">Home</span>
+      </button>
+      <button class="drawer-nav-item" data-tab="tab-markets" onclick="switchTab('tab-markets'); closeNavDrawer()">
+        <span class="dnav-icon">📈</span><span class="dnav-label">Markets</span>
+      </button>
+      <button class="drawer-nav-item" data-tab="tab-manual" onclick="switchTab('tab-manual'); closeNavDrawer()">
+        <span class="dnav-icon">🎯</span><span class="dnav-label">Manual Trade</span>
+      </button>
+      <button class="drawer-nav-item" data-tab="tab-bots" onclick="switchTab('tab-bots'); closeNavDrawer()">
+        <span class="dnav-icon">🤖</span><span class="dnav-label">Bots</span>
+      </button>
+      <button class="drawer-nav-item" data-tab="tab-analytics" onclick="switchTab('tab-analytics'); closeNavDrawer()">
+        <span class="dnav-icon">📉</span><span class="dnav-label">Analytics</span>
+      </button>
+      <button class="drawer-nav-item" data-tab="tab-logs" onclick="switchTab('tab-logs'); closeNavDrawer()">
+        <span class="dnav-icon">📋</span><span class="dnav-label">Logs</span>
+      </button>
+      <button class="drawer-nav-item" data-tab="tab-settings" onclick="switchTab('tab-settings'); closeNavDrawer()">
+        <span class="dnav-icon">⚙️</span><span class="dnav-label">Settings</span>
+      </button>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn-swap-drawer" onclick="swapEnvironment(); closeNavDrawer()">🔄 Switch Account</button>
+    </div>
+  </nav>
+
   <!-- ====== HEADER ====== -->
   <header class="app-header">
     <div class="left">
+      <!-- Desktop: brand + tabs -->
       <div class="app-brand">QUANTCORE<span>//</span>TERMINAL <small>v6.0</small></div>
       <div class="header-tabs">
-        <button class="nav-tab active" data-tab="tab-dashboard">Dashboard</button>
+        <button class="nav-tab active" data-tab="tab-home">Home</button>
+        <button class="nav-tab" data-tab="tab-markets">Markets</button>
+        <button class="nav-tab" data-tab="tab-manual">Manual</button>
+        <button class="nav-tab" data-tab="tab-bots">Bots</button>
         <button class="nav-tab" data-tab="tab-analytics">Analytics</button>
         <button class="nav-tab" data-tab="tab-logs">Logs</button>
         <button class="nav-tab" data-tab="tab-settings">Settings</button>
       </div>
+      <!-- Mobile: profile button -->
+      <button class="mobile-profile-btn" id="mobileProfileBtn" onclick="openNavDrawer()">
+        <span class="profile-avatar">👤</span>
+        <span class="profile-mode" id="header-profile-mode">DEMO</span>
+      </button>
     </div>
     <div class="header-right">
       <span class="header-status" id="header-status">● IDLE</span>
@@ -33,7 +82,7 @@
   <!-- ====== BODY ====== -->
   <div class="app-body">
 
-    <!-- SIDEBAR -->
+    <!-- SIDEBAR (Desktop only) -->
     <aside class="app-sidebar" id="appSidebar">
       <div class="sidebar-content">
         <div class="sidebar-metrics">
@@ -66,13 +115,10 @@
       </div>
     </aside>
 
-    <!-- FIXED SIDEBAR TOGGLE -->
-    <button class="sidebar-toggle-fixed" id="sidebarToggleFixed">◀</button>
-
     <!-- MAIN CONTENT -->
     <main class="app-main">
 
-      <!-- FOCUS BAR (hidden on Analytics) -->
+      <!-- FOCUS BAR (Desktop only) -->
       <div class="focus-bar" id="focusBar">
         <div class="left">
           <span class="name" id="f-name">Volatility 75 Index</span>
@@ -85,9 +131,11 @@
         </div>
       </div>
 
-      <!-- TAB PAGES -->
-      <!-- DASHBOARD -->
-      <div id="tab-dashboard" class="tab-page active">
+      <!-- ======= TAB PAGES ======= -->
+
+      <!-- HOME (Mobile landing / Desktop dashboard) -->
+      <div id="tab-home" class="tab-page active">
+        <!-- Desktop: original markets table -->
         <div class="table-container desktop-table">
           <table class="data-table" id="dataTable">
             <thead>
@@ -106,35 +154,162 @@
           </table>
         </div>
 
-        <!-- MOBILE MARKET VIEW -->
-        <div class="mobile-market-view">
-          <div class="asset-carousel" id="assetCarousel"></div>
-          <div class="asset-detail-card" id="assetDetailCard">
-            <div class="detail-header">
-              <span class="asset-name" id="mobile-asset-name">Volatility 75 Index</span>
-              <span class="asset-price" id="mobile-asset-price">—</span>
-              <span class="asset-change" id="mobile-asset-change">—</span>
-            </div>
-            <div class="detail-levels">
-              <div class="level-item"><span class="label">Support</span><span class="value" id="mobile-support">—</span></div>
-              <div class="level-item"><span class="label">Resistance</span><span class="value" id="mobile-resistance">—</span></div>
-            </div>
-            <div class="detail-indicators">
-              <div class="indicator-item">
-                <span class="label">RSI (14)</span>
-                <div class="rsi-gauge" id="mobile-rsi-gauge"><div class="rsi-fill" style="width:50%;"></div></div>
-                <span class="value" id="mobile-rsi-value">50.0</span>
-              </div>
-              <div class="indicator-item">
-                <span class="label">Volatility</span>
-                <span class="value" id="mobile-volatility">—</span>
+        <!-- Mobile: performance home screen -->
+        <div class="mobile-home-screen">
+          <!-- Performance graph -->
+          <div class="perf-section">
+            <div class="perf-header">
+              <span class="perf-title">Equity Performance</span>
+              <div class="perf-timeframe">
+                <button class="tf-btn active" onclick="setHomeTf(this,'1W')">1W</button>
+                <button class="tf-btn" onclick="setHomeTf(this,'1M')">1M</button>
               </div>
             </div>
-            <div class="detail-tick-stream">
-              <div class="tick-label">Last Ticks</div>
-              <div class="tick-digits" id="mobile-tick-digits"></div>
+            <div class="perf-chart-wrap">
+              <canvas id="mobile-equity-chart"></canvas>
+              <div class="perf-empty" id="perf-empty">No trade history yet</div>
+            </div>
+            <div class="perf-stats">
+              <div class="pstat"><div class="pstat-lbl">Net P&L</div><div class="pstat-val" id="home-pnl">$0.00</div></div>
+              <div class="pstat"><div class="pstat-lbl">Win Rate</div><div class="pstat-val" id="home-wr">0%</div></div>
+              <div class="pstat"><div class="pstat-lbl">Trades</div><div class="pstat-val" id="home-trades">0</div></div>
             </div>
           </div>
+
+          <!-- Asset performance bar -->
+          <div class="asset-perf-section">
+            <div class="section-title">Asset Performance</div>
+            <div class="asset-perf-chart-wrap">
+              <canvas id="mobile-asset-perf-chart"></canvas>
+              <div class="perf-empty" id="asset-perf-empty">No data yet</div>
+            </div>
+          </div>
+
+          <!-- Quick status strip -->
+          <div class="home-status-strip">
+            <div class="hstat"><span class="hstat-lbl">Mode</span><span class="hstat-val blue" id="home-mode">DEMO</span></div>
+            <div class="hstat"><span class="hstat-lbl">Balance</span><span class="hstat-val blue" id="home-balance">$0.00</span></div>
+            <div class="hstat"><span class="hstat-lbl">Status</span><span class="hstat-val" id="home-status">IDLE</span></div>
+            <div class="hstat"><span class="hstat-lbl">Session</span><span class="hstat-val green" id="home-session">$0.00</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MARKETS (Mobile vertical cards) -->
+      <div id="tab-markets" class="tab-page">
+        <!-- Desktop reuses same table in tab-home, mobile gets cards -->
+        <div class="mobile-markets-list" id="mobileMarketsList"></div>
+      </div>
+
+      <!-- MANUAL TRADE -->
+      <div id="tab-manual" class="tab-page">
+        <div class="manual-trade-screen">
+          <!-- Market selector -->
+          <div class="manual-market-selector">
+            <div class="manual-chips" id="manualChips"></div>
+          </div>
+
+          <!-- Selected market info -->
+          <div class="manual-market-info">
+            <div class="manual-price-row">
+              <span class="manual-asset-name" id="manual-asset-name">Volatility 75 Index</span>
+              <span class="manual-price" id="manual-price">—</span>
+            </div>
+            <!-- Mini tick chart -->
+            <div class="manual-chart-wrap">
+              <canvas id="manual-tick-chart"></canvas>
+            </div>
+            <!-- Metrics grid -->
+            <div class="manual-metrics">
+              <div class="mm-item">
+                <div class="mm-lbl">Support</div>
+                <div class="mm-val green" id="mm-support">—</div>
+              </div>
+              <div class="mm-item">
+                <div class="mm-lbl">Resistance</div>
+                <div class="mm-val red" id="mm-resistance">—</div>
+              </div>
+              <div class="mm-item">
+                <div class="mm-lbl">Rise %</div>
+                <div class="mm-val green" id="mm-rise">—</div>
+              </div>
+              <div class="mm-item">
+                <div class="mm-lbl">Fall %</div>
+                <div class="mm-val red" id="mm-fall">—</div>
+              </div>
+              <div class="mm-item">
+                <div class="mm-lbl">RSI</div>
+                <div class="mm-val" id="mm-rsi">50.0</div>
+              </div>
+              <div class="mm-item">
+                <div class="mm-lbl">Volatility</div>
+                <div class="mm-val" id="mm-vol">—</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Trade controls -->
+          <div class="manual-controls">
+            <div class="manual-stake-row">
+              <div class="manual-field">
+                <label>Stake ($)</label>
+                <input type="number" id="m-stake-input" value="0.35" min="0.35" step="0.01">
+              </div>
+              <div class="manual-field">
+                <label>Duration</label>
+                <div class="dur-row">
+                  <input type="number" id="m-dur-input" value="7" min="1" max="10">
+                  <select id="m-unit-input">
+                    <option value="t" selected>Ticks</option>
+                    <option value="s">Sec</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="manual-trade-btns">
+              <button class="btn-trade call" onclick="fireMobileManual('CALL')">
+                <span class="trade-btn-icon">▲</span>
+                <span class="trade-btn-label">CALL</span>
+                <span class="trade-btn-sub">Rise</span>
+              </button>
+              <button class="btn-trade put" onclick="fireMobileManual('PUT')">
+                <span class="trade-btn-icon">▼</span>
+                <span class="trade-btn-label">PUT</span>
+                <span class="trade-btn-sub">Fall</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BOTS -->
+      <div id="tab-bots" class="tab-page">
+        <div class="bots-screen">
+          <div class="bots-header">
+            <span class="bots-title">My Bots</span>
+          </div>
+          <div class="bots-list">
+            <!-- QuantCore Bot Card -->
+            <div class="bot-card" id="botCard-quantcore">
+              <div class="bot-card-header">
+                <div class="bot-info">
+                  <div class="bot-name">QuantCore v6</div>
+                  <div class="bot-desc">Bollinger Breakout · Volatility Indices</div>
+                </div>
+                <div class="bot-status-badge idle" id="bot-status-badge">IDLE</div>
+              </div>
+              <div class="bot-stats">
+                <div class="bstat"><div class="bstat-lbl">Session P&L</div><div class="bstat-val" id="bot-session-pnl">$0.00</div></div>
+                <div class="bstat"><div class="bstat-lbl">Daily P&L</div><div class="bstat-val" id="bot-daily-pnl">$0.00</div></div>
+                <div class="bstat"><div class="bstat-lbl">Risk/Trade</div><div class="bstat-val orange" id="bot-risk">$0.35</div></div>
+              </div>
+              <div class="bot-controls">
+                <button class="bot-btn start" onclick="sendControl('start')">▶ Start Bot</button>
+                <button class="bot-btn stop" onclick="sendControl('stop')">⏹ Stop</button>
+              </div>
+            </div>
+          </div>
+          <div class="bots-hint">More bots coming soon</div>
         </div>
       </div>
 
@@ -210,7 +385,7 @@
             <div class="settings-subgrid">
               <div class="setting-item"><label>Trigger Interval <span class="hint">(seconds)</span></label><input type="number" id="config-MIN_TRIGGER_INTERVAL_SECONDS" step="1" value="300" /></div>
               <div class="setting-item"><label>Max Consecutive Losses</label><select id="config-MAX_CONSECUTIVE_LOSSES"><option value="1">1</option><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option><option value="5">5</option></select></div>
-              <div class="setting-item"><label>Loss Cooldown <span class="hint">(minutes)</span></label><input type="number" id="config-LOSS_COOLDOWN_MINUTES" step="1" value="5" /><input type="hidden" id="config-LOSS_COOLDOWN_MS" value="300000" /></div>
+              <div class="setting-item"><label>Loss Cooldown <span class="hint">(minutes)</span></label><input type="number" id="config-LOSS_COOLDOWN_MINUTES" step="1" value="5" /></div>
             </div>
           </div>
           <div class="settings-section">
@@ -226,8 +401,8 @@
             <h4>⚙️ Trade Execution</h4>
             <div class="settings-subgrid">
               <div class="setting-item"><label>Cooldown Ticks</label><input type="number" id="config-COOLDOWN_TICKS" step="1" value="5" /></div>
-              <div class="setting-item"><label>Settlement Timeout <span class="hint">(seconds)</span></label><input type="number" id="config-SETTLEMENT_TIMEOUT_SECONDS" step="1" value="15" /><input type="hidden" id="config-SETTLEMENT_TIMEOUT_MS" value="15000" /></div>
-              <div class="setting-item"><label>P&L Sync <span class="hint">(seconds)</span></label><input type="number" id="config-PNL_SYNC_INTERVAL_SECONDS" step="1" value="300" /><input type="hidden" id="config-PNL_SYNC_INTERVAL_MS" value="300000" /></div>
+              <div class="setting-item"><label>Settlement Timeout <span class="hint">(seconds)</span></label><input type="number" id="config-SETTLEMENT_TIMEOUT_SECONDS" step="1" value="15" /></div>
+              <div class="setting-item"><label>P&L Sync <span class="hint">(seconds)</span></label><input type="number" id="config-PNL_SYNC_INTERVAL_SECONDS" step="1" value="300" /></div>
             </div>
           </div>
         </div>
@@ -240,15 +415,6 @@
     </main>
   </div>
 
-  <!-- BOTTOM TAB BAR (Mobile) -->
-  <div class="tab-bar">
-    <button class="nav-tab active" data-tab="tab-dashboard"><span class="icon">📊</span><span class="label">Markets</span></button>
-    <button class="nav-tab" data-tab="tab-analytics"><span class="icon">📈</span><span class="label">Analytics</span></button>
-    <button class="nav-tab" data-tab="tab-logs"><span class="icon">📋</span><span class="label">Logs</span></button>
-    <button class="nav-tab" data-tab="tab-settings"><span class="icon">⚙️</span><span class="label">Settings</span></button>
-  </div>
-
-  <!-- MODULAR JAVASCRIPT FILES -->
   <script src="js/core.js"></script>
   <script src="js/dashboard.js"></script>
   <script src="js/analytics.js"></script>
