@@ -9,7 +9,13 @@ class DerivClient {
     this.accountId = null;
     this.wsUrl = null;
     this.pingInterval = null;
-    this.isDemo = true;             // DEFAULT DEMO – must stay true
+    this.isDemo = true;             // default demo
+    this._store = null;            // will be set from outside
+  }
+
+  // ----- Allow server to inject the store -----
+  setStore(storeInstance) {
+    this._store = storeInstance;
   }
 
   // ----- PUBLIC: start connection -----
@@ -29,6 +35,12 @@ class DerivClient {
     if (mode === 'real') this.isDemo = false;
     else this.isDemo = true;
     console.log(`🔵 isDemo set to ${this.isDemo}`);
+
+    // Immediately update UI via store
+    if (this._store) {
+      this._store.updateState({ tradingMode: this.isDemo ? 'demo' : 'real' });
+    }
+
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -46,7 +58,6 @@ class DerivClient {
 
       // Debug: show what we are looking for
       console.log(`🔍 Looking for ${this.isDemo ? 'demo' : 'real'} account`);
-      console.log('🔍 Accounts available:');
       accounts.forEach(a => console.log(`   - ${a.loginid} is_virtual=${a.is_virtual}`));
 
       let target = accounts.find(a => a.is_virtual === this.isDemo);
@@ -149,7 +160,9 @@ class DerivClient {
     this.ws.on('open', () => {
       console.log('🔌 WebSocket connected (authenticated)');
       this.pingInterval = setInterval(() => this.send({ ping: 1 }), 30000);
+      // Already authenticated – notify listeners
       this._emit('authorized', { loginid: this.accountId });
+      // Request balance and subscribe to ticks
       this.send({ balance: 1, subscribe: 1 });
       this._subscribeTicks();
     });
@@ -175,7 +188,7 @@ class DerivClient {
   }
 
   // -------------------------------------------------------------
-  //  MESSAGE HANDLING
+  //  MESSAGE HANDLING – improved to catch all formats
   // -------------------------------------------------------------
   _handleMessage(msg) {
     if (msg.error) {
@@ -183,22 +196,53 @@ class DerivClient {
       return;
     }
 
-    switch (msg.msg_type) {
-      case 'balance':
-        this._emit('balance', msg.balance);
-        break;
-      case 'tick':
-        this._emit('tick', msg.tick);
-        break;
-      case 'proposal_open_contract':
-        this._emit('contract_result', msg.proposal_open_contract);
-        break;
-      case 'buy':
-        this._emit('buy_result', msg.buy);
-        break;
-      case 'history':
-        this._emit('history', msg.history);
-        break;
+    // Sometimes the message is directly the balance object, without msg_type
+    if (msg.balance) {
+      console.log('💰 Emitting balance event (direct)');
+      this._emit('balance', msg.balance);
+      return; // avoid double processing
+    }
+
+    if (msg.tick) {
+      this._emit('tick', msg.tick);
+      return;
+    }
+
+    if (msg.proposal_open_contract) {
+      this._emit('contract_result', msg.proposal_open_contract);
+      return;
+    }
+
+    if (msg.buy) {
+      this._emit('buy_result', msg.buy);
+      return;
+    }
+
+    if (msg.history) {
+      this._emit('history', msg.history);
+      return;
+    }
+
+    // Legacy msg_type handling
+    if (msg.msg_type) {
+      switch (msg.msg_type) {
+        case 'balance':
+          console.log('💰 Emitting balance event (msg_type)');
+          this._emit('balance', msg.balance);
+          break;
+        case 'tick':
+          this._emit('tick', msg.tick);
+          break;
+        case 'proposal_open_contract':
+          this._emit('contract_result', msg.proposal_open_contract);
+          break;
+        case 'buy':
+          this._emit('buy_result', msg.buy);
+          break;
+        case 'history':
+          this._emit('history', msg.history);
+          break;
+      }
     }
   }
 
