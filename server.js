@@ -1,4 +1,4 @@
-// backend/server.js
+// server.js
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
@@ -8,8 +8,8 @@ const logger = require('./logger');
 const app = express();
 app.use(express.json());
 
-// Serve static frontend from ../public
-app.use(express.static(path.join(__dirname, '..', 'public')));
+// Serve static frontend from public/ (same directory)
+app.use(express.static(path.join(__dirname, 'public')));
 
 // SSE endpoint
 app.get('/api/logs', (req, res) => {
@@ -47,6 +47,11 @@ setInterval(() => {
   store.updateState({ marketMetrics: metrics });
   store.addLog('info', `Tick ${sym}: ${newPrice.toFixed(4)}`);
 }, 3000);
+
+// Fallback: serve index.html for any unknown route (SPA)
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
