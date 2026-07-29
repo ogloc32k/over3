@@ -13,7 +13,7 @@ class DerivClient {
     this.ws = null;
     this.listeners = {};
     this.accountId = null;
-    this.activeAccountId = null;      // used for balance filtering
+    this.activeAccountId = null;
     this.pingInterval = null;
     this.isDemo = true;
     this._store = null;
@@ -50,22 +50,18 @@ class DerivClient {
   setMode(mode) {
     console.log(`🔵 setMode(${mode})`);
     this.isDemo = (mode === 'real') ? false : true;
-
-    // Immediately invalidate the active account so stale events are ignored
-    this.activeAccountId = null;
+    this.activeAccountId = null;   // block all balance events during transition
 
     if (this._store) {
-      this._store.updateState({ tradingMode: this.isDemo ? 'demo' : 'real' });
+      this._store.updateState({
+        tradingMode: this.isDemo ? 'demo' : 'real',
+        balance: null              // clear stale balance immediately
+      });
     }
 
     this._disconnect(true);
     this.accountId = null;
     this.connect();
-  }
-
-  subscribeBalance() {
-    this.send({ balance: 1, subscribe: 1 });
-    console.log('💰 Balance subscription requested');
   }
 
   requestHistory(symbol, start, end, count) {
@@ -156,6 +152,7 @@ class DerivClient {
       this.pingInterval = setInterval(() => this.send({ ping: 1 }), 30000);
       this._emit('authorized', { loginid: this.accountId });
       this._subscribeTicks();
+      // NO subscribeBalance() – balance comes from REST accounts list
     });
 
     this.ws.on('message', (data) => {
@@ -215,16 +212,12 @@ class DerivClient {
       return;
     }
 
-    // Respond to server pings
     if (msg.ping) {
       this.send({ pong: 1 });
       return;
     }
 
-    if (msg.balance) {
-      this._emit('balance', msg.balance);
-      return;
-    }
+    if (msg.balance) { this._emit('balance', msg.balance); return; }
     if (msg.tick) { this._emit('tick', msg.tick); return; }
     if (msg.proposal_open_contract) { this._emit('contract_result', msg.proposal_open_contract); return; }
     if (msg.buy) { this._emit('buy_result', msg.buy); return; }
