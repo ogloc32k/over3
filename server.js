@@ -16,10 +16,10 @@ if (derivClient) derivClient.setStore(store);
 
 const app = express();
 app.use(express.json());
-app.use((req,res,next) => { console.log(`📡 ${req.method} ${req.url}`); next(); });
+app.use((req, res, next) => { console.log(`📡 ${req.method} ${req.url}`); next(); });
 app.use(express.static(path.join(__dirname, 'public')));
 
-// SSE – pushes full state on every change
+// SSE
 app.get('/api/logs', (req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
   res.write('\n');
@@ -34,7 +34,7 @@ app.get('/api/logs', (req, res) => {
   req.on('close', () => store.removeListener('stateChanged', onChange));
 });
 
-// REST API
+// REST
 app.post('/api/control', (req, res) => {
   const { action, mode } = req.body;
   console.log('🟡 POST /api/control body:', req.body);
@@ -71,11 +71,10 @@ const server = app.listen(PORT, () => {
   console.log(`🚀 Server on port ${PORT}`);
 
   if (derivClient) {
-    // Balance event handler – only updates if loginid matches active account
     derivClient.on('balance', (data) => {
-      console.log('🔍 RAW BALANCE EVENT:', JSON.stringify(data));
+      console.log('🔍 RAW BALANCE EVENT:', JSON.stringify(data), '| activeAccountId:', derivClient.activeAccountId);
 
-      // Normalise the balance format (nested or flat)
+      // Normalise balance format
       let balanceValue, currency, loginid;
       if (data.balance !== undefined) {
         if (typeof data.balance === 'object') {
@@ -92,9 +91,9 @@ const server = app.listen(PORT, () => {
         return;
       }
 
-      // Ignore stale events from old accounts
-      if (loginid && derivClient.accountId && loginid !== derivClient.accountId) {
-        console.log(`⏩ Ignoring balance for ${loginid} (active is ${derivClient.accountId})`);
+      // ✅ Ignore stale events from old connections
+      if (derivClient.activeAccountId && loginid && loginid !== derivClient.activeAccountId) {
+        console.log(`⏩ Ignoring balance for ${loginid} (active is ${derivClient.activeAccountId})`);
         return;
       }
 
@@ -102,22 +101,20 @@ const server = app.listen(PORT, () => {
       store.updateState({
         balance: parseFloat(balanceValue),
         currency,
-        loginid: derivClient.accountId,
+        loginid: derivClient.activeAccountId,
         tradingMode: derivClient.isDemo ? 'demo' : 'real'
       });
       logger.info(`💰 Balance updated: ${currency} ${balanceValue}`);
     });
 
     derivClient.on('authorized', (data) => {
-      logger.info(`🔐 Authorized as ${data.loginid || derivClient.accountId}`);
+      logger.info(`🔐 Authorized as ${data.loginid || derivClient.activeAccountId}`);
     });
 
     derivClient.on('tick', (tick) => {
-      // Future: feed into trading engine
       console.log(`📈 Tick: ${tick.symbol} ${tick.quote}`);
     });
 
-    // Start initial connection
     derivClient.connect();
   }
 });
