@@ -9,11 +9,12 @@ class DerivClient {
     this.accountId = null;
     this.wsUrl = null;
     this.pingInterval = null;
-    this.isDemo = true;             // default: demo
+    this.isDemo = true;             // DEFAULT DEMO – must stay true
   }
 
   // ----- PUBLIC: start connection -----
   connect() {
+    console.log(`🔵 connect() called – isDemo = ${this.isDemo}`);
     this._connectViaOtp()
       .then(() => console.log('✅ Connected to Deriv (new API)'))
       .catch(err => {
@@ -24,9 +25,10 @@ class DerivClient {
 
   // ----- CHANGE MODE (demo/real) -----
   setMode(mode) {
+    console.log(`🔵 setMode(${mode}) called`);
     if (mode === 'real') this.isDemo = false;
     else this.isDemo = true;
-    console.log(`Mode set to ${this.isDemo ? 'demo' : 'real'}`);
+    console.log(`🔵 isDemo set to ${this.isDemo}`);
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -41,10 +43,21 @@ class DerivClient {
   async _connectViaOtp() {
     if (!this.accountId) {
       const accounts = await this._fetchAccounts();
-      const target = accounts.find(a => a.is_virtual === this.isDemo);
-      if (!target) throw new Error(`No ${this.isDemo ? 'demo' : 'real'} account found`);
+
+      // Debug: show what we are looking for
+      console.log(`🔍 Looking for ${this.isDemo ? 'demo' : 'real'} account`);
+      console.log('🔍 Accounts available:');
+      accounts.forEach(a => console.log(`   - ${a.loginid} is_virtual=${a.is_virtual}`));
+
+      let target = accounts.find(a => a.is_virtual === this.isDemo);
+      if (!target) {
+        console.warn(`⚠️ No exact match found, falling back to first demo account`);
+        target = accounts.find(a => a.is_virtual === true);
+        if (!target) throw new Error('No accounts available at all');
+      }
+
       this.accountId = target.loginid;
-      console.log(`🔑 Using account: ${this.accountId} (${this.isDemo ? 'demo' : 'real'})`);
+      console.log(`🔑 Using account: ${this.accountId} (${target.is_virtual ? 'demo' : 'real'})`);
     }
 
     const otpUrl = `https://api.derivws.com/trading/v1/options/accounts/${this.accountId}/otp`;
@@ -110,15 +123,7 @@ class DerivClient {
 
     if (json.errors) throw new Error('Accounts API error: ' + JSON.stringify(json.errors));
 
-    // 🔍 FIX: accounts can be inside `json.data` or `json.accounts`
     let accountsRaw = json.data || json.accounts;
-    console.log('🔍 accountsRaw type:', typeof accountsRaw, 'isArray:', Array.isArray(accountsRaw));
-    if (accountsRaw) {
-      console.log('🔍 accountsRaw sample:', JSON.stringify(accountsRaw).slice(0, 300));
-    } else {
-      console.log('🔍 Full JSON response:', JSON.stringify(json).slice(0, 500));
-    }
-
     if (!accountsRaw || !Array.isArray(accountsRaw) || accountsRaw.length === 0) {
       throw new Error('No accounts returned');
     }
