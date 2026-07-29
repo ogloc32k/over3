@@ -11,7 +11,7 @@ class DerivClient {
 
   // Connect and authenticate
   connect() {
-    const wsUrl = `wss://ws.binaryws.com/websockets/v3?app_id=${config.derivAppId}`;
+    const wsUrl = `wss://ws.derivws.com/websockets/v3?app_id=${config.derivAppId}`;
     this.ws = new WebSocket(wsUrl);
 
     this.ws.on('open', () => {
