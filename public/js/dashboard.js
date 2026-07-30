@@ -33,7 +33,7 @@
 
   // ✅ Updated fireManual – accepts optional overrides for mobile trade
   window.fireManual = function (type, overrides) {
-    const duration  = overrides?.duration     ?? parseInt(document.getElementById('manual-duration')?.value) || 7;
+    const duration  = overrides?.duration     ?? (parseInt(document.getElementById('manual-duration')?.value) || 7);
     const unit      = overrides?.durationUnit ?? document.getElementById('manual-unit')?.value ?? 't';
     const focusSym  = overrides?.symbol       ?? QuantCore.getCurrentFocus();
     const stake     = overrides?.stake;
