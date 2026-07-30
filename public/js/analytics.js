@@ -71,9 +71,15 @@
     } catch (e) { console.error('renderCharts error:', e); }
   }
 
+  // Helper: hide all chart empty‑state overlays
+  function hideAllEmptyStates() {
+    document.querySelectorAll('.chart-empty-state').forEach(el => el.style.display = 'none');
+  }
+
   function renderAssetBarChart(contributions) {
     if (!assetBarChart) return;
     try {
+      hideAllEmptyStates();
       const isMobile = window.innerWidth < 768;
       const labels = contributions.map(a => QuantCore.getAssetLabel(a.name, isMobile));
       const values = contributions.map(a => a.pnl);
@@ -101,6 +107,7 @@
   function renderEquityCurve(equityData, startingBalance, timeframe) {
     if (!equityChartInstance) return;
     try {
+      hideAllEmptyStates();
       if (!equityData || equityData.length < 2) {
         equityChartInstance.data.labels = [];
         equityChartInstance.data.datasets[0].data = [];
