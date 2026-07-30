@@ -1,4 +1,4 @@
-// server.js
+// server.js – v8 (force redeploy)
 require('dotenv').config();
 
 process.on('uncaughtException', err => { console.error('🔥 UNCAUGHT EXCEPTION', err); process.exit(1); });
@@ -72,15 +72,15 @@ app.post('/api/config', (req, res) => {
 });
 
 // ============================================================
-// ANALYTICS – REAL DATA FROM SUPABASE (timeframe filtering)
+// ANALYTICS – REAL DATA FROM SUPABASE (timeframe + custom range)
 // ============================================================
 app.get('/api/ledger/aggregated', async (req, res) => {
   try {
     const { mode = 'session' } = req.query;
     const now = new Date();
-    let start;
+    let start, end;
 
-    // Accept both short and long timeframe names
+    // Map both short and long timeframe names
     const modeMap = { 'year': '1y', 'week': '1w', 'month': '1m', '24h': '24h', 'session': 'session' };
     const cleanMode = modeMap[mode] || mode;
 
@@ -97,6 +97,12 @@ app.get('/api/ledger/aggregated', async (req, res) => {
       case '1y':
         start = new Date(now.getTime() - 365*24*60*60*1000);
         break;
+      case 'custom':
+        // Accept start and end query parameters
+        if (req.query.start) start = new Date(req.query.start);
+        if (req.query.end)   end   = new Date(req.query.end);
+        if (!start) start = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // fallback to session
+        break;
       case 'session':
       default:
         // session = today's trades (since midnight UTC)
@@ -104,13 +110,13 @@ app.get('/api/ledger/aggregated', async (req, res) => {
         break;
     }
 
-    console.log(`📊 Analytics requested mode=${cleanMode}, start=${start.toISOString()}`);
+    console.log(`📊 Analytics mode=${cleanMode}, start=${start?.toISOString?.()}, end=${end?.toISOString?.()}`);
 
-    const { data: trades, error } = await supabase
-      .from('trading_ledger')
-      .select('*')
-      .gte('created_at', start.toISOString())
-      .order('created_at', { ascending: true });
+    let query = supabase.from('trading_ledger').select('*').gte('created_at', start.toISOString());
+    if (end) query = query.lte('created_at', end.toISOString());
+    query = query.order('created_at', { ascending: true });
+
+    const { data: trades, error } = await query;
 
     if (error) {
       console.error('❌ Supabase query error:', error);
@@ -139,7 +145,7 @@ app.get('/api/ledger/aggregated', async (req, res) => {
     const assetMap = {};
     const equityCurve = [];
     let runningEquity = 0;
-    let peakEquity = 0;          // start at 0, drawdown only computed when peak > 0
+    let peakEquity = 0;
     let maxDrawdown = 0;
 
     let currentStreak = 0, maxWinStreak = 0, maxLossStreak = 0;
@@ -272,7 +278,6 @@ const server = app.listen(PORT, () => {
       logger.info(`🔐 Authorized as ${data.loginid || derivClient.activeAccountId}`);
     });
 
-    // Insert settled trades into Supabase
     derivClient.on('trade_settled', async (trade) => {
       try {
         const record = {
