@@ -433,6 +433,12 @@ function loadMobileHomeData() {
       const hasData = (data.equityData && data.equityData.length >= 2);
 
       if (hasData) {
+        const firstEquity = data.equityData[0].equity;
+        const lastEquity = data.equityData[data.equityData.length - 1].equity;
+        const isUp = lastEquity >= firstEquity;
+        const lineColor = isUp ? '#10b981' : '#ef4444';
+        const fillColor = isUp ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)';
+
         mobileEquityChart = new Chart(ctx, {
           type: 'line',
           data: {
@@ -442,8 +448,8 @@ function loadMobileHomeData() {
                 x: new Date(p.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
                 y: p.equity
               })),
-              borderColor: '#10b981',
-              backgroundColor: 'rgba(16,185,129,0.1)',
+              borderColor: lineColor,
+              backgroundColor: fillColor,
               fill: true,
               tension: 0.3,
               pointRadius: 0
@@ -518,6 +524,12 @@ function setHomeTf(btn, mode) {
       if (ctx) {
         const hasData = (data.equityData && data.equityData.length >= 2);
         if (hasData) {
+          const firstEquity = data.equityData[0].equity;
+          const lastEquity = data.equityData[data.equityData.length - 1].equity;
+          const isUp = lastEquity >= firstEquity;
+          const lineColor = isUp ? '#10b981' : '#ef4444';
+          const fillColor = isUp ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)';
+
           mobileEquityChart = new Chart(ctx, {
             type: 'line',
             data: {
@@ -527,8 +539,8 @@ function setHomeTf(btn, mode) {
                   x: new Date(p.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
                   y: p.equity
                 })),
-                borderColor: '#10b981',
-                backgroundColor: 'rgba(16,185,129,0.1)',
+                borderColor: lineColor,
+                backgroundColor: fillColor,
                 fill: true,
                 tension: 0.3,
                 pointRadius: 0
