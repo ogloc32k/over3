@@ -70,7 +70,7 @@
     try {
       const safeState = state || {};
       const tradingMode = safeState.tradingMode || 'demo';
-      const balance = safeState.balance ?? null;   // ✅ preserves 0
+      const balance = safeState.balance ?? null;
       const sessionPnl = safeState.sessionPnl || 0;
       const dailyPnl = safeState.dailyPnl || 0;
       const currentStake = safeState.currentStake || 0.35;
@@ -80,7 +80,6 @@
       const tradeInProgress = safeState.tradeInProgress || false;
       const marketMetrics = safeState.marketMetrics || {};
 
-      // keep internal state up-to-date
       serverMode = tradingMode;
 
       // ---- Header status ----
@@ -102,18 +101,11 @@
         }
       }
 
-      // ---- Sidebar metrics ----
-      document.getElementById('m-profile').textContent = tradingMode.toUpperCase();
-      document.getElementById('m-balance').textContent = balance !== null ? `$${Number(balance).toFixed(2)}` : '---';
-      const sessVal = Number(sessionPnl);
-      const sessEl = document.getElementById('m-session');
-      sessEl.textContent = `$${sessVal.toFixed(2)}`;
-      sessEl.className = 'val ' + (sessVal >= 0 ? 'green' : 'red');
-      const dailyVal = Number(dailyPnl);
-      const dailyEl = document.getElementById('m-daily');
-      dailyEl.textContent = `$${dailyVal.toFixed(2)}`;
-      dailyEl.className = 'val ' + (dailyVal >= 0 ? 'green' : 'red');
-      document.getElementById('m-stake').textContent = `$${Number(currentStake).toFixed(2)}`;
+      // ---- Sidebar profile ----
+      const profileEl = document.getElementById('m-profile');
+      if (profileEl) profileEl.textContent = tradingMode.toUpperCase();
+      const spModeEl = document.getElementById('sp-mode');
+      if (spModeEl) spModeEl.textContent = tradingMode.toUpperCase();
 
       // ---- Focus bar ----
       const focusMetric = marketMetrics[currentFocus] || null;
@@ -151,23 +143,19 @@
         if (metric) {
           priceDisplay = metric.formattedPrice || formatPrice(sym, metric.price) || '—';
           step = metric.step || 0;
-
           if (step === 3) { stepLabel = 'ENTRY'; stepClass = 'step-3'; }
           else if (step === 2) { stepLabel = 'NEAR'; stepClass = 'step-2'; }
           else if (step === 1) { stepLabel = 'LEVEL'; stepClass = 'step-1'; }
           else { stepLabel = 'SCAN'; stepClass = 'step-0'; }
-
           support = metric.support ? Number(metric.support).toFixed(2) : '—';
           resistance = metric.resistance ? Number(metric.resistance).toFixed(2) : '—';
           rsiVal = metric.rsi !== undefined ? Number(metric.rsi).toFixed(1) : '—';
           if (metric.rsi !== undefined && metric.rsi > 70) rsiClass = 'overbought';
           else if (metric.rsi !== undefined && metric.rsi < 30) rsiClass = 'oversold';
-
           if (metric.bandwidth !== null && metric.bandwidth !== undefined) {
             squeezeDisplay = metric.bandwidth.toFixed(2) + '%';
             if (metric.bandwidth < 2.0) squeezeClass = 'badge-squeeze';
           }
-
           if (metric.tickDirections && metric.tickDirections.length > 0) {
             const dirs = metric.tickDirections.slice(-5);
             trendHtml = dirs.map(d => {
@@ -178,7 +166,6 @@
           } else {
             trendHtml = '—';
           }
-
           supportPct = metric.supportPct !== undefined ? Math.round(metric.supportPct) : null;
           resistancePct = metric.resistancePct !== undefined ? Math.round(metric.resistancePct) : null;
           risePct = metric.risePct !== undefined ? Math.round(metric.risePct) : null;
@@ -208,8 +195,8 @@
         tbody.appendChild(tr);
       }
 
-      // ---- Mobile view ----
-      renderMobileView(state);
+      // ---- Mobile view (legacy — silently no-ops if elements missing) ----
+      try { renderMobileView(state); } catch(e) {}
 
     } catch (err) {
       console.error('❌ Error in renderUI:', err);
@@ -217,105 +204,26 @@
   }
 
   function renderMobileView(state) {
-    try {
-      const safeState = state || {};
-      const marketMetrics = safeState.marketMetrics || {};
-      const symbols = Object.keys(MARKETS_CFG);
-      const carousel = document.getElementById('assetCarousel');
-      if (carousel) {
-        carousel.innerHTML = '';
-        symbols.forEach(sym => {
-          const chip = document.createElement('div');
-          chip.className = 'asset-chip' + (sym === currentFocus ? ' active' : '');
-          chip.dataset.symbol = sym;
-          const shortName = getAssetLabel(MARKETS_CFG[sym], true);
-          chip.textContent = shortName;
-          chip.onclick = () => window.setFocusMarket(sym);
-          carousel.appendChild(chip);
-        });
-      }
-
-      const metric = marketMetrics[currentFocus] || null;
-      if (!metric) {
-        document.getElementById('mobile-asset-name').textContent = MARKETS_CFG[currentFocus] || '—';
-        document.getElementById('mobile-asset-price').textContent = '—';
-        document.getElementById('mobile-support').textContent = '—';
-        document.getElementById('mobile-resistance').textContent = '—';
-        document.getElementById('mobile-rsi-value').textContent = '—';
-        document.getElementById('mobile-volatility').textContent = '—';
-        document.getElementById('mobile-tick-digits').innerHTML = '<span class="tick-digit">—</span>';
-        document.getElementById('mobile-rsi-gauge').querySelector('.rsi-fill').style.width = '50%';
-        return;
-      }
-
-      const price = metric.price;
-      const formattedPrice = metric.formattedPrice || formatPrice(currentFocus, price) || '—';
-      const support = metric.support ? Number(metric.support).toFixed(2) : '—';
-      const resistance = metric.resistance ? Number(metric.resistance).toFixed(2) : '—';
-      const rsi = metric.rsi !== undefined ? Number(metric.rsi).toFixed(1) : '—';
-      const vol = metric.volatility !== undefined ? Number(metric.volatility).toFixed(2) + '%' : '—';
-
-      const lastPrices = metric.lastPrices || [];
-      let change = 0;
-      let changeClass = '';
-      if (lastPrices.length >= 2) {
-        const prev = lastPrices[lastPrices.length - 2];
-        const curr = lastPrices[lastPrices.length - 1];
-        if (prev !== undefined && curr !== undefined) {
-          change = curr - prev;
-          changeClass = change > 0 ? 'up' : (change < 0 ? 'down' : '');
-        }
-      }
-      const changeDisplay = change !== 0 ? (change > 0 ? '+' : '') + change.toFixed(2) : '—';
-
-      document.getElementById('mobile-asset-name').textContent = MARKETS_CFG[currentFocus] || '—';
-      document.getElementById('mobile-asset-price').textContent = formattedPrice;
-      const changeEl = document.getElementById('mobile-asset-change');
-      changeEl.textContent = changeDisplay;
-      changeEl.className = 'asset-change ' + changeClass;
-
-      document.getElementById('mobile-support').textContent = support;
-      document.getElementById('mobile-resistance').textContent = resistance;
-
-      document.getElementById('mobile-rsi-value').textContent = rsi;
-      const rsiFill = document.getElementById('mobile-rsi-gauge').querySelector('.rsi-fill');
-      if (rsiFill) {
-        const rsiNum = parseFloat(rsi);
-        if (!isNaN(rsiNum)) {
-          rsiFill.style.width = Math.min(100, Math.max(0, rsiNum)) + '%';
-        } else {
-          rsiFill.style.width = '50%';
-        }
-      }
-
-      document.getElementById('mobile-volatility').textContent = vol;
-
-      const digitsContainer = document.getElementById('mobile-tick-digits');
-      if (digitsContainer) {
-        if (lastPrices.length > 0) {
-          const lastTicks = lastPrices.slice(-10);
-          let html = '';
-          let prev = null;
-          lastTicks.forEach((val) => {
-            const num = Number(val);
-            const cls = (prev !== null) ? (num > prev ? 'up' : (num < prev ? 'down' : '')) : '';
-            html += `<span class="tick-digit ${cls}">${num.toFixed(2)}</span>`;
-            prev = num;
-          });
-          digitsContainer.innerHTML = html;
-        } else {
-          digitsContainer.innerHTML = '<span class="tick-digit">—</span>';
-        }
-      }
-    } catch (err) {
-      console.error('❌ Error in renderMobileView:', err);
+    const safeState = state || {};
+    const marketMetrics = safeState.marketMetrics || {};
+    const carousel = document.getElementById('assetCarousel');
+    if (carousel) {
+      carousel.innerHTML = '';
+      Object.keys(MARKETS_CFG).forEach(sym => {
+        const chip = document.createElement('div');
+        chip.className = 'asset-chip' + (sym === currentFocus ? ' active' : '');
+        chip.dataset.symbol = sym;
+        chip.textContent = getAssetLabel(MARKETS_CFG[sym], true);
+        chip.onclick = () => window.setFocusMarket(sym);
+        carousel.appendChild(chip);
+      });
     }
   }
 
   // ---------- SSE ----------
   function connectSSE() {
     if (sse) { sse.close(); sse = null; }
-    sse = new EventSource('/api/logs');
+    sse = new EventSource('/stream');
     sse.onopen = function () { console.log('✅ SSE connected'); reconnectAttempts = 0; };
     sse.onerror = function (err) {
       console.warn('⚠️ SSE error:', err);
@@ -330,14 +238,10 @@
     sse.onmessage = function (e) {
       try {
         const data = JSON.parse(e.data);
-
-        // Analytics delta -> delegate to analytics module
         if (data.event === 'analytics_delta') {
           eventBus.emit('analytics_delta', data.data);
           return;
         }
-
-        // Full state update
         if (data.state) {
           globalState = data.state;
           if (data.state.marketMetrics) {
@@ -349,9 +253,9 @@
             }
           }
           renderUI(data.state);
+          // Sync mobile UI elements (drawer, home screen, bot card, etc.)
+          if (typeof syncMobileUI === 'function') syncMobileUI(data.state);
         }
-
-        // New log entries -> delegate to logs module
         if (data.logs && data.logs.length > 0) {
           eventBus.emit('new-logs', data.logs);
         }
