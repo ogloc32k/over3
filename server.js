@@ -1,4 +1,4 @@
-// server.js – v8 (force redeploy)
+// server.js – v9 (account separation)
 require('dotenv').config();
 
 process.on('uncaughtException', err => { console.error('🔥 UNCAUGHT EXCEPTION', err); process.exit(1); });
@@ -20,7 +20,7 @@ app.use(express.json());
 app.use((req, res, next) => { console.log(`📡 ${req.method} ${req.url}`); next(); });
 app.use(express.static(path.join(__dirname, 'public')));
 
-// SSE stream
+// SSE
 app.get('/stream', (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -40,7 +40,7 @@ app.get('/stream', (req, res) => {
   req.on('close', () => store.removeListener('stateChanged', onChange));
 });
 
-// REST API
+// REST
 app.post('/api/control', (req, res) => {
   const { action, mode } = req.body;
   console.log('🟡 POST /api/control body:', req.body);
@@ -72,15 +72,14 @@ app.post('/api/config', (req, res) => {
 });
 
 // ============================================================
-// ANALYTICS – REAL DATA FROM SUPABASE (timeframe + custom range)
+// ANALYTICS – REAL DATA FROM SUPABASE (account filtering)
 // ============================================================
 app.get('/api/ledger/aggregated', async (req, res) => {
   try {
-    const { mode = 'session' } = req.query;
+    const { mode = 'session', account = 'demo', start: customStart, end: customEnd } = req.query;
     const now = new Date();
     let start, end;
 
-    // Map both short and long timeframe names
     const modeMap = { 'year': '1y', 'week': '1w', 'month': '1m', '24h': '24h', 'session': 'session' };
     const cleanMode = modeMap[mode] || mode;
 
@@ -98,21 +97,21 @@ app.get('/api/ledger/aggregated', async (req, res) => {
         start = new Date(now.getTime() - 365*24*60*60*1000);
         break;
       case 'custom':
-        // Accept start and end query parameters
-        if (req.query.start) start = new Date(req.query.start);
-        if (req.query.end)   end   = new Date(req.query.end);
-        if (!start) start = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // fallback to session
+        if (customStart) start = new Date(customStart);
+        if (customEnd)   end   = new Date(customEnd);
+        if (!start) start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         break;
       case 'session':
       default:
-        // session = today's trades (since midnight UTC)
         start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         break;
     }
 
-    console.log(`📊 Analytics mode=${cleanMode}, start=${start?.toISOString?.()}, end=${end?.toISOString?.()}`);
+    console.log(`📊 Analytics mode=${cleanMode}, account=${account}, start=${start?.toISOString?.()}, end=${end?.toISOString?.()}`);
 
-    let query = supabase.from('trading_ledger').select('*').gte('created_at', start.toISOString());
+    let query = supabase.from('trading_ledger').select('*')
+      .eq('account', account)
+      .gte('created_at', start.toISOString());
     if (end) query = query.lte('created_at', end.toISOString());
     query = query.order('created_at', { ascending: true });
 
@@ -120,125 +119,66 @@ app.get('/api/ledger/aggregated', async (req, res) => {
 
     if (error) {
       console.error('❌ Supabase query error:', error);
-      return res.json({
-        totalProfit: 0, tradeCount: 0, winCount: 0, lossCount: 0,
-        grossProfit: 0, grossLoss: 0, maxDrawdown: 0, totalDuration: 0,
-        avgWin: 0, avgLoss: 0, strikeRate: 0, profitFactor: 0,
-        assetContributions: [], equityData: []
-      });
+      return res.json({ totalProfit:0,tradeCount:0,winCount:0,lossCount:0,grossProfit:0,grossLoss:0,maxDrawdown:0,totalDuration:0,avgWin:0,avgLoss:0,strikeRate:0,profitFactor:0,assetContributions:[],equityData:[] });
     }
 
     if (!trades || trades.length === 0) {
-      return res.json({
-        totalProfit: 0, tradeCount: 0, winCount: 0, lossCount: 0,
-        grossProfit: 0, grossLoss: 0, maxDrawdown: 0, totalDuration: 0,
-        avgWin: 0, avgLoss: 0, strikeRate: 0, profitFactor: 0,
-        assetContributions: [], equityData: []
-      });
+      return res.json({ totalProfit:0,tradeCount:0,winCount:0,lossCount:0,grossProfit:0,grossLoss:0,maxDrawdown:0,totalDuration:0,avgWin:0,avgLoss:0,strikeRate:0,profitFactor:0,assetContributions:[],equityData:[] });
     }
 
     // ---- calculations ----
-    let totalProfit = 0, grossProfit = 0, grossLoss = 0;
-    let wins = 0, losses = 0, sumWin = 0, sumLoss = 0;
-    let sumDuration = 0;
-
+    let totalProfit=0, grossProfit=0, grossLoss=0, wins=0, losses=0, sumWin=0, sumLoss=0, sumDuration=0;
     const assetMap = {};
     const equityCurve = [];
-    let runningEquity = 0;
-    let peakEquity = 0;
-    let maxDrawdown = 0;
-
-    let currentStreak = 0, maxWinStreak = 0, maxLossStreak = 0;
+    let runningEquity=0, peakEquity=0, maxDrawdown=0;
+    let currentStreak=0, maxWinStreak=0, maxLossStreak=0;
 
     for (const t of trades) {
       const pnl = parseFloat(t.profit_loss);
       totalProfit += pnl;
-
-      if (pnl > 0) {
-        wins++;
-        grossProfit += pnl;
-        sumWin += pnl;
-      } else if (pnl < 0) {
-        losses++;
-        grossLoss += Math.abs(pnl);
-        sumLoss += pnl;
-      }
-
+      if (pnl > 0) { wins++; grossProfit += pnl; sumWin += pnl; }
+      else if (pnl < 0) { losses++; grossLoss += Math.abs(pnl); sumLoss += pnl; }
       sumDuration += parseInt(t.duration_ticks) || 0;
-
-      // asset grouping
       const asset = t.asset || 'Unknown';
       assetMap[asset] = (assetMap[asset] || 0) + pnl;
-
-      // equity curve
       runningEquity += pnl;
       equityCurve.push({ timestamp: t.created_at, equity: runningEquity });
-
-      // Drawdown: only valid when peakEquity > 0
       if (runningEquity > peakEquity) peakEquity = runningEquity;
-      if (peakEquity > 0) {
-        const dd = ((peakEquity - runningEquity) / peakEquity) * 100;
-        if (dd > maxDrawdown) maxDrawdown = dd;
-      }
-
-      // consecutive streaks
-      if (pnl > 0) {
-        currentStreak = currentStreak >= 0 ? currentStreak + 1 : 1;
-      } else {
-        currentStreak = currentStreak <= 0 ? currentStreak - 1 : -1;
-      }
+      if (peakEquity > 0) { const dd = ((peakEquity - runningEquity) / peakEquity)*100; if (dd > maxDrawdown) maxDrawdown = dd; }
+      if (pnl > 0) currentStreak = currentStreak >= 0 ? currentStreak+1 : 1;
+      else currentStreak = currentStreak <= 0 ? currentStreak-1 : -1;
       if (currentStreak > maxWinStreak) maxWinStreak = currentStreak;
       if (currentStreak < maxLossStreak) maxLossStreak = currentStreak;
     }
 
     const total = trades.length;
-    const strikeRate = total > 0 ? (wins / total) * 100 : 0;
+    const strikeRate = total>0 ? (wins/total)*100 : 0;
     let profitFactor = 0;
-    if (grossLoss === 0) {
-      profitFactor = grossProfit > 0 ? parseFloat(grossProfit.toFixed(2)) : 0;
-    } else {
-      profitFactor = grossProfit / grossLoss;
-    }
-
-    const avgWin = wins > 0 ? sumWin / wins : 0;
-    const avgLoss = losses > 0 ? Math.abs(sumLoss / losses) : 0;
-    const avgDuration = total > 0 ? sumDuration / total : 0;
-
+    if (grossLoss===0) profitFactor = grossProfit>0 ? parseFloat(grossProfit.toFixed(2)) : 0;
+    else profitFactor = grossProfit / grossLoss;
+    const avgWin = wins>0 ? sumWin/wins : 0;
+    const avgLoss = losses>0 ? Math.abs(sumLoss/losses) : 0;
+    const avgDuration = total>0 ? sumDuration/total : 0;
     const assetContributions = Object.entries(assetMap).map(([name, pnl]) => ({ name, pnl }));
 
-    console.log(`📊 Returning ${total} trades for mode=${cleanMode}`);
+    console.log(`📊 Returning ${total} trades for mode=${cleanMode}, account=${account}`);
 
     res.json({
-      totalProfit,
-      tradeCount: total,
-      winCount: wins,
-      lossCount: losses,
-      grossProfit,
-      grossLoss,
-      maxDrawdown,
-      totalDuration: sumDuration,
-      avgWin,
-      avgLoss,
-      strikeRate,
-      profitFactor,
-      assetContributions,
-      equityData: equityCurve,
+      totalProfit, tradeCount: total, winCount: wins, lossCount: losses,
+      grossProfit, grossLoss, maxDrawdown, totalDuration: sumDuration,
+      avgWin, avgLoss, strikeRate, profitFactor,
+      assetContributions, equityData: equityCurve
     });
   } catch (err) {
     console.error('❌ Analytics error:', err);
-    res.json({
-      totalProfit: 0, tradeCount: 0, winCount: 0, lossCount: 0,
-      grossProfit: 0, grossLoss: 0, maxDrawdown: 0, totalDuration: 0,
-      avgWin: 0, avgLoss: 0, strikeRate: 0, profitFactor: 0,
-      assetContributions: [], equityData: []
-    });
+    res.json({ totalProfit:0,tradeCount:0,winCount:0,lossCount:0,grossProfit:0,grossLoss:0,maxDrawdown:0,totalDuration:0,avgWin:0,avgLoss:0,strikeRate:0,profitFactor:0,assetContributions:[],equityData:[] });
   }
 });
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// ==================== START SERVER & DERIV ====================
+// ==================== START ====================
 const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
   console.log(`🚀 Server on port ${PORT}`);
@@ -251,16 +191,10 @@ const server = app.listen(PORT, () => {
 
       let balanceValue, currency, loginid;
       if (typeof data.balance === 'string' || typeof data.balance === 'number') {
-        balanceValue = data.balance;
-        currency = data.currency || 'USD';
-        loginid = data.loginid || derivClient.accountId;
+        balanceValue = data.balance; currency = data.currency || 'USD'; loginid = data.loginid || derivClient.accountId;
       } else if (data.balance && typeof data.balance === 'object') {
-        balanceValue = data.balance.balance;
-        currency = data.balance.currency || 'USD';
-        loginid = data.balance.loginid;
-      } else {
-        return;
-      }
+        balanceValue = data.balance.balance; currency = data.balance.currency || 'USD'; loginid = data.balance.loginid;
+      } else return;
 
       if (loginid && loginid !== derivClient.activeAccountId) return;
 
@@ -278,8 +212,10 @@ const server = app.listen(PORT, () => {
       logger.info(`🔐 Authorized as ${data.loginid || derivClient.activeAccountId}`);
     });
 
+    // Insert settled trades with account type
     derivClient.on('trade_settled', async (trade) => {
       try {
+        const account = derivClient.isDemo ? 'demo' : 'real';
         const record = {
           asset: trade.symbol,
           contract_type: trade.contract_type,
@@ -293,14 +229,15 @@ const server = app.listen(PORT, () => {
           entry_price: trade.entry_price ? parseFloat(trade.entry_price) : null,
           exit_price: trade.exit_price ? parseFloat(trade.exit_price) : null,
           duration_ticks: trade.duration_ticks || 0,
-          bot_name: trade.bot_name || 'manual'
+          bot_name: trade.bot_name || 'manual',
+          account: account
         };
 
         const { error } = await supabase.from('trading_ledger').insert(record);
         if (error) {
           console.error('❌ Failed to insert trade:', error);
         } else {
-          console.log('✅ Trade recorded:', record.asset, record.profit_loss);
+          console.log('✅ Trade recorded:', record.asset, record.profit_loss, 'account:', account);
         }
       } catch (e) {
         console.error('❌ trade_settled handler error:', e);
