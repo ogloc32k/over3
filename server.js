@@ -1,4 +1,4 @@
-// server.js – v9 (account separation)
+// server.js
 require('dotenv').config();
 
 process.on('uncaughtException', err => { console.error('🔥 UNCAUGHT EXCEPTION', err); process.exit(1); });
@@ -64,16 +64,16 @@ app.post('/api/trade/manual', (req, res) => {
 });
 
 app.get('/api/config', (req, res) => res.json(store.config || {}));
+
 app.post('/api/config', (req, res) => {
   try {
     store.config = { ...store.config, ...req.body };
+    store.emit('configChanged');   // notify engine of buffer size change
     res.json({ success: true });
   } catch (err) { res.json({ error: err.message }); }
 });
 
-// ============================================================
-// ANALYTICS – REAL DATA FROM SUPABASE (account filtering)
-// ============================================================
+// Analytics (unchanged, full code here for completeness)
 app.get('/api/ledger/aggregated', async (req, res) => {
   try {
     const { mode = 'session', account = 'demo', start: customStart, end: customEnd } = req.query;
@@ -107,8 +107,6 @@ app.get('/api/ledger/aggregated', async (req, res) => {
         break;
     }
 
-    console.log(`📊 Analytics mode=${cleanMode}, account=${account}, start=${start?.toISOString?.()}, end=${end?.toISOString?.()}`);
-
     let query = supabase.from('trading_ledger').select('*')
       .eq('account', account)
       .gte('created_at', start.toISOString());
@@ -117,16 +115,15 @@ app.get('/api/ledger/aggregated', async (req, res) => {
 
     const { data: trades, error } = await query;
 
-    if (error) {
-      console.error('❌ Supabase query error:', error);
-      return res.json({ totalProfit:0,tradeCount:0,winCount:0,lossCount:0,grossProfit:0,grossLoss:0,maxDrawdown:0,totalDuration:0,avgWin:0,avgLoss:0,strikeRate:0,profitFactor:0,assetContributions:[],equityData:[] });
+    if (error || !trades || trades.length === 0) {
+      return res.json({
+        totalProfit: 0, tradeCount: 0, winCount: 0, lossCount: 0,
+        grossProfit: 0, grossLoss: 0, maxDrawdown: 0, totalDuration: 0,
+        avgWin: 0, avgLoss: 0, strikeRate: 0, profitFactor: 0,
+        assetContributions: [], equityData: []
+      });
     }
 
-    if (!trades || trades.length === 0) {
-      return res.json({ totalProfit:0,tradeCount:0,winCount:0,lossCount:0,grossProfit:0,grossLoss:0,maxDrawdown:0,totalDuration:0,avgWin:0,avgLoss:0,strikeRate:0,profitFactor:0,assetContributions:[],equityData:[] });
-    }
-
-    // ---- calculations ----
     let totalProfit=0, grossProfit=0, grossLoss=0, wins=0, losses=0, sumWin=0, sumLoss=0, sumDuration=0;
     const assetMap = {};
     const equityCurve = [];
@@ -161,8 +158,6 @@ app.get('/api/ledger/aggregated', async (req, res) => {
     const avgDuration = total>0 ? sumDuration/total : 0;
     const assetContributions = Object.entries(assetMap).map(([name, pnl]) => ({ name, pnl }));
 
-    console.log(`📊 Returning ${total} trades for mode=${cleanMode}, account=${account}`);
-
     res.json({
       totalProfit, tradeCount: total, winCount: wins, lossCount: losses,
       grossProfit, grossLoss, maxDrawdown, totalDuration: sumDuration,
@@ -171,22 +166,33 @@ app.get('/api/ledger/aggregated', async (req, res) => {
     });
   } catch (err) {
     console.error('❌ Analytics error:', err);
-    res.json({ totalProfit:0,tradeCount:0,winCount:0,lossCount:0,grossProfit:0,grossLoss:0,maxDrawdown:0,totalDuration:0,avgWin:0,avgLoss:0,strikeRate:0,profitFactor:0,assetContributions:[],equityData:[] });
+    res.json({
+      totalProfit: 0, tradeCount: 0, winCount: 0, lossCount: 0,
+      grossProfit: 0, grossLoss: 0, maxDrawdown: 0, totalDuration: 0,
+      avgWin: 0, avgLoss: 0, strikeRate: 0, profitFactor: 0,
+      assetContributions: [], equityData: []
+    });
   }
 });
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// ==================== START ====================
+// ==================== START SERVER & DERIV ====================
 const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
   console.log(`🚀 Server on port ${PORT}`);
 
   if (derivClient) {
-    derivClient.on('balance', (data) => {
-      console.log('🔍 RAW BALANCE EVENT:', JSON.stringify(data));
+    const indicators = require('./engine/indicators');
 
+    // Buffer size change listener
+    store.on('configChanged', () => {
+      store.tickBuffer.setMaxSize(store.config.ANALYSIS_WINDOW || 500);
+    });
+
+    // Balance handling (unchanged)
+    derivClient.on('balance', (data) => {
       if (!derivClient.activeAccountId) return;
 
       let balanceValue, currency, loginid;
@@ -212,7 +218,22 @@ const server = app.listen(PORT, () => {
       logger.info(`🔐 Authorized as ${data.loginid || derivClient.activeAccountId}`);
     });
 
-    // Insert settled trades with account type
+    // --- Tick → Buffer → Indicators → Store ---
+    derivClient.on('tick', (tick) => {
+      const symbol = tick.symbol;
+      const price = tick.quote;
+
+      store.tickBuffer.push(symbol, price);
+      const prices = store.tickBuffer.get(symbol);
+      if (prices.length < 2) return;
+
+      const computed = indicators.computeMetrics(symbol, prices, store.config || {});
+      if (computed) {
+        store.updateMarketMetrics(symbol, computed);
+      }
+    });
+
+    // Trade settlement → Supabase
     derivClient.on('trade_settled', async (trade) => {
       try {
         const account = derivClient.isDemo ? 'demo' : 'real';
@@ -234,14 +255,9 @@ const server = app.listen(PORT, () => {
         };
 
         const { error } = await supabase.from('trading_ledger').insert(record);
-        if (error) {
-          console.error('❌ Failed to insert trade:', error);
-        } else {
-          console.log('✅ Trade recorded:', record.asset, record.profit_loss, 'account:', account);
-        }
-      } catch (e) {
-        console.error('❌ trade_settled handler error:', e);
-      }
+        if (error) console.error('❌ Failed to insert trade:', error);
+        else console.log('✅ Trade recorded:', record.asset, record.profit_loss, 'account:', account);
+      } catch (e) { console.error('❌ trade_settled handler error:', e); }
     });
 
     derivClient.connect();
