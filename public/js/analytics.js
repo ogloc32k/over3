@@ -98,7 +98,7 @@
 
   function formatEquityLabel(timestamp, timeframe) {
     const date = new Date(timestamp);
-    if (timeframe === '24h' || timeframe === 'session') {
+    if (timeframe === '24h' || timeframe === 'session' || timeframe === 'custom') {
       return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
@@ -139,10 +139,91 @@
     } catch (e) { console.error('updateMetrics error:', e); }
   }
 
+  // ---------- Timeframe preset & custom date handling ----------
+  function updateDatePickersForPreset(mode) {
+    const now = new Date();
+    const startEl = document.getElementById('date-start');
+    const endEl = document.getElementById('date-end');
+    if (!startEl || !endEl) return;
+
+    const todayStr = now.toISOString().split('T')[0];
+    // Restrict future dates
+    startEl.setAttribute('max', todayStr);
+    endEl.setAttribute('max', todayStr);
+
+    let startDate, endDate;
+    switch (mode) {
+      case '24h':
+        startDate = new Date(now.getTime() - 24*60*60*1000);
+        endDate = now;
+        break;
+      case '1w':
+        startDate = new Date(now.getTime() - 7*24*60*60*1000);
+        endDate = now;
+        break;
+      case '1m':
+        startDate = new Date(now.getTime() - 30*24*60*60*1000);
+        endDate = now;
+        break;
+      case '1y':
+        startDate = new Date(now.getTime() - 365*24*60*60*1000);
+        endDate = now;
+        break;
+      case 'session':
+      default:
+        // session = today's trades (since midnight)
+        startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        endDate = now;
+        break;
+    }
+    const formatDate = (d) => d.toISOString().split('T')[0];
+    startEl.value = formatDate(startDate);
+    endEl.value = formatDate(endDate);
+  }
+
+  // Validate and apply custom date range
+  function applyDateFilter() {
+    const startEl = document.getElementById('date-start');
+    const endEl   = document.getElementById('date-end');
+    if (!startEl || !endEl) return;
+
+    const from = new Date(startEl.value);
+    const to   = new Date(endEl.value);
+    // Swap if reversed
+    if (from > to) {
+      const tmp = startEl.value;
+      startEl.value = endEl.value;
+      endEl.value = tmp;
+    }
+    // Disable preset buttons (no active preset)
+    document.querySelectorAll('.preset-strip .btn-preset').forEach(b => b.classList.remove('active'));
+
+    // Fetch with custom start/end
+    const params = new URLSearchParams({
+      mode: 'custom',
+      start: new Date(startEl.value).toISOString(),
+      end:   new Date(endEl.value).toISOString()
+    });
+    fetch(`/api/ledger/aggregated?${params.toString()}`)
+      .then(r => r.json())
+      .then(data => {
+        currentAnalyticsData = data;
+        renderAssetBarChart(data.assetContributions || []);
+        renderEquityCurve(data.equityData || [], 0, 'custom');
+        updateMetrics(data);
+      })
+      .catch(err => console.error('Custom date filter error:', err));
+  }
+
+  window.applyDateFilter = applyDateFilter;   // expose for inline onclick
+
   window.timeframePreset = async function (btn, mode) {
     // Map human‑friendly names to API mode values
     const modeMap = { 'year': '1y', 'week': '1w', 'month': '1m', '24h': '24h', 'session': 'session' };
     mode = modeMap[mode] || mode;
+
+    // Update the date pickers to reflect the preset
+    updateDatePickersForPreset(mode);
 
     if (btn) {
       document.querySelectorAll('.preset-strip .btn-preset').forEach(b => b.classList.remove('active'));
@@ -180,6 +261,11 @@
     const group = document.getElementById('datePickerGroup');
     if (group) group.style.display = group.style.display === 'none' ? 'flex' : 'none';
   };
+
+  // Initialise date pickers with default (session) and set max attributes
+  window.addEventListener('DOMContentLoaded', () => {
+    updateDatePickersForPreset('session');
+  });
 
   window.Analytics = {
     renderCharts,
