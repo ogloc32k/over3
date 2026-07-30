@@ -20,7 +20,7 @@ app.use(express.json());
 app.use((req, res, next) => { console.log(`📡 ${req.method} ${req.url}`); next(); });
 app.use(express.static(path.join(__dirname, 'public')));
 
-// SSE
+// SSE stream
 app.get('/stream', (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -40,7 +40,7 @@ app.get('/stream', (req, res) => {
   req.on('close', () => store.removeListener('stateChanged', onChange));
 });
 
-// REST
+// REST API
 app.post('/api/control', (req, res) => {
   const { action, mode } = req.body;
   console.log('🟡 POST /api/control body:', req.body);
@@ -72,7 +72,7 @@ app.post('/api/config', (req, res) => {
 });
 
 // ============================================================
-// ANALYTICS – REAL DATA FROM SUPABASE (timeframe filtering FIXED)
+// ANALYTICS – REAL DATA FROM SUPABASE (timeframe filtering)
 // ============================================================
 app.get('/api/ledger/aggregated', async (req, res) => {
   try {
@@ -80,7 +80,7 @@ app.get('/api/ledger/aggregated', async (req, res) => {
     const now = new Date();
     let start;
 
-    // Map human-friendly mode strings (in case frontend sends them)
+    // Accept both short and long timeframe names
     const modeMap = { 'year': '1y', 'week': '1w', 'month': '1m', '24h': '24h', 'session': 'session' };
     const cleanMode = modeMap[mode] || mode;
 
@@ -139,7 +139,7 @@ app.get('/api/ledger/aggregated', async (req, res) => {
     const assetMap = {};
     const equityCurve = [];
     let runningEquity = 0;
-    let peakEquity = 0;        // start at 0, only compute drawdown when peak > 0
+    let peakEquity = 0;          // start at 0, drawdown only computed when peak > 0
     let maxDrawdown = 0;
 
     let currentStreak = 0, maxWinStreak = 0, maxLossStreak = 0;
@@ -168,7 +168,7 @@ app.get('/api/ledger/aggregated', async (req, res) => {
       runningEquity += pnl;
       equityCurve.push({ timestamp: t.created_at, equity: runningEquity });
 
-      // Drawdown: only meaningful when peakEquity > 0
+      // Drawdown: only valid when peakEquity > 0
       if (runningEquity > peakEquity) peakEquity = runningEquity;
       if (peakEquity > 0) {
         const dd = ((peakEquity - runningEquity) / peakEquity) * 100;
@@ -232,16 +232,40 @@ app.get('/api/ledger/aggregated', async (req, res) => {
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// ============================================================
-// START SERVER & DERIV CONNECTION
-// ============================================================
+// ==================== START SERVER & DERIV ====================
 const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
   console.log(`🚀 Server on port ${PORT}`);
 
   if (derivClient) {
     derivClient.on('balance', (data) => {
-      // ... existing balance handling ...
+      console.log('🔍 RAW BALANCE EVENT:', JSON.stringify(data));
+
+      if (!derivClient.activeAccountId) return;
+
+      let balanceValue, currency, loginid;
+      if (typeof data.balance === 'string' || typeof data.balance === 'number') {
+        balanceValue = data.balance;
+        currency = data.currency || 'USD';
+        loginid = data.loginid || derivClient.accountId;
+      } else if (data.balance && typeof data.balance === 'object') {
+        balanceValue = data.balance.balance;
+        currency = data.balance.currency || 'USD';
+        loginid = data.balance.loginid;
+      } else {
+        return;
+      }
+
+      if (loginid && loginid !== derivClient.activeAccountId) return;
+
+      const mode = data.isDemo !== undefined ? (data.isDemo ? 'demo' : 'real') : (derivClient.isDemo ? 'demo' : 'real');
+      store.updateState({
+        balance: parseFloat(balanceValue),
+        currency,
+        loginid: derivClient.activeAccountId,
+        tradingMode: mode
+      });
+      logger.info(`💰 Balance updated: ${currency} ${balanceValue} (${mode})`);
     });
 
     derivClient.on('authorized', (data) => {
