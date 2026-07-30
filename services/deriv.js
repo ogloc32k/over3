@@ -23,6 +23,10 @@ class DerivClient {
     this._maxReconnectDelay = 30000;
     this._retryCount = 0;
     this._explicitClose = false;
+
+    // --- trade tracking ---
+    this._lastBuyParams = null;           // holds symbol, stake, contract_type, duration_ticks, bot_name
+    this._pendingTrades = {};             // contract_id → pending info
   }
 
   setStore(storeInstance) { this._store = storeInstance; }
@@ -67,54 +71,59 @@ class DerivClient {
   requestHistory(symbol, start, end, count) {
     const req = { ticks_history: symbol, adjust_start_time: 1, style: 'ticks', granularity: 1 };
     if (count) req.count = count;
-    else { req.start = start || Math.floor(Date.now() / 1000) - 3600; req.end = end || Math.floor(Date.now() / 1000); }
+    else { req.start = start || Math.floor(Date.now()/1000)-3600; req.end = end || Math.floor(Date.now()/1000); }
     this.send(req);
   }
 
+  /**
+   * Place a trade. Pass an optional `bot_name` to distinguish manual vs bot trades.
+   */
   buyContract(params) {
+    this._lastBuyParams = {
+      symbol: params.symbol,
+      contract_type: params.contractType,
+      stake: params.stake || 0,         // will be filled by server if missing
+      duration_ticks: params.duration,
+      duration_unit: params.durationUnit || 't',
+      bot_name: params.bot_name || 'manual'
+    };
+
     this.send({
-      buy: params.contractId || 1, price: params.stake,
+      buy: params.contractId || 1,
+      price: params.stake,
       parameters: {
-        amount: params.stake, basis: 'stake', contract_type: params.contractType,
-        currency: 'USD', duration: params.duration, duration_unit: params.durationUnit || 't', symbol: params.symbol
+        amount: params.stake,
+        basis: 'stake',
+        contract_type: params.contractType,
+        currency: 'USD',
+        duration: params.duration,
+        duration_unit: params.durationUnit || 't',
+        symbol: params.symbol
       }
     });
   }
 
+  // ---------- INTERNAL ----------
+
   async _connectViaOtp() {
     if (!this.accountId) {
-      let accounts;
-      try {
-        accounts = await this._fetchAccounts();
-      } catch (err) {
-        console.error('❌ Failed to fetch accounts:', err.message);
-        throw err;
-      }
+      const accounts = await this._fetchAccounts();
+      console.log('🔍 Accounts fetched, isDemo =', this.isDemo);
+      accounts.forEach(a => console.log(`   ${a.loginid} is_virtual=${a.is_virtual}`));
 
-      console.log('🔍 Accounts received:', JSON.stringify(accounts));
-      console.log('🔍 Looking for is_virtual ===', this.isDemo);
-
-      const target = accounts.find(a => {
-        console.log(`   checking ${a.loginid}: is_virtual=${a.is_virtual} (want ${this.isDemo})`);
-        return a.is_virtual === this.isDemo;
-      });
-
-      if (!target) {
-        console.error('❌ No matching account found! Available:', accounts.map(a => `${a.loginid}:${a.is_virtual}`));
-        throw new Error(`No ${this.isDemo ? 'demo' : 'real'} account found`);
-      }
+      const target = accounts.find(a => a.is_virtual === this.isDemo)
+                     || accounts.find(a => a.is_virtual === true);
+      if (!target) throw new Error('No accounts available');
 
       this.accountId = target.loginid;
       this.activeAccountId = target.loginid;
 
-      // ✅ Include isDemo in the balance event so server.js can set mode atomically
       this._emit('balance', {
         balance: target.balance,
         currency: target.currency || 'USD',
-        loginid: target.loginid,
-        isDemo: this.isDemo
+        loginid: target.loginid
       });
-      console.log(`🔑 Account: ${this.accountId} balance=${target.balance} (activeAccountId=${this.activeAccountId})`);
+      console.log(`🔑 Account: ${this.accountId} balance=${target.balance}`);
     }
 
     const otpUrl = `https://api.derivws.com/trading/v1/options/accounts/${this.accountId}/otp`;
@@ -204,7 +213,7 @@ class DerivClient {
     if (this._reconnectTimer) return;
     this._retryCount++;
     const delay = Math.min(this._reconnectDelay * Math.pow(2, this._retryCount - 1), this._maxReconnectDelay);
-    console.log(`⏳ Reconnecting in ${delay / 1000}s (attempt ${this._retryCount})`);
+    console.log(`⏳ Reconnecting in ${delay/1000}s (attempt ${this._retryCount})`);
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;
       this.connect();
@@ -229,10 +238,41 @@ class DerivClient {
       return;
     }
 
+    // --- trade settlement tracking ---
+    if (msg.buy) {
+      const contractId = msg.buy.contract_id;
+      if (contractId && this._lastBuyParams) {
+        this._pendingTrades[contractId] = { ...this._lastBuyParams };
+        this._lastBuyParams = null;
+      }
+      this._emit('buy_result', msg.buy);
+      return;
+    }
+
+    if (msg.proposal_open_contract) {
+      const settlement = msg.proposal_open_contract;
+      const contractId = settlement.contract_id;
+      const pending = contractId ? this._pendingTrades[contractId] : null;
+
+      if (pending) {
+        delete this._pendingTrades[contractId];
+        this._emit('trade_settled', {
+          ...pending,
+          contract_id: contractId,
+          entry_price: settlement.entry_spot,
+          exit_price: settlement.exit_spot,
+          payout: settlement.payout,
+          profit: settlement.profit,
+          barrier: settlement.barrier,
+          date_expiry: settlement.date_expiry,
+        });
+      }
+      return;
+    }
+
+    // --- other messages ---
     if (msg.balance) { this._emit('balance', msg.balance); return; }
     if (msg.tick) { this._emit('tick', msg.tick); return; }
-    if (msg.proposal_open_contract) { this._emit('contract_result', msg.proposal_open_contract); return; }
-    if (msg.buy) { this._emit('buy_result', msg.buy); return; }
     if (msg.history) { this._emit('history', msg.history); return; }
 
     if (msg.msg_type) {
@@ -248,7 +288,7 @@ class DerivClient {
   }
 
   _subscribeTicks() {
-    const symbols = ['R_10', 'R_25', 'R_50', 'R_75', 'R_100', '1HZ10V', '1HZ25V', '1HZ50V', '1HZ75V', '1HZ100V'];
+    const symbols = ['R_10','R_25','R_50','R_75','R_100','1HZ10V','1HZ25V','1HZ50V','1HZ75V','1HZ100V'];
     symbols.forEach(s => this.send({ ticks: s, subscribe: 1 }));
     console.log('📊 Subscribed to ticks');
   }
@@ -256,7 +296,6 @@ class DerivClient {
   send(data) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(data));
   }
-
   on(e, cb) { if (!this.listeners[e]) this.listeners[e] = []; this.listeners[e].push(cb); }
   off(e, cb) { if (!this.listeners[e]) return; this.listeners[e] = this.listeners[e].filter(c => c !== cb); }
   _emit(e, d) { (this.listeners[e] || []).forEach(cb => cb(d)); }
