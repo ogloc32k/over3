@@ -104,6 +104,7 @@
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
   }
 
+  // --- UPDATED: dynamic green/red colors ---
   function renderEquityCurve(equityData, startingBalance, timeframe) {
     if (!equityChartInstance) return;
     try {
@@ -114,10 +115,27 @@
         equityChartInstance.update('none');
         return;
       }
+
+      const firstEquity = equityData[0].equity;
+      const lastEquity = equityData[equityData.length - 1].equity;
+      const isUp = lastEquity >= firstEquity;
+      const lineColor = isUp ? '#10b981' : '#ef4444';
+      const fillColor = isUp ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
+
       const labels = equityData.map(p => formatEquityLabel(p.timestamp, timeframe));
       const values = equityData.map(p => p.equity);
+
       equityChartInstance.data.labels = labels;
       equityChartInstance.data.datasets[0].data = values;
+      equityChartInstance.data.datasets[0].borderColor = lineColor;
+      equityChartInstance.data.datasets[0].backgroundColor = fillColor;
+      equityChartInstance.data.datasets[0].pointBackgroundColor = lineColor;
+
+      // Remove any extra datasets (like baseline)
+      while (equityChartInstance.data.datasets.length > 1) {
+        equityChartInstance.data.datasets.pop();
+      }
+
       equityChartInstance.update('none');
     } catch (e) { console.error('renderEquityCurve error:', e); }
   }
