@@ -21,23 +21,19 @@ function closeNavDrawer() {
 
 // ---- Unified Tab Switching (desktop header + mobile drawer) ----
 function switchTab(tabId) {
-  console.log('[switchTab] called with:', tabId);
   if (!tabId) return;
 
-  // Deactivate all tab pages, drawer items, and header tabs
+  const isMobile = window.innerWidth <= 768;
+
   document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.drawer-nav-item').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.header-tabs .nav-tab').forEach(b => b.classList.remove('active'));
 
-  // Activate the target page
   const page = document.getElementById(tabId);
   if (page) page.classList.add('active');
 
-  // Activate matching drawer button
   const drawerBtn = document.querySelector(`.drawer-nav-item[data-tab="${tabId}"]`);
   if (drawerBtn) drawerBtn.classList.add('active');
-
-  // Activate matching header button
   const headerBtn = document.querySelector(`.header-tabs .nav-tab[data-tab="${tabId}"]`);
   if (headerBtn) headerBtn.classList.add('active');
 
@@ -58,27 +54,33 @@ function switchTab(tabId) {
     if (typeof window.scrollLogsToBottom === 'function') window.scrollLogsToBottom();
   }
 
-  // Lazy-render mobile-only tabs
-  if (tabId === 'tab-markets' && typeof renderMobileMarkets === 'function') renderMobileMarkets();
+  // Lazy-render tabs
+  if (isMobile && tabId === 'tab-markets' && typeof renderMobileMarkets === 'function') renderMobileMarkets();
   if (tabId === 'tab-manual' && typeof initManualTrade === 'function') initManualTrade();
 
-  // Focus bar visibility
+  // ---- Focus bar visibility ----
   const focusBar = document.getElementById('focusBar');
   if (focusBar) {
-    focusBar.style.display = (tabId === 'tab-analytics') ? 'none' : 'flex';
+    focusBar.style.display = (tabId === 'tab-analytics') ? 'none' : '';
   }
 
-  // Body classes for sidebar behavior
+  // ---- Sidebar collapse / restore ----
+  const sidebar = document.getElementById('appSidebar');
+  const toggle = document.getElementById('sidebarToggleFixed');
   const body = document.body;
   body.classList.remove('analytics-active', 'dashboard-active');
+
   if (tabId === 'tab-analytics') {
     body.classList.add('analytics-active');
-    const sidebar = document.getElementById('appSidebar');
     if (sidebar) sidebar.classList.add('collapsed');
-    const toggle = document.getElementById('sidebarToggleFixed');
     if (toggle) toggle.textContent = '▶';
-  } else if (tabId === 'tab-dashboard' || tabId === 'tab-home') {
-    body.classList.add('dashboard-active');
+  } else {
+    // Make sure sidebar is visible and toggle shows ◀
+    if (sidebar) sidebar.classList.remove('collapsed');
+    if (toggle) toggle.textContent = '◀';
+    if (tabId === 'tab-home' || tabId === 'tab-dashboard') {
+      body.classList.add('dashboard-active');
+    }
   }
 }
 
@@ -162,6 +164,7 @@ function syncMobileUI(state) {
 
   // Header profile button
   _setText('header-profile-mode', mode.toUpperCase());
+  _setText('sp-mode', mode.toUpperCase());
 
   // Home screen strip
   _setText('home-mode',    mode.toUpperCase());
@@ -246,19 +249,18 @@ function renderMobileMarkets() {
 }
 
 // ============================================================
-// MANUAL TRADE (mobile)
+// MANUAL TRADE (works on both desktop & mobile)
 // ============================================================
 const MANUAL_SHORT = {
   'R_10':'V10','R_25':'V25','R_50':'V50','R_75':'V75','R_100':'V100',
   '1HZ10V':'V10(1s)','1HZ25V':'V25(1s)','1HZ50V':'V50(1s)',
   '1HZ75V':'V75(1s)','1HZ100V':'V100(1s)'
 };
-let _manualMarket    = 'R_75';
-let _manualChart     = null;
+let _manualMarket   = 'R_75';
+let _manualChart    = null;
 let _manualChipsInit = false;
 
 function initManualTrade() {
-  if (window.innerWidth > 768) return;
   const MARKETS = window.QuantCore?.MARKETS_CFG || {};
   const chips   = document.getElementById('manualChips');
   if (!chips) return;
@@ -346,7 +348,6 @@ function fireMobileManual(direction) {
   if (typeof fireManual === 'function') {
     fireManual(direction, { symbol: _manualMarket, stake, duration, durationUnit: unit });
   } else {
-    // Fallback: direct fetch if fireManual is not available
     const prices = window.QuantCore?.getCurrentMarketPrices();
     const price  = prices ? prices[_manualMarket] : null;
     fetch('/api/trade/manual', {
