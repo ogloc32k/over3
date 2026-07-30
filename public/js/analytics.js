@@ -133,6 +133,10 @@
   }
 
   window.timeframePreset = async function (btn, mode) {
+    // Map human‑friendly names to API mode values
+    const modeMap = { 'year': '1y', 'week': '1w', 'month': '1m', '24h': '24h', 'session': 'session' };
+    mode = modeMap[mode] || mode;
+
     if (btn) {
       document.querySelectorAll('.preset-strip .btn-preset').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
