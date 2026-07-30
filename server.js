@@ -6,7 +6,7 @@ process.on('unhandledRejection', reason => { console.error('🔥 UNHANDLED REJEC
 
 const express = require('express');
 const path = require('path');
-const supabase = require('./services/supabase');   // our Supabase client
+const supabase = require('./services/supabase');
 
 let store, logger, derivClient;
 try { store = require('./store'); console.log('✅ Store loaded'); } catch(e) { console.error('❌ store.js:', e); process.exit(1); }
@@ -17,13 +17,18 @@ if (derivClient) derivClient.setStore(store);
 
 const app = express();
 app.use(express.json());
-app.use((req,res,next) => { console.log(`📡 ${req.method} ${req.url}`); next(); });
+app.use((req, res, next) => { console.log(`📡 ${req.method} ${req.url}`); next(); });
 app.use(express.static(path.join(__dirname, 'public')));
 
-// SSE
+// SSE stream (state + logs)
 app.get('/stream', (req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive'
+  });
   res.write('\n');
+
   const initial = store.getStatePayload();
   res.write(`data: ${JSON.stringify(initial)}\n\n`);
 
@@ -35,7 +40,7 @@ app.get('/stream', (req, res) => {
   req.on('close', () => store.removeListener('stateChanged', onChange));
 });
 
-// REST
+// REST API
 app.post('/api/control', (req, res) => {
   const { action, mode } = req.body;
   console.log('🟡 POST /api/control body:', req.body);
@@ -71,72 +76,68 @@ app.post('/api/config', (req, res) => {
 // ============================================================
 app.get('/api/ledger/aggregated', async (req, res) => {
   try {
-    const { mode } = req.query;
-    let start = null;
-
+    const { mode = 'session' } = req.query;
     const now = new Date();
+    let start;
+
     switch (mode) {
       case '24h':
         start = new Date(now.getTime() - 24*60*60*1000);
         break;
-      case 'week':
+      case '1w':
         start = new Date(now.getTime() - 7*24*60*60*1000);
         break;
-      case 'month':
+      case '1m':
         start = new Date(now.getTime() - 30*24*60*60*1000);
         break;
-      case 'year':
+      case '1y':
         start = new Date(now.getTime() - 365*24*60*60*1000);
         break;
       case 'session':
       default:
-        // session = today's trades
+        // session = today's trades (since midnight)
         start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         break;
     }
 
-    let query = supabase
+    const { data: trades, error } = await supabase
       .from('trading_ledger')
       .select('*')
       .gte('created_at', start.toISOString())
       .order('created_at', { ascending: true });
-
-    const { data: trades, error } = await query;
 
     if (error) {
       console.error('❌ Supabase query error:', error);
       return res.json({
         totalProfit: 0, tradeCount: 0, winCount: 0, lossCount: 0,
         grossProfit: 0, grossLoss: 0, maxDrawdown: 0, totalDuration: 0,
+        avgWin: 0, avgLoss: 0, strikeRate: 0, profitFactor: 0,
         assetContributions: [], equityData: []
       });
     }
 
-    const total = trades.length;
-    if (total === 0) {
+    if (!trades || trades.length === 0) {
       return res.json({
         totalProfit: 0, tradeCount: 0, winCount: 0, lossCount: 0,
         grossProfit: 0, grossLoss: 0, maxDrawdown: 0, totalDuration: 0,
+        avgWin: 0, avgLoss: 0, strikeRate: 0, profitFactor: 0,
         assetContributions: [], equityData: []
       });
     }
 
-    // ---- compute metrics ----
+    // ---- calculations ----
     let totalProfit = 0, grossProfit = 0, grossLoss = 0;
-    let wins = 0, losses = 0;
-    let sumWin = 0, sumLoss = 0;
+    let wins = 0, losses = 0, sumWin = 0, sumLoss = 0;
     let sumDuration = 0;
 
     const assetMap = {};
     const equityCurve = [];
-    let runningEquity = 0;
-    let peakEquity = -Infinity;
-    let maxDrawdown = 0;
+    let runningEquity = 0, peakEquity = -Infinity, maxDrawdown = 0;
 
     let currentStreak = 0, maxWinStreak = 0, maxLossStreak = 0;
 
-    trades.forEach((t, idx) => {
-      const pnl = Number(t.profit_loss);
+    for (const t of trades) {
+      const pnl = parseFloat(t.profit_loss);
       totalProfit += pnl;
 
       if (pnl > 0) {
@@ -146,10 +147,10 @@ app.get('/api/ledger/aggregated', async (req, res) => {
       } else if (pnl < 0) {
         losses++;
         grossLoss += Math.abs(pnl);
-        sumLoss += pnl;   // negative value
+        sumLoss += pnl;
       }
 
-      sumDuration += Number(t.duration_ticks || 0);
+      sumDuration += parseInt(t.duration_ticks) || 0;
 
       // asset grouping
       const asset = t.asset || 'Unknown';
@@ -160,10 +161,12 @@ app.get('/api/ledger/aggregated', async (req, res) => {
       equityCurve.push({ timestamp: t.created_at, equity: runningEquity });
 
       if (runningEquity > peakEquity) peakEquity = runningEquity;
-      const dd = peakEquity > 0 ? ((peakEquity - runningEquity) / peakEquity) * 100 : 0;
-      if (dd > maxDrawdown) maxDrawdown = dd;
+      if (peakEquity > 0) {
+        const dd = ((peakEquity - runningEquity) / peakEquity) * 100;
+        if (dd > maxDrawdown) maxDrawdown = dd;
+      }
 
-      // streaks
+      // consecutive streaks
       if (pnl > 0) {
         currentStreak = currentStreak >= 0 ? currentStreak + 1 : 1;
       } else {
@@ -171,9 +174,10 @@ app.get('/api/ledger/aggregated', async (req, res) => {
       }
       if (currentStreak > maxWinStreak) maxWinStreak = currentStreak;
       if (currentStreak < maxLossStreak) maxLossStreak = currentStreak;
-    });
+    }
 
-    const strikeRate = total > 0 ? ((wins / total) * 100) : 0;
+    const total = trades.length;
+    const strikeRate = total > 0 ? (wins / total) * 100 : 0;
     let profitFactor = 0;
     if (grossLoss === 0) {
       profitFactor = grossProfit > 0 ? parseFloat(grossProfit.toFixed(2)) : 0;
@@ -208,6 +212,7 @@ app.get('/api/ledger/aggregated', async (req, res) => {
     res.json({
       totalProfit: 0, tradeCount: 0, winCount: 0, lossCount: 0,
       grossProfit: 0, grossLoss: 0, maxDrawdown: 0, totalDuration: 0,
+      avgWin: 0, avgLoss: 0, strikeRate: 0, profitFactor: 0,
       assetContributions: [], equityData: []
     });
   }
@@ -225,24 +230,23 @@ const server = app.listen(PORT, () => {
 
   if (derivClient) {
     derivClient.on('balance', (data) => {
-      // ... (unchanged balance handling) ...
+      // ... existing balance handling ...
     });
 
     derivClient.on('authorized', (data) => {
       logger.info(`🔐 Authorized as ${data.loginid || derivClient.activeAccountId}`);
     });
 
-    // --- Listen for settled trades and insert into Supabase ---
+    // Insert settled trades into Supabase
     derivClient.on('trade_settled', async (trade) => {
       try {
-        const isWin = trade.profit > 0;
         const record = {
           asset: trade.symbol,
           contract_type: trade.contract_type,
           stake: parseFloat(trade.stake),
           payout: parseFloat(trade.payout || 0),
           profit_loss: parseFloat(trade.profit || 0),
-          is_win: isWin,
+          is_win: trade.profit > 0,
           barrier: trade.barrier || null,
           exit_tick: trade.exit_price ? parseFloat(trade.exit_price) : null,
           contract_id: trade.contract_id,
@@ -257,8 +261,6 @@ const server = app.listen(PORT, () => {
           console.error('❌ Failed to insert trade:', error);
         } else {
           console.log('✅ Trade recorded:', record.asset, record.profit_loss);
-          // Optionally push an analytics delta to SSE clients
-          // (not yet implemented for multiple clients)
         }
       } catch (e) {
         console.error('❌ trade_settled handler error:', e);
