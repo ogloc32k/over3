@@ -198,7 +198,6 @@
     } catch (e) { console.error('renderEquityCurve error:', e); }
   }
 
-  // UPDATED: now reads real fields from backend
   function updateMetrics(data) {
     try {
       const totalProfit = data.totalProfit || 0;
@@ -317,6 +316,14 @@
       return;
     }
     updateDatePickersForPreset(mode);
+
+    // ✅ Ensure charts are initialized before populating them
+    if (!assetBarChart || !equityChartInstance) {
+      if (window.Analytics && typeof window.Analytics.renderCharts === 'function') {
+        window.Analytics.renderCharts();
+      }
+    }
+
     try {
       const resp = await fetch(`/api/ledger/aggregated?mode=${mode}`);
       const data = await resp.json();
