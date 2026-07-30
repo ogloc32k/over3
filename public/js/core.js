@@ -2,7 +2,6 @@
 // core.js – Shared state, SSE, rendering engine, utilities
 // ============================================================
 (function () {
-  // ---------- Constants ----------
   const MARKETS_CFG = {
     'R_10': 'Volatility 10 Index',
     'R_25': 'Volatility 25 Index',
@@ -20,14 +19,12 @@
     '1HZ10V': 2, '1HZ25V': 2, '1HZ50V': 2, '1HZ75V': 2, '1HZ100V': 2
   };
 
-  // ---------- Event bus ----------
   const eventBus = {
     _handlers: {},
     on(evt, fn) { (this._handlers[evt] = this._handlers[evt] || []).push(fn); },
     emit(evt, data) { (this._handlers[evt] || []).forEach(fn => fn(data)); }
   };
 
-  // ---------- Private state ----------
   let currentFocus = 'R_75';
   let globalState = null;
   let serverMode = 'demo';
@@ -36,7 +33,6 @@
   let reconnectAttempts = 0;
   const maxReconnectAttempts = 10;
 
-  // ---------- Utility functions ----------
   function formatPrice(symbol, raw) {
     if (raw === undefined || raw === null) return '—';
     const dec = MARKET_DECIMALS[symbol] || 2;
@@ -60,7 +56,6 @@
     return shortMap[name] || name;
   }
 
-  // ---------- Render engine ----------
   let lastRenderTime = 0;
   function renderUI(state) {
     const now = Date.now();
@@ -101,12 +96,9 @@
         }
       }
 
-      // ---- Sidebar profile ----
+      // ---- Sidebar profile (only one mode badge) ----
       const profileEl = document.getElementById('m-profile');
       if (profileEl) profileEl.textContent = tradingMode.toUpperCase();
-      const spModeEl = document.getElementById('sp-mode');
-      if (spModeEl) spModeEl.textContent = tradingMode.toUpperCase();
-      // Desktop balance
       const balanceEl = document.getElementById('m-balance');
       if (balanceEl) {
         balanceEl.textContent = balance !== null ? `$${Number(balance).toFixed(2)}` : '---';
@@ -200,7 +192,6 @@
         tbody.appendChild(tr);
       }
 
-      // ---- Mobile view (legacy — silently no-ops if elements missing) ----
       try { renderMobileView(state); } catch(e) {}
 
     } catch (err) {
@@ -225,7 +216,6 @@
     }
   }
 
-  // ---------- SSE ----------
   function connectSSE() {
     if (sse) { sse.close(); sse = null; }
     sse = new EventSource('/stream');
@@ -258,7 +248,6 @@
             }
           }
           renderUI(data.state);
-          // Sync mobile UI elements (drawer, home screen, bot card, etc.)
           if (typeof syncMobileUI === 'function') syncMobileUI(data.state);
         }
         if (data.logs && data.logs.length > 0) {
@@ -270,7 +259,6 @@
     };
   }
 
-  // ---------- Set focus market ----------
   function setFocusMarket(sym) {
     if (!sym) return;
     currentFocus = sym;
@@ -280,7 +268,6 @@
     if (chip) chip.classList.add('active');
   }
 
-  // ---------- Public API ----------
   window.QuantCore = {
     getCurrentFocus: () => currentFocus,
     getGlobalState: () => globalState,
