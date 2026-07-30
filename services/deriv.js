@@ -24,9 +24,9 @@ class DerivClient {
     this._retryCount = 0;
     this._explicitClose = false;
 
-    // --- trade tracking ---
-    this._lastBuyParams = null;           // holds symbol, stake, contract_type, duration_ticks, bot_name
-    this._pendingTrades = {};             // contract_id → pending info
+    // trade tracking (unused for now, but ready)
+    this._lastBuyParams = null;
+    this._pendingTrades = {};
   }
 
   setStore(storeInstance) { this._store = storeInstance; }
@@ -75,14 +75,11 @@ class DerivClient {
     this.send(req);
   }
 
-  /**
-   * Place a trade. Pass an optional `bot_name` to distinguish manual vs bot trades.
-   */
   buyContract(params) {
     this._lastBuyParams = {
       symbol: params.symbol,
       contract_type: params.contractType,
-      stake: params.stake || 0,         // will be filled by server if missing
+      stake: params.stake || 0,
       duration_ticks: params.duration,
       duration_unit: params.durationUnit || 't',
       bot_name: params.bot_name || 'manual'
@@ -108,9 +105,6 @@ class DerivClient {
   async _connectViaOtp() {
     if (!this.accountId) {
       const accounts = await this._fetchAccounts();
-      console.log('🔍 Accounts fetched, isDemo =', this.isDemo);
-      accounts.forEach(a => console.log(`   ${a.loginid} is_virtual=${a.is_virtual}`));
-
       const target = accounts.find(a => a.is_virtual === this.isDemo)
                      || accounts.find(a => a.is_virtual === true);
       if (!target) throw new Error('No accounts available');
@@ -118,10 +112,12 @@ class DerivClient {
       this.accountId = target.loginid;
       this.activeAccountId = target.loginid;
 
+      // Emit balance immediately (restores the sidebar instantly)
       this._emit('balance', {
         balance: target.balance,
         currency: target.currency || 'USD',
-        loginid: target.loginid
+        loginid: target.loginid,
+        isDemo: this.isDemo
       });
       console.log(`🔑 Account: ${this.accountId} balance=${target.balance}`);
     }
@@ -238,41 +234,16 @@ class DerivClient {
       return;
     }
 
-    // --- trade settlement tracking ---
-    if (msg.buy) {
-      const contractId = msg.buy.contract_id;
-      if (contractId && this._lastBuyParams) {
-        this._pendingTrades[contractId] = { ...this._lastBuyParams };
-        this._lastBuyParams = null;
-      }
-      this._emit('buy_result', msg.buy);
+    if (msg.balance) {
+      this._emit('balance', msg.balance);
       return;
     }
-
-    if (msg.proposal_open_contract) {
-      const settlement = msg.proposal_open_contract;
-      const contractId = settlement.contract_id;
-      const pending = contractId ? this._pendingTrades[contractId] : null;
-
-      if (pending) {
-        delete this._pendingTrades[contractId];
-        this._emit('trade_settled', {
-          ...pending,
-          contract_id: contractId,
-          entry_price: settlement.entry_spot,
-          exit_price: settlement.exit_spot,
-          payout: settlement.payout,
-          profit: settlement.profit,
-          barrier: settlement.barrier,
-          date_expiry: settlement.date_expiry,
-        });
-      }
-      return;
-    }
-
-    // --- other messages ---
-    if (msg.balance) { this._emit('balance', msg.balance); return; }
     if (msg.tick) { this._emit('tick', msg.tick); return; }
+    if (msg.proposal_open_contract) {
+      this._emit('contract_result', msg.proposal_open_contract);
+      return;
+    }
+    if (msg.buy) { this._emit('buy_result', msg.buy); return; }
     if (msg.history) { this._emit('history', msg.history); return; }
 
     if (msg.msg_type) {
