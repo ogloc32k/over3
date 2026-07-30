@@ -14,7 +14,6 @@ class DerivClient {
     this.listeners = {};
     this.accountId = null;
     this.activeAccountId = null;
-    this.pingInterval = null;
     this.isDemo = true;
     this._store = null;
     this._connecting = false;
@@ -24,7 +23,6 @@ class DerivClient {
     this._retryCount = 0;
     this._explicitClose = false;
 
-    // trade tracking
     this._lastBuyParams = null;
     this._pendingTrades = {};
   }
@@ -59,7 +57,7 @@ class DerivClient {
     if (this._store) {
       this._store.updateState({
         tradingMode: this.isDemo ? 'demo' : 'real',
-        balance: null   // clear stale balance during transition
+        balance: null
       });
     }
 
@@ -112,7 +110,6 @@ class DerivClient {
       this.accountId = target.loginid;
       this.activeAccountId = target.loginid;
 
-      // ✅ Emit balance immediately (fixes the “---” balance)
       this._emit('balance', {
         balance: target.balance,
         currency: target.currency || 'USD',
@@ -167,7 +164,6 @@ class DerivClient {
     this.ws = new WebSocket(wsUrl);
     this.ws.on('open', () => {
       console.log('🔌 WebSocket connected (authenticated)');
-      this.pingInterval = setInterval(() => this.send({ ping: 1 }), 30000);
       this._emit('authorized', { loginid: this.accountId });
       this._subscribeTicks();
     });
@@ -183,7 +179,6 @@ class DerivClient {
 
     this.ws.on('close', (code, reason) => {
       console.log(`⚠️ WS closed (${code}). Reason: ${reason?.toString()}`);
-      clearInterval(this.pingInterval);
       this.ws = null;
       if (!this._explicitClose) {
         this._scheduleReconnect();
@@ -201,7 +196,6 @@ class DerivClient {
       this.ws.close();
       this.ws = null;
     }
-    clearInterval(this.pingInterval);
     if (explicit) this._clearReconnectTimer();
   }
 
@@ -229,28 +223,38 @@ class DerivClient {
       return;
     }
 
-    if (msg.ping) {
-      this.send({ pong: 1 });
+    if (msg.tick) {
+      this._emit('tick', msg.tick);
       return;
     }
 
-    if (msg.balance) { this._emit('balance', msg.balance); return; }
-    if (msg.tick) { this._emit('tick', msg.tick); return; }
+    if (msg.balance) {
+      this._emit('balance', msg.balance);
+      return;
+    }
+
     if (msg.proposal_open_contract) {
       this._emit('contract_result', msg.proposal_open_contract);
       return;
     }
-    if (msg.buy) { this._emit('buy_result', msg.buy); return; }
-    if (msg.history) { this._emit('history', msg.history); return; }
+
+    if (msg.buy) {
+      this._emit('buy_result', msg.buy);
+      return;
+    }
+
+    if (msg.history) {
+      this._emit('history', msg.history);
+      return;
+    }
 
     if (msg.msg_type) {
       switch (msg.msg_type) {
-        case 'balance': this._emit('balance', msg.balance); break;
         case 'tick': this._emit('tick', msg.tick); break;
+        case 'balance': this._emit('balance', msg.balance); break;
         case 'proposal_open_contract': this._emit('contract_result', msg.proposal_open_contract); break;
         case 'buy': this._emit('buy_result', msg.buy); break;
         case 'history': this._emit('history', msg.history); break;
-        case 'ping': this.send({ pong: 1 }); break;
       }
     }
   }
