@@ -55,7 +55,6 @@
   <!-- ====== HEADER ====== -->
   <header class="app-header">
     <div class="left">
-      <!-- Desktop: brand + tabs -->
       <div class="app-brand">QUANTCORE<span>//</span>TERMINAL <small>v6.0</small></div>
       <div class="header-tabs">
         <button class="nav-tab active" data-tab="tab-home">Home</button>
@@ -65,7 +64,6 @@
         <button class="nav-tab" data-tab="tab-logs">Logs</button>
         <button class="nav-tab" data-tab="tab-settings">Settings</button>
       </div>
-      <!-- Mobile: profile button -->
       <button class="mobile-profile-btn" id="mobileProfileBtn" onclick="openNavDrawer()">
         <span class="profile-avatar">👤</span>
         <span class="profile-mode" id="header-profile-mode">DEMO</span>
@@ -88,6 +86,7 @@
           <div class="sp-avatar">👤</div>
           <div class="sp-name" id="m-profile">—</div>
           <div class="sp-mode" id="sp-mode">DEMO</div>
+          <div class="sp-balance" id="m-balance">---</div>
           <button class="sp-switch" onclick="swapEnvironment()" title="Switch between DEMO and REAL account">🔄 Switch</button>
         </div>
       </div>
@@ -111,9 +110,8 @@
 
       <!-- ======= TAB PAGES ======= -->
 
-      <!-- HOME (Mobile landing / Desktop dashboard) -->
+      <!-- HOME -->
       <div id="tab-home" class="tab-page active">
-        <!-- Desktop: original markets table -->
         <div class="table-container desktop-table">
           <table class="data-table" id="dataTable">
             <thead>
@@ -131,10 +129,7 @@
             <tbody id="tableBody"></tbody>
           </table>
         </div>
-
-        <!-- Mobile: performance home screen -->
         <div class="mobile-home-screen">
-          <!-- Performance graph -->
           <div class="perf-section">
             <div class="perf-header">
               <span class="perf-title">Equity Performance</span>
@@ -153,8 +148,6 @@
               <div class="pstat"><div class="pstat-lbl">Trades</div><div class="pstat-val" id="home-trades">0</div></div>
             </div>
           </div>
-
-          <!-- Asset performance bar -->
           <div class="asset-perf-section">
             <div class="section-title">Asset Performance</div>
             <div class="asset-perf-chart-wrap">
@@ -162,8 +155,6 @@
               <div class="perf-empty" id="asset-perf-empty">No data yet</div>
             </div>
           </div>
-
-          <!-- Quick status strip -->
           <div class="home-status-strip">
             <div class="hstat"><span class="hstat-lbl">Mode</span><span class="hstat-val blue" id="home-mode">DEMO</span></div>
             <div class="hstat"><span class="hstat-lbl">Balance</span><span class="hstat-val blue" id="home-balance">$0.00</span></div>
@@ -173,15 +164,13 @@
         </div>
       </div>
 
-      <!-- MARKETS (Mobile vertical cards) -->
+      <!-- MARKETS -->
       <div id="tab-markets" class="tab-page">
-        <!-- Desktop reuses same table in tab-home, mobile gets cards -->
         <div class="mobile-markets-list" id="mobileMarketsList"></div>
       </div>
 
       <!-- MANUAL TRADE -->
       <div id="tab-manual" class="tab-page">
-        <!-- Desktop: sidebar handles all manual trading -->
         <div class="desktop-manual-hint">
           <span class="hint-icon">🎯</span>
           <strong>Manual Trade</strong>
@@ -189,22 +178,17 @@
           Set your duration and stake there, then fire.</span>
         </div>
         <div class="manual-trade-screen">
-          <!-- Market selector -->
           <div class="manual-market-selector">
             <div class="manual-chips" id="manualChips"></div>
           </div>
-
-          <!-- Selected market info -->
           <div class="manual-market-info">
             <div class="manual-price-row">
               <span class="manual-asset-name" id="manual-asset-name">Volatility 75 Index</span>
               <span class="manual-price" id="manual-price">—</span>
             </div>
-            <!-- Mini tick chart -->
             <div class="manual-chart-wrap">
               <canvas id="manual-tick-chart"></canvas>
             </div>
-            <!-- Metrics grid -->
             <div class="manual-metrics">
               <div class="mm-item">
                 <div class="mm-lbl">Support</div>
@@ -232,8 +216,6 @@
               </div>
             </div>
           </div>
-
-          <!-- Trade controls -->
           <div class="manual-controls">
             <div class="manual-stake-row">
               <div class="manual-field">
@@ -274,7 +256,6 @@
             <span class="bots-title">My Bots</span>
           </div>
           <div class="bots-list">
-            <!-- QuantCore Bot Card -->
             <div class="bot-card" id="botCard-quantcore">
               <div class="bot-card-header">
                 <div class="bot-info">
