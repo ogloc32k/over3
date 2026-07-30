@@ -232,16 +232,6 @@ body.light {
   font-family: 'Consolas', monospace;
   word-break: break-all;
 }
-.sp-mode {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  padding: 2px 10px;
-  border-radius: 20px;
-  background: rgba(59,130,246,0.12);
-  border: 1px solid rgba(59,130,246,0.3);
-  color: var(--neon-blue);
-}
 .sp-balance {
   font-size: 14px;
   font-weight: 700;
@@ -307,7 +297,7 @@ body.light {
 .focus-bar .right { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-secondary); flex-wrap: wrap; }
 
 /* ============================================================
-   TAB VISIBILITY — ✅ FIXED for scrolling
+   TAB VISIBILITY
    ============================================================ */
 .tab-page {
   display: none !important;
@@ -794,7 +784,7 @@ body.light {
 .log-header .clear-btn:active { transform: scale(0.95); }
 
 /* ============================================================
-   FIX: AUTO-COLLAPSE SIDEBAR ON ANALYTICS
+   FIX: AUTO-COLLAPSE SIDEBAR ON ANALYTICS (already correct)
    ============================================================ */
 body.analytics-active .app-sidebar {
   width: 0 !important;
@@ -811,7 +801,7 @@ body.analytics-active .app-main {
 }
 
 /* ============================================================
-   BOTS TAB — base styles (desktop + mobile, mobile overrides sizing)
+   BOTS TAB — base styles
    ============================================================ */
 .bots-screen {
   display: flex;
@@ -912,21 +902,146 @@ body.analytics-active .app-main {
   padding: 8px;
 }
 
-/* MANUAL TAB — desktop hint (hidden on mobile, shown on desktop via media query) */
-.desktop-manual-hint {
-  display: none;
+/* ============================================================
+   MANUAL TRADE — global styles (desktop + mobile)
+   ============================================================ */
+.manual-trade-screen {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px;
+  gap: 10px;
+}
+.manual-market-selector { flex-shrink: 0; }
+.manual-chips {
+  display: flex;
+  overflow-x: auto;
+  gap: 6px;
+  padding: 4px 0;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.manual-chips::-webkit-scrollbar { display: none; }
+.manual-chips .asset-chip {
+  flex: 0 0 auto;
+  padding: 6px 14px;
+  border-radius: 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.manual-chips .asset-chip.active {
+  background: var(--neon-blue);
+  color: #fff;
+  border-color: var(--neon-blue);
+}
+.manual-market-info {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.manual-price-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.manual-asset-name { font-size: 13px; font-weight: 700; color: var(--neon-blue); }
+.manual-price {
+  font-size: 22px;
+  font-weight: 700;
+  font-family: 'Consolas', monospace;
+  color: var(--text-primary);
+}
+.manual-chart-wrap {
+  height: 100px;
+  position: relative;
+  background: var(--bg-surface);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.manual-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.mm-item {
+  background: var(--bg-surface);
+  border-radius: 8px;
+  padding: 8px 6px;
+  text-align: center;
+}
+.mm-lbl {
+  font-size: 9px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.mm-val {
+  font-size: 13px;
+  font-weight: 700;
+  font-family: 'Consolas', monospace;
+  color: var(--text-primary);
+  margin-top: 2px;
+}
+.mm-val.green { color: var(--green-profit); }
+.mm-val.red { color: var(--red-loss); }
+
+.manual-controls { display: flex; flex-direction: column; gap: 10px; }
+.manual-stake-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.manual-field { display: flex; flex-direction: column; gap: 4px; }
+.manual-field label {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.manual-field input,
+.manual-field select {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 15px;
+  outline: none;
+  width: 100%;
+  min-height: 48px;
+}
+.dur-row { display: flex; gap: 6px; }
+.dur-row input,
+.dur-row select { flex: 1; }
+
+.manual-trade-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.btn-trade {
+  display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  flex: 1;
-  gap: 8px;
-  color: var(--text-secondary);
-  font-size: 13px;
-  text-align: center;
-  padding: 40px 20px;
+  padding: 18px 12px;
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  gap: 2px;
+  transition: all 0.15s;
+  min-height: 80px;
 }
-.desktop-manual-hint .hint-icon { font-size: 32px; margin-bottom: 4px; }
-.desktop-manual-hint strong { color: var(--text-primary); font-size: 14px; }
+.btn-trade:active { transform: scale(0.97); }
+.btn-trade.call { background: var(--green-profit); color: #0b0e14; }
+.btn-trade.put  { background: var(--red-loss);   color: #fff; }
+.trade-btn-icon { font-size: 22px; font-weight: 700; }
+.trade-btn-label { font-size: 16px; font-weight: 800; letter-spacing: 1px; }
+.trade-btn-sub { font-size: 10px; font-weight: 600; opacity: 0.8; }
 
 /* ============================================================
    ALWAYS HIDE NAV DRAWER AND OVERLAY BY DEFAULT
@@ -945,16 +1060,13 @@ body.analytics-active .app-main {
   .mobile-market-view { display: none !important; }
   .mobile-profile-btn { display: none; }
 
-  /* ---- Hide mobile-only content inside tabs on desktop ---- */
   .mobile-home-screen,
   .mobile-markets-list {
     display: none !important;
   }
 
-  /* ---- Hide the "use sidebar" hint — sidebar no longer has trade buttons ---- */
   #tab-manual .desktop-manual-hint { display: none !important; }
 
-  /* ---- Allow MANUAL / BOTS to show when active ---- */
   #tab-manual.active,
   #tab-bots.active {
     display: flex !important;
@@ -964,9 +1076,7 @@ body.analytics-active .app-main {
     overflow-y: auto;
   }
 
-  /* ---- Manual trade screen: show on desktop with a comfortable max-width ---- */
   #tab-manual .manual-trade-screen {
-    display: flex;
     max-width: 560px;
     width: 100%;
     margin: 0 auto;
@@ -980,10 +1090,6 @@ body.analytics-active .app-main {
    MOBILE-ONLY RULES
    ============================================================ */
 @media (max-width: 768px) {
-  .header-tabs {
-    display: none;
-  }
-  .mobile-profile-btn {
-    display: flex;
-  }
+  .header-tabs { display: none; }
+  .mobile-profile-btn { display: flex; }
 }
