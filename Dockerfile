@@ -1,20 +1,18 @@
-# Use a clean, stable Node.js environment
+# Dockerfile
 FROM node:20-alpine
 
-# Create and set the app directory inside the container
 WORKDIR /usr/src/app
 
-# Copy ONLY the package.json first to isolate dependency installation
+# Copy package files and install dependencies
 COPY package.json ./
+# No package-lock.json needed – npm install will generate one
+RUN npm install --production
 
-# Run a standard install (this dynamically downloads express and ws perfectly)
-RUN npm install
-
-# Copy the rest of your trading bot files (server.js, public folder, etc.)
+# Copy the rest of the application
 COPY . .
 
-# Expose port 3000 for your web interface dashboard
+# Expose the port (Koyeb sets PORT env var)
 EXPOSE 3000
 
-# Ignite the engine
+# Start the server
 CMD ["node", "server.js"]
