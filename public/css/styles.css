@@ -313,13 +313,16 @@ body.light {
 .analytics-container { flex: 1; min-height: 0; }
 
 /* ============================================================
-   SETTINGS
+   SETTINGS – now scrollable
    ============================================================ */
 .settings-grid {
   padding: 6px 0 80px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 .settings-section {
   background: var(--bg-card);
@@ -784,7 +787,7 @@ body.light {
 .log-header .clear-btn:active { transform: scale(0.95); }
 
 /* ============================================================
-   FIX: AUTO-COLLAPSE SIDEBAR ON ANALYTICS (already correct)
+   FIX: AUTO-COLLAPSE SIDEBAR ON ANALYTICS
    ============================================================ */
 body.analytics-active .app-sidebar {
   width: 0 !important;
