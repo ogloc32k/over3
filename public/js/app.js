@@ -485,3 +485,79 @@ function loadMobileHomeData() {
     })
     .catch(err => console.error('Failed to load mobile home data:', err));
 }
+
+// Mobile home timeframe buttons (1W / 1M)
+function setHomeTf(btn, mode) {
+  // Highlight the active button
+  document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+
+  // Map short mode to full API mode (same as Analytics)
+  const map = { '1W': '1w', '1M': '1m' };
+  const apiMode = map[mode] || 'session';
+
+  // Re‑fetch data for the home screen
+  fetch(`/api/ledger/aggregated?mode=${apiMode}`)
+    .then(r => r.json())
+    .then(data => {
+      // Update the summary numbers
+      _setText('home-pnl', (data.totalProfit||0) >= 0 ? '+$' + (data.totalProfit||0).toFixed(2) : '-$' + Math.abs(data.totalProfit||0).toFixed(2));
+      _setText('home-wr', (data.strikeRate||0).toFixed(1) + '%');
+      _setText('home-trades', data.tradeCount || 0);
+
+      // Re‑draw the equity chart
+      if (mobileEquityChart) {
+        mobileEquityChart.destroy();
+        mobileEquityChart = null;
+      }
+      const ctx = document.getElementById('mobile-equity-chart');
+      if (ctx) {
+        mobileEquityChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            datasets: [{
+              label: 'Equity',
+              data: (data.equityData || []).map(p => ({
+                x: new Date(p.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                y: p.equity
+              })),
+              borderColor: '#10b981',
+              backgroundColor: 'rgba(16,185,129,0.1)',
+              fill: true,
+              tension: 0.3,
+              pointRadius: 0
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } }
+          }
+        });
+      }
+
+      // Re‑draw the asset performance bar chart
+      const assetCtx = document.getElementById('mobile-asset-perf-chart');
+      if (assetCtx) {
+        Chart.getChart(assetCtx)?.destroy();
+        new Chart(assetCtx, {
+          type: 'bar',
+          data: {
+            labels: (data.assetContributions || []).map(a => a.name),
+            datasets: [{
+              data: (data.assetContributions || []).map(a => a.pnl),
+              backgroundColor: (data.assetContributions || []).map(a => a.pnl >= 0 ? '#10b981' : '#ef4444')
+            }]
+          },
+          options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } }
+          }
+        });
+      }
+    });
+}
+// Make it global so the HTML onclick can find it
+window.setHomeTf = setHomeTf;
