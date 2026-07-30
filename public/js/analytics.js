@@ -5,7 +5,7 @@
   let assetBarChart = null;
   let equityChartInstance = null;
   let currentAnalyticsData = null;
-  let currentMode = 'session';   // remember active preset for auto‑refresh
+  let currentMode = 'session';
 
   const barValueLabelPlugin = {
     id: 'barValueLabel',
@@ -145,11 +145,10 @@
     return state?.tradingMode || 'demo';
   }
 
-  // Called externally (from app.js) when account switches
+  // Called externally when account switches
   function refreshAnalytics() {
     const activePage = document.querySelector('.tab-page.active');
     if (!activePage || activePage.id !== 'tab-analytics') return;
-    // Re‑fetch with current mode and account
     window.timeframePreset(null, currentMode);
   }
 
@@ -158,7 +157,7 @@
   window.timeframePreset = async function (btn, mode) {
     const modeMap = { 'year': '1y', 'week': '1w', 'month': '1m', '24h': '24h', 'session': 'session' };
     mode = modeMap[mode] || mode;
-    currentMode = mode;   // remember for auto‑refresh
+    currentMode = mode;
 
     updateDatePickersForPreset(mode);
 
