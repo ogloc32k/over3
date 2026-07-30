@@ -1,0 +1,97 @@
+// engine/indicators.js
+
+function computeMetrics(symbol, prices, config = {}) {
+  if (!prices || prices.length < 2) return null;
+
+  const lastPrice = prices[prices.length - 1];
+  const rsi = computeRSI(prices, config.RSI_PERIOD || 20);
+  const { upper, middle, lower, bandwidth } = computeBollinger(prices, config.BOLLINGER_PERIOD || 20, config.BOLLINGER_STD || 2);
+  const { support, resistance } = computeSupportResistance(prices);
+  const volatility = computeVolatility(prices);
+
+  const supportPct = support !== null ? ((lastPrice - support) / lastPrice) * 100 : null;
+  const resistancePct = resistance !== null ? ((resistance - lastPrice) / lastPrice) * 100 : null;
+
+  const isBreakout = resistance !== null && lastPrice > resistance;
+  const isBreakdown = support !== null && lastPrice < support;
+
+  const tickDirections = prices.slice(1).map((p, i) => p > prices[i] ? 1 : (p < prices[i] ? -1 : 0));
+  const score = computeScore(rsi, isBreakout, isBreakdown, volatility);
+
+  return {
+    price: lastPrice,
+    step: isBreakout || isBreakdown ? 3 : (resistancePct !== null && resistancePct < 1 ? 2 : 1),
+    support,
+    resistance,
+    isBreakout,
+    isBreakdown,
+    rsi,
+    volatility,
+    score,
+    bandwidth,
+    tickDirections: tickDirections.slice(-20),
+    supportPct,
+    resistancePct,
+    risePct: resistancePct,
+    fallPct: supportPct,
+    lastPrices: prices.slice(-20),
+  };
+}
+
+function computeRSI(prices, period) {
+  if (prices.length < period + 1) return 50;
+  let gains = 0, losses = 0;
+  for (let i = prices.length - period; i < prices.length; i++) {
+    const diff = prices[i] - prices[i - 1];
+    if (diff > 0) gains += diff;
+    else losses -= diff;
+  }
+  const avgGain = gains / period;
+  const avgLoss = losses / period;
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return 100 - (100 / (1 + rs));
+}
+
+function computeBollinger(prices, period, stdDev) {
+  if (prices.length < period) return { upper: null, middle: null, lower: null, bandwidth: null };
+  const slice = prices.slice(-period);
+  const mean = slice.reduce((a,b) => a + b, 0) / period;
+  const variance = slice.reduce((a,b) => a + (b - mean) ** 2, 0) / period;
+  const std = Math.sqrt(variance);
+  const upper = mean + stdDev * std;
+  const lower = mean - stdDev * std;
+  const bandwidth = ((upper - lower) / mean) * 100;
+  return { upper, middle: mean, lower, bandwidth };
+}
+
+function computeSupportResistance(prices) {
+  if (prices.length < 10) return { support: null, resistance: null };
+  const recent = prices.slice(-50);
+  const support = Math.min(...recent);
+  const resistance = Math.max(...recent);
+  return { support, resistance };
+}
+
+function computeVolatility(prices) {
+  if (prices.length < 2) return 0;
+  const returns = [];
+  for (let i = 1; i < prices.length; i++) {
+    returns.push((prices[i] - prices[i-1]) / prices[i-1]);
+  }
+  const mean = returns.reduce((a,b) => a + b, 0) / returns.length;
+  const variance = returns.reduce((a,b) => a + (b - mean) ** 2, 0) / returns.length;
+  return Math.sqrt(variance) * 100;
+}
+
+function computeScore(rsi, isBreakout, isBreakdown, volatility) {
+  let score = 50;
+  if (rsi > 70) score += 20;
+  else if (rsi < 30) score -= 20;
+  if (isBreakout) score += 15;
+  if (isBreakdown) score -= 15;
+  score += volatility * 2;
+  return Math.min(100, Math.max(0, score));
+}
+
+module.exports = { computeMetrics };
