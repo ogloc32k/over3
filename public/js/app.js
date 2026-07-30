@@ -75,12 +75,16 @@ function switchTab(tabId) {
     if (sidebar) sidebar.classList.add('collapsed');
     if (toggle) toggle.textContent = '▶';
   } else {
-    // Make sure sidebar is visible and toggle shows ◀
     if (sidebar) sidebar.classList.remove('collapsed');
     if (toggle) toggle.textContent = '◀';
     if (tabId === 'tab-home' || tabId === 'tab-dashboard') {
       body.classList.add('dashboard-active');
     }
+  }
+
+  // ---- Mobile home chart ----
+  if (tabId === 'tab-home' && typeof loadMobileHomeData === 'function') {
+    loadMobileHomeData();
   }
 }
 
@@ -141,6 +145,11 @@ document.addEventListener('DOMContentLoaded', function () {
   }
   if (window.QuantCore && typeof window.QuantCore.renderUI === 'function') {
     QuantCore.renderUI({});
+  }
+
+  // Load mobile home data if on mobile and home tab is active
+  if (window.innerWidth <= 768 && typeof loadMobileHomeData === 'function') {
+    loadMobileHomeData();
   }
 
   console.log('🚀 QUANTCORE Terminal v6.0 loaded');
@@ -391,4 +400,88 @@ function _syncBotCard(state) {
   if (sp) { sp.textContent = pnl(state.sessionPnl); sp.style.color = (state.sessionPnl || 0) >= 0 ? 'var(--green-profit)' : 'var(--red-loss)'; }
   if (dp) { dp.textContent = pnl(state.dailyPnl);   dp.style.color = (state.dailyPnl   || 0) >= 0 ? 'var(--green-profit)' : 'var(--red-loss)'; }
   if (rk) rk.textContent = pnl(state.currentStake);
+}
+
+// ============================================================
+// MOBILE HOME EQUITY CHART
+// ============================================================
+let mobileEquityChart = null;
+
+function loadMobileHomeData() {
+  if (window.innerWidth > 768) return; // only on mobile
+
+  fetch('/api/ledger/aggregated?mode=session')
+    .then(r => r.json())
+    .then(data => {
+      // Update summary stats
+      _setText('home-pnl', (data.totalProfit || 0) >= 0 ? '+$' + (data.totalProfit || 0).toFixed(2) : '-$' + Math.abs(data.totalProfit || 0).toFixed(2));
+      _setText('home-wr', (data.strikeRate || 0).toFixed(1) + '%');
+      _setText('home-trades', data.tradeCount || 0);
+
+      // Equity curve
+      const ctx = document.getElementById('mobile-equity-chart');
+      if (!ctx) return;
+      if (mobileEquityChart) mobileEquityChart.destroy();
+      mobileEquityChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          datasets: [{
+            label: 'Equity',
+            data: (data.equityData || []).map(p => ({ x: new Date(p.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }), y: p.equity })),
+            borderColor: '#10b981',
+            backgroundColor: 'rgba(16,185,129,0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { display: true, ticks: { maxTicksLimit: 5 } },
+            y: { display: true }
+          }
+        }
+      });
+      // Show empty state if no data
+      const emptyEl = document.getElementById('perf-empty');
+      if (emptyEl) emptyEl.style.display = (data.equityData || []).length < 2 ? 'flex' : 'none';
+
+      // Asset performance bar chart
+      const assetCtx = document.getElementById('mobile-asset-perf-chart');
+      if (assetCtx) {
+        // destroy previous if exists
+        Chart.getChart(assetCtx)?.destroy();
+        const labels = (data.assetContributions || []).map(a => a.name);
+        const values = (data.assetContributions || []).map(a => a.pnl);
+        const colors = values.map(v => v >= 0 ? '#10b981' : '#ef4444');
+        new Chart(assetCtx, {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [{
+              data: values,
+              backgroundColor: colors,
+              borderColor: colors,
+              borderWidth: 0,
+              borderRadius: 4
+            }]
+          },
+          options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { ticks: { callback: val => (val >= 0 ? '+' : '') + '$' + val.toFixed(2) } }
+            }
+          }
+        });
+        const assetEmpty = document.getElementById('asset-perf-empty');
+        if (assetEmpty) assetEmpty.style.display = (data.assetContributions || []).length === 0 ? 'flex' : 'none';
+      }
+    })
+    .catch(err => console.error('Failed to load mobile home data:', err));
 }
