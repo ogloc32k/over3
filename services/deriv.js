@@ -24,7 +24,7 @@ class DerivClient {
     this._retryCount = 0;
     this._explicitClose = false;
 
-    // trade tracking (unused for now, but ready)
+    // trade tracking
     this._lastBuyParams = null;
     this._pendingTrades = {};
   }
@@ -59,7 +59,7 @@ class DerivClient {
     if (this._store) {
       this._store.updateState({
         tradingMode: this.isDemo ? 'demo' : 'real',
-        balance: null
+        balance: null   // clear stale balance during transition
       });
     }
 
@@ -112,7 +112,7 @@ class DerivClient {
       this.accountId = target.loginid;
       this.activeAccountId = target.loginid;
 
-      // Emit balance immediately (restores the sidebar instantly)
+      // ✅ Emit balance immediately (fixes the “---” balance)
       this._emit('balance', {
         balance: target.balance,
         currency: target.currency || 'USD',
@@ -234,10 +234,7 @@ class DerivClient {
       return;
     }
 
-    if (msg.balance) {
-      this._emit('balance', msg.balance);
-      return;
-    }
+    if (msg.balance) { this._emit('balance', msg.balance); return; }
     if (msg.tick) { this._emit('tick', msg.tick); return; }
     if (msg.proposal_open_contract) {
       this._emit('contract_result', msg.proposal_open_contract);
