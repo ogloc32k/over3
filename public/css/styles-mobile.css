@@ -143,11 +143,15 @@
 .hstat-val.green { color: var(--green-profit); }
 .hstat-val.red { color: var(--red-loss); }
 
-/* ---- Markets vertical cards ---- */
+/* ---- Markets vertical cards – now scrollable ---- */
 .mobile-markets-list {
-  display: flex; flex-direction: column;
-  gap: 6px; padding: 10px;
-  overflow-y: auto; flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 .market-card {
   background: var(--bg-card);
@@ -359,7 +363,7 @@
 .log-header { flex-shrink: 0; margin-bottom: 8px; }
 .log-stream { flex: 1; min-height: 0; overflow-y: auto; }
 
-/* ---- Settings ---- */
+/* ---- Settings (scrollable) ---- */
 .settings-grid { padding: 10px 10px 80px; overflow-y: auto; }
 .settings-subgrid { grid-template-columns: 1fr !important; }
 .settings-actions {
@@ -367,7 +371,7 @@
   margin: 0 !important; padding: 12px 10px !important;
 }
 
-/* ---- Drawer button reset (removes default browser styles) ---- */
+/* ---- Drawer button reset ---- */
 .drawer-nav-item,
 .drawer-nav-item:visited,
 .drawer-nav-item:link {
@@ -402,4 +406,52 @@
   height: 1px;
   background: rgba(255, 255, 255, 0.08);
   margin: 12px 0;
+}
+
+/* ---- Fix 1: Switch Account button matches menu items ---- */
+.btn-swap-drawer {
+  display: flex !important;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 12px;
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
+  color: #d1d5db !important;
+  font-size: 15px;
+  font-weight: 500;
+  text-align: left;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.btn-swap-drawer:hover,
+.btn-swap-drawer:active {
+  background-color: #1a2130 !important;
+  color: #ffffff !important;
+}
+
+/* ---- Fix 2: Close button (✕) in top‑right corner ---- */
+.drawer-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: transparent !important;
+  border: none !important;
+  color: #8a8d93;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px;
+  transition: color 0.15s;
+}
+
+.drawer-close:hover {
+  color: #ffffff;
+}
+
+.drawer-header {
+  position: relative;
 }
