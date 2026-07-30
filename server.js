@@ -64,16 +64,15 @@ app.post('/api/trade/manual', (req, res) => {
 });
 
 app.get('/api/config', (req, res) => res.json(store.config || {}));
-
 app.post('/api/config', (req, res) => {
   try {
     store.config = { ...store.config, ...req.body };
-    store.emit('configChanged');   // notify engine of buffer size change
+    store.emit('configChanged');
     res.json({ success: true });
   } catch (err) { res.json({ error: err.message }); }
 });
 
-// Analytics (unchanged, full code here for completeness)
+// Analytics
 app.get('/api/ledger/aggregated', async (req, res) => {
   try {
     const { mode = 'session', account = 'demo', start: customStart, end: customEnd } = req.query;
@@ -84,44 +83,28 @@ app.get('/api/ledger/aggregated', async (req, res) => {
     const cleanMode = modeMap[mode] || mode;
 
     switch (cleanMode) {
-      case '24h':
-        start = new Date(now.getTime() - 24*60*60*1000);
-        break;
-      case '1w':
-        start = new Date(now.getTime() - 7*24*60*60*1000);
-        break;
-      case '1m':
-        start = new Date(now.getTime() - 30*24*60*60*1000);
-        break;
-      case '1y':
-        start = new Date(now.getTime() - 365*24*60*60*1000);
-        break;
+      case '24h': start = new Date(now.getTime() - 24*60*60*1000); break;
+      case '1w':  start = new Date(now.getTime() - 7*24*60*60*1000); break;
+      case '1m':  start = new Date(now.getTime() - 30*24*60*60*1000); break;
+      case '1y':  start = new Date(now.getTime() - 365*24*60*60*1000); break;
       case 'custom':
         if (customStart) start = new Date(customStart);
         if (customEnd)   end   = new Date(customEnd);
         if (!start) start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         break;
       case 'session':
-      default:
-        start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        break;
+      default: start = new Date(now.getFullYear(), now.getMonth(), now.getDate()); break;
     }
 
     let query = supabase.from('trading_ledger').select('*')
-      .eq('account', account)
-      .gte('created_at', start.toISOString());
+      .eq('account', account).gte('created_at', start.toISOString());
     if (end) query = query.lte('created_at', end.toISOString());
     query = query.order('created_at', { ascending: true });
 
     const { data: trades, error } = await query;
 
     if (error || !trades || trades.length === 0) {
-      return res.json({
-        totalProfit: 0, tradeCount: 0, winCount: 0, lossCount: 0,
-        grossProfit: 0, grossLoss: 0, maxDrawdown: 0, totalDuration: 0,
-        avgWin: 0, avgLoss: 0, strikeRate: 0, profitFactor: 0,
-        assetContributions: [], equityData: []
-      });
+      return res.json({ totalProfit:0,tradeCount:0,winCount:0,lossCount:0,grossProfit:0,grossLoss:0,maxDrawdown:0,totalDuration:0,avgWin:0,avgLoss:0,strikeRate:0,profitFactor:0,assetContributions:[],equityData:[] });
     }
 
     let totalProfit=0, grossProfit=0, grossLoss=0, wins=0, losses=0, sumWin=0, sumLoss=0, sumDuration=0;
@@ -158,20 +141,10 @@ app.get('/api/ledger/aggregated', async (req, res) => {
     const avgDuration = total>0 ? sumDuration/total : 0;
     const assetContributions = Object.entries(assetMap).map(([name, pnl]) => ({ name, pnl }));
 
-    res.json({
-      totalProfit, tradeCount: total, winCount: wins, lossCount: losses,
-      grossProfit, grossLoss, maxDrawdown, totalDuration: sumDuration,
-      avgWin, avgLoss, strikeRate, profitFactor,
-      assetContributions, equityData: equityCurve
-    });
+    res.json({ totalProfit, tradeCount: total, winCount: wins, lossCount: losses, grossProfit, grossLoss, maxDrawdown, totalDuration: sumDuration, avgWin, avgLoss, strikeRate, profitFactor, assetContributions, equityData: equityCurve });
   } catch (err) {
     console.error('❌ Analytics error:', err);
-    res.json({
-      totalProfit: 0, tradeCount: 0, winCount: 0, lossCount: 0,
-      grossProfit: 0, grossLoss: 0, maxDrawdown: 0, totalDuration: 0,
-      avgWin: 0, avgLoss: 0, strikeRate: 0, profitFactor: 0,
-      assetContributions: [], equityData: []
-    });
+    res.json({ totalProfit:0,tradeCount:0,winCount:0,lossCount:0,grossProfit:0,grossLoss:0,maxDrawdown:0,totalDuration:0,avgWin:0,avgLoss:0,strikeRate:0,profitFactor:0,assetContributions:[],equityData:[] });
   }
 });
 
@@ -191,7 +164,6 @@ const server = app.listen(PORT, () => {
       store.tickBuffer.setMaxSize(store.config.ANALYSIS_WINDOW || 500);
     });
 
-    // Balance handling (unchanged)
     derivClient.on('balance', (data) => {
       if (!derivClient.activeAccountId) return;
 
@@ -218,7 +190,7 @@ const server = app.listen(PORT, () => {
       logger.info(`🔐 Authorized as ${data.loginid || derivClient.activeAccountId}`);
     });
 
-    // --- Tick → Buffer → Indicators → Store ---
+    // Tick pipeline
     derivClient.on('tick', (tick) => {
       const symbol = tick.symbol;
       const price = tick.quote;
@@ -233,7 +205,6 @@ const server = app.listen(PORT, () => {
       }
     });
 
-    // Trade settlement → Supabase
     derivClient.on('trade_settled', async (trade) => {
       try {
         const account = derivClient.isDemo ? 'demo' : 'real';
