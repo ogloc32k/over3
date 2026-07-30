@@ -59,7 +59,6 @@
       <div class="app-brand">QUANTCORE<span>//</span>TERMINAL <small>v6.0</small></div>
       <div class="header-tabs">
         <button class="nav-tab active" data-tab="tab-home">Home</button>
-        <button class="nav-tab" data-tab="tab-markets">Markets</button>
         <button class="nav-tab" data-tab="tab-manual">Manual</button>
         <button class="nav-tab" data-tab="tab-bots">Bots</button>
         <button class="nav-tab" data-tab="tab-analytics">Analytics</button>
@@ -85,32 +84,11 @@
     <!-- SIDEBAR (Desktop only) -->
     <aside class="app-sidebar" id="appSidebar">
       <div class="sidebar-content">
-        <div class="sidebar-metrics">
-          <div class="metric"><div class="lbl">Profile</div><div class="val blue" id="m-profile">—</div></div>
-          <div class="metric"><div class="lbl">Balance</div><div class="val blue" id="m-balance">—</div></div>
-          <div class="metric"><div class="lbl">Session</div><div class="val green" id="m-session">$0.00</div></div>
-          <div class="metric"><div class="lbl">Daily</div><div class="val green" id="m-daily">$0.00</div></div>
-          <div class="metric" style="grid-column: span 2;"><div class="lbl">Risk</div><div class="val orange" id="m-stake">$0.00</div></div>
-        </div>
-        <div class="sidebar-controls">
-          <div class="row">
-            <button class="btn start" onclick="sendControl('start')">▶ Start</button>
-            <button class="btn stop" onclick="sendControl('stop')">⏹ Stop</button>
-            <button class="btn swap" onclick="swapEnvironment()">🔄</button>
-          </div>
-        </div>
-        <div class="sidebar-duration">
-          <label>Dur</label>
-          <input type="number" id="manual-duration" value="7" min="1" max="10">
-          <select id="manual-unit">
-            <option value="t" selected>Ticks</option>
-            <option value="s">Sec</option>
-            <option value="m">Min</option>
-          </select>
-        </div>
-        <div class="sidebar-trade-btns">
-          <button class="btn call" onclick="fireManual('CALL')">📈 CALL</button>
-          <button class="btn put" onclick="fireManual('PUT')">📉 PUT</button>
+        <div class="sidebar-profile">
+          <div class="sp-avatar">👤</div>
+          <div class="sp-name" id="m-profile">—</div>
+          <div class="sp-mode" id="sp-mode">DEMO</div>
+          <button class="sp-switch" onclick="swapEnvironment()" title="Switch between DEMO and REAL account">🔄 Switch</button>
         </div>
       </div>
     </aside>
@@ -203,6 +181,13 @@
 
       <!-- MANUAL TRADE -->
       <div id="tab-manual" class="tab-page">
+        <!-- Desktop: sidebar handles all manual trading -->
+        <div class="desktop-manual-hint">
+          <span class="hint-icon">🎯</span>
+          <strong>Manual Trade</strong>
+          <span>Use the <b>CALL</b> / <b>PUT</b> buttons in the sidebar to place trades.<br>
+          Set your duration and stake there, then fire.</span>
+        </div>
         <div class="manual-trade-screen">
           <!-- Market selector -->
           <div class="manual-market-selector">
