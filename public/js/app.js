@@ -194,6 +194,11 @@ function syncMobileUI(state) {
     if (activeTab.id === 'tab-markets' && typeof renderMobileMarkets === 'function') renderMobileMarkets();
     if (activeTab.id === 'tab-manual'  && typeof updateManualInfo === 'function')  updateManualInfo();
   }
+
+  // Refresh analytics on account switch
+  if (typeof window.refreshAnalytics === 'function') {
+    window.refreshAnalytics();
+  }
 }
 
 function _setText(id, text) {
@@ -410,7 +415,7 @@ let mobileEquityChart = null;
 function loadMobileHomeData() {
   if (window.innerWidth > 768) return; // only on mobile
 
-  fetch('/api/ledger/aggregated?mode=session')
+  fetch('/api/ledger/aggregated?mode=session&account=' + (QuantCore.getGlobalState()?.tradingMode || 'demo'))
     .then(r => r.json())
     .then(data => {
       // Update summary stats
@@ -488,28 +493,21 @@ function loadMobileHomeData() {
 
 // Mobile home timeframe buttons (1W / 1M)
 function setHomeTf(btn, mode) {
-  // Highlight the active button
   document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
 
-  // Map short mode to full API mode (same as Analytics)
   const map = { '1W': '1w', '1M': '1m' };
   const apiMode = map[mode] || 'session';
+  const account = QuantCore.getGlobalState()?.tradingMode || 'demo';
 
-  // Re‑fetch data for the home screen
-  fetch(`/api/ledger/aggregated?mode=${apiMode}`)
+  fetch(`/api/ledger/aggregated?mode=${apiMode}&account=${account}`)
     .then(r => r.json())
     .then(data => {
-      // Update the summary numbers
       _setText('home-pnl', (data.totalProfit||0) >= 0 ? '+$' + (data.totalProfit||0).toFixed(2) : '-$' + Math.abs(data.totalProfit||0).toFixed(2));
       _setText('home-wr', (data.strikeRate||0).toFixed(1) + '%');
       _setText('home-trades', data.tradeCount || 0);
 
-      // Re‑draw the equity chart
-      if (mobileEquityChart) {
-        mobileEquityChart.destroy();
-        mobileEquityChart = null;
-      }
+      if (mobileEquityChart) { mobileEquityChart.destroy(); mobileEquityChart = null; }
       const ctx = document.getElementById('mobile-equity-chart');
       if (ctx) {
         mobileEquityChart = new Chart(ctx, {
@@ -517,26 +515,16 @@ function setHomeTf(btn, mode) {
           data: {
             datasets: [{
               label: 'Equity',
-              data: (data.equityData || []).map(p => ({
-                x: new Date(p.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                y: p.equity
-              })),
+              data: (data.equityData || []).map(p => ({ x: new Date(p.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), y: p.equity })),
               borderColor: '#10b981',
               backgroundColor: 'rgba(16,185,129,0.1)',
-              fill: true,
-              tension: 0.3,
-              pointRadius: 0
+              fill: true, tension: 0.3, pointRadius: 0
             }]
           },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { display: false } }
-          }
+          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
         });
       }
 
-      // Re‑draw the asset performance bar chart
       const assetCtx = document.getElementById('mobile-asset-perf-chart');
       if (assetCtx) {
         Chart.getChart(assetCtx)?.destroy();
@@ -544,20 +532,11 @@ function setHomeTf(btn, mode) {
           type: 'bar',
           data: {
             labels: (data.assetContributions || []).map(a => a.name),
-            datasets: [{
-              data: (data.assetContributions || []).map(a => a.pnl),
-              backgroundColor: (data.assetContributions || []).map(a => a.pnl >= 0 ? '#10b981' : '#ef4444')
-            }]
+            datasets: [{ data: (data.assetContributions || []).map(a => a.pnl), backgroundColor: (data.assetContributions || []).map(a => a.pnl >= 0 ? '#10b981' : '#ef4444') }]
           },
-          options: {
-            indexAxis: 'y',
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { display: false } }
-          }
+          options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
         });
       }
     });
 }
-// Make it global so the HTML onclick can find it
 window.setHomeTf = setHomeTf;
