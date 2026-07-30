@@ -6,7 +6,6 @@
   let equityChartInstance = null;
   let currentAnalyticsData = null;
 
-  // ---------- Bar value label plugin ----------
   const barValueLabelPlugin = {
     id: 'barValueLabel',
     afterDraw: function (chart) {
@@ -33,7 +32,6 @@
     }
   };
 
-  // ---------- Chart rendering ----------
   function renderCharts() {
     try {
       const isMobile = window.innerWidth < 768;
@@ -47,20 +45,11 @@
         data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderColor: [], borderWidth: 0, borderRadius: 4 }] },
         options: {
           indexAxis: 'y',
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (context) {
-            const value = context.parsed.x;
-            return (value >= 0 ? '+' : '') + '$' + value.toFixed(2);
-          } } } },
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (context) { return (context.parsed.x >= 0 ? '+' : '') + '$' + context.parsed.x.toFixed(2); } } } },
           scales: {
-            x: { grid: { display: isMobile ? false : true }, ticks: { display: isMobile ? false : true, callback: function (value) {
-              return (value >= 0 ? '+' : '') + '$' + value.toFixed(2);
-            } } },
-            y: { grid: { display: false }, ticks: { font: { size: isMobile ? 8 : 9 }, color: '#d1d5db' }, afterFit: function (scale) {
-              if (window.innerWidth < 768) scale.width = 70;
-              else scale.width = 120;
-            } }
+            x: { grid: { display: isMobile ? false : true }, ticks: { display: isMobile ? false : true, callback: function (v) { return (v >= 0 ? '+' : '') + '$' + v.toFixed(2); } } },
+            y: { grid: { display: false }, ticks: { font: { size: isMobile ? 8 : 9 }, color: '#d1d5db' }, afterFit: function (scale) { if (window.innerWidth < 768) scale.width = 70; else scale.width = 120; } }
           }
         },
         plugins: [barValueLabelPlugin]
@@ -71,17 +60,11 @@
         type: 'line',
         data: { datasets: [{ label: 'Equity', data: [], borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 5, pointHitRadius: 10, borderWidth: 2, pointBackgroundColor: '#10b981' }] },
         options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (context) {
-            const value = context.parsed.y;
-            return 'Balance: ' + (value >= 0 ? '+$' : '-$') + Math.abs(value).toFixed(2);
-          } } } },
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (context) { return 'Balance: ' + (context.parsed.y >= 0 ? '+$' : '-$') + Math.abs(context.parsed.y).toFixed(2); } } } },
           scales: {
             x: { type: 'category', grid: { display: false }, ticks: { font: { size: 7 }, maxTicksLimit: window.innerWidth < 768 ? 5 : 20, maxRotation: 0, autoSkip: true, color: '#9ca3af' } },
-            y: { grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { font: { size: 7 }, color: '#9ca3af', callback: function (value) {
-              return (value >= 0 ? '+' : '-') + '$' + Math.abs(value).toFixed(2);
-            } } }
+            y: { grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { font: { size: 7 }, color: '#9ca3af', callback: function (v) { return (v >= 0 ? '+' : '-') + '$' + Math.abs(v).toFixed(2); } } }
           }
         }
       });
@@ -97,204 +80,56 @@
       const colors = values.map(v => v >= 0 ? '#10b981' : '#ef4444');
       const maxAbs = values.reduce((max, v) => Math.max(max, Math.abs(v)), 0);
       const buffer = maxAbs * 0.15;
-      const suggestedMax = maxAbs + buffer;
-      const suggestedMin = -suggestedMax;
-
       assetBarChart.data.labels = labels;
       assetBarChart.data.datasets[0].data = values;
       assetBarChart.data.datasets[0].backgroundColor = colors;
       assetBarChart.data.datasets[0].borderColor = colors;
-      assetBarChart.options.scales.x = {
-        grid: { display: isMobile ? false : true, color: 'rgba(0,0,0,0.05)' },
-        ticks: { display: isMobile ? false : true, callback: function (value) {
-          return (value >= 0 ? '+' : '') + '$' + value.toFixed(2);
-        } },
-        suggestedMin: suggestedMin,
-        suggestedMax: suggestedMax
-      };
+      assetBarChart.options.scales.x.suggestedMin = -(maxAbs + buffer);
+      assetBarChart.options.scales.x.suggestedMax = maxAbs + buffer;
       assetBarChart.update('none');
     } catch (e) { console.error('renderAssetBarChart error:', e); }
   }
 
   function formatEquityLabel(timestamp, timeframe) {
     const date = new Date(timestamp);
-    if (timeframe === '24h' || timeframe === 'hour' || timeframe === 'session') {
-      const hours = String(date.getHours()).padStart(2, '0');
-      const minutes = String(date.getMinutes()).padStart(2, '0');
-      return hours + ':' + minutes;
-    } else {
-      return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    if (timeframe === '24h' || timeframe === 'session') {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
-  }
-
-  function showChartEmptyState(containerId, message) {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-    let empty = container.parentElement?.querySelector('.chart-empty-state');
-    if (!empty) {
-      empty = document.createElement('div');
-      empty.className = 'chart-empty-state';
-      empty.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-secondary);font-size:13px;text-align:center;padding:20px;';
-      container.parentElement.style.position = 'relative';
-      container.parentElement.appendChild(empty);
-    }
-    empty.textContent = message || 'No trade history recorded for this period';
-    container.style.display = 'none';
-  }
-
-  function hideChartEmptyState(containerId) {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-    container.style.display = 'block';
-    const parent = container.parentElement;
-    if (parent) {
-      const empty = parent.querySelector('.chart-empty-state');
-      if (empty) empty.remove();
-    }
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
   }
 
   function renderEquityCurve(equityData, startingBalance, timeframe) {
     if (!equityChartInstance) return;
     try {
       if (!equityData || equityData.length < 2) {
-        showChartEmptyState('chart-line', 'No trade history recorded for this period');
         equityChartInstance.data.labels = [];
         equityChartInstance.data.datasets[0].data = [];
         equityChartInstance.update('none');
         return;
       }
-      hideChartEmptyState('chart-line');
-
-      const labels = equityData.map(point => formatEquityLabel(point.timestamp, timeframe));
-      const values = equityData.map(point => point.equity);
-      const baseline = startingBalance || 0;
-      const lastValue = values.length > 0 ? values[values.length - 1] : baseline;
-      const isAbove = lastValue >= baseline;
-      const lineColor = isAbove ? '#10b981' : '#ef4444';
-      const fillColor = isAbove ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
-
+      const labels = equityData.map(p => formatEquityLabel(p.timestamp, timeframe));
+      const values = equityData.map(p => p.equity);
       equityChartInstance.data.labels = labels;
       equityChartInstance.data.datasets[0].data = values;
-      equityChartInstance.data.datasets[0].borderColor = lineColor;
-      equityChartInstance.data.datasets[0].backgroundColor = fillColor;
-      equityChartInstance.data.datasets[0].pointBackgroundColor = lineColor;
-
-      const baselineData = [baseline, baseline];
-      equityChartInstance.data.datasets[1] = {
-        label: 'Start',
-        data: baselineData,
-        borderColor: 'rgba(100,116,139,0.4)',
-        borderDash: [5, 5],
-        borderWidth: 1,
-        pointRadius: 0,
-        fill: false,
-        tension: 0
-      };
-
-      while (equityChartInstance.data.datasets.length > 2) {
-        equityChartInstance.data.datasets.pop();
-      }
       equityChartInstance.update('none');
     } catch (e) { console.error('renderEquityCurve error:', e); }
   }
 
   function updateMetrics(data) {
     try {
-      const totalProfit = data.totalProfit || 0;
-      const tradeCount = data.tradeCount || 0;
-      const winCount = data.winCount || 0;
-      const lossCount = data.lossCount || 0;
-      const strikeRate = data.strikeRate || 0;
-      const profitFactor = data.profitFactor || 0;
-      const maxDrawdown = data.maxDrawdown || 0;
-      const avgWin = data.avgWin || 0;
-      const avgLoss = data.avgLoss || 0;
-      const maxWinStreak = data.maxWinStreak || 0;
-      const maxLossStreak = Math.abs(data.maxLossStreak || 0);
-      const avgDuration = data.totalDuration ? (data.totalDuration / (tradeCount || 1)) : 0;
-
-      const profitEl = document.getElementById('meta-profit');
-      if (profitEl) profitEl.textContent = (totalProfit >= 0 ? '+$' : '-$') + Math.abs(totalProfit).toFixed(2);
-
-      const strikeEl = document.getElementById('meta-strike');
-      if (strikeEl) strikeEl.innerHTML = `${strikeRate.toFixed(1)}% <small style="display:block;font-size:8px;color:#787b86;font-weight:400;">${tradeCount} trades total</small>`;
-
-      const pfEl = document.getElementById('meta-pf');
-      if (pfEl) pfEl.textContent = typeof profitFactor === 'number' ? profitFactor.toFixed(2) : profitFactor;
-
-      const ddEl = document.getElementById('meta-dd');
-      if (ddEl) ddEl.textContent = `-${maxDrawdown.toFixed(2)}%`;
-
-      const avgEl = document.getElementById('meta-avg-win-loss');
-      if (avgEl) avgEl.textContent = `$${avgWin.toFixed(2)} / $${avgLoss.toFixed(2)}`;
-
-      const maxConsecEl = document.getElementById('meta-max-consec');
-      if (maxConsecEl) maxConsecEl.textContent = `W:${maxWinStreak} / L:${maxLossStreak}`;
-
-      const avgDurEl = document.getElementById('meta-avg-duration');
-      if (avgDurEl) avgDurEl.textContent = `${avgDuration.toFixed(0)}s`;
-
-      const wonLostEl = document.getElementById('meta-won-lost');
-      if (wonLostEl) wonLostEl.textContent = `${winCount} / ${lossCount}`;
+      const profit = data.totalProfit || 0;
+      const total = data.tradeCount || 0;
+      const wins = data.winCount || 0;
+      const losses = data.lossCount || 0;
+      document.getElementById('meta-profit').textContent = (profit >= 0 ? '+$' : '-$') + Math.abs(profit).toFixed(2);
+      document.getElementById('meta-strike').innerHTML = `${(data.strikeRate||0).toFixed(1)}% <small style="display:block;font-size:8px;color:#787b86;">${total} trades total</small>`;
+      document.getElementById('meta-pf').textContent = typeof data.profitFactor === 'number' ? data.profitFactor.toFixed(2) : data.profitFactor;
+      document.getElementById('meta-dd').textContent = `-${(data.maxDrawdown||0).toFixed(2)}%`;
+      document.getElementById('meta-avg-win-loss').textContent = `$${(data.avgWin||0).toFixed(2)} / $${(data.avgLoss||0).toFixed(2)}`;
+      document.getElementById('meta-max-consec').textContent = `W:${data.maxWinStreak||0} / L:${Math.abs(data.maxLossStreak||0)}`;
+      document.getElementById('meta-avg-duration').textContent = `${((data.totalDuration||0)/(total||1)).toFixed(0)}s`;
+      document.getElementById('meta-won-lost').textContent = `${wins} / ${losses}`;
     } catch (e) { console.error('updateMetrics error:', e); }
-  }
-
-  // ---------- Delta handler (called on SSE event) ----------
-  function handleAnalyticsDelta(delta) {
-    if (!currentAnalyticsData) return;
-    const asset = delta.asset || 'Unknown';
-    const pnl = delta.pnl || 0;
-    const assetMap = {};
-    currentAnalyticsData.assetContributions.forEach(a => { assetMap[a.name] = a.pnl; });
-    assetMap[asset] = (assetMap[asset] || 0) + pnl;
-    currentAnalyticsData.assetContributions = Object.entries(assetMap)
-      .map(([name, pnl]) => ({ name, pnl }))
-      .sort((a, b) => b.pnl - a.pnl);
-
-    if (currentAnalyticsData.equityData) {
-      const lastEquity = currentAnalyticsData.equityData.length > 0 ?
-        currentAnalyticsData.equityData[currentAnalyticsData.equityData.length - 1].equity : 0;
-      const newEquity = lastEquity + pnl;
-      currentAnalyticsData.equityData.push({
-        timestamp: delta.timestamp || Date.now(),
-        equity: newEquity
-      });
-      if (currentAnalyticsData.equityData.length > 200) {
-        currentAnalyticsData.equityData = currentAnalyticsData.equityData.slice(-200);
-      }
-    }
-    currentAnalyticsData.totalProfit += pnl;
-    currentAnalyticsData.tradeCount += 1;
-    if (pnl > 0) {
-      currentAnalyticsData.winCount += 1;
-      currentAnalyticsData.grossProfit += pnl;
-    } else if (pnl < 0) {
-      currentAnalyticsData.lossCount += 1;
-      currentAnalyticsData.grossLoss += Math.abs(pnl);
-    }
-
-    renderAssetBarChart(currentAnalyticsData.assetContributions);
-    renderEquityCurve(currentAnalyticsData.equityData, currentAnalyticsData.startingBalance || 0, currentAnalyticsData.timeframe || 'session');
-    updateMetrics(currentAnalyticsData);
-  }
-
-  // ---------- Timeframe preset (global) ----------
-  function updateDatePickersForPreset(mode) {
-    const now = new Date();
-    const startEl = document.getElementById('date-start');
-    const endEl = document.getElementById('date-end');
-    if (!startEl || !endEl) return;
-    let startDate, endDate;
-    switch (mode) {
-      case '24h': startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000); endDate = now; break;
-      case '1w': startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); endDate = now; break;
-      case '1m': startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000); endDate = now; break;
-      case '1y': startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000); endDate = now; break;
-      default: return;
-    }
-    const formatDate = (d) => d.toISOString().split('T')[0];
-    startEl.value = formatDate(startDate);
-    endEl.value = formatDate(endDate);
   }
 
   window.timeframePreset = async function (btn, mode) {
@@ -303,10 +138,9 @@
       btn.classList.add('active');
     }
     if (mode === 'clear') {
-      renderAssetBarChart([]);
-      renderEquityCurve([], 0);
+      renderAssetBarChart([]); renderEquityCurve([], 0);
       document.getElementById('meta-profit').textContent = '$0.00';
-      document.getElementById('meta-strike').innerHTML = '0.0% <small style="display:block;font-size:8px;color:#787b86;">0 trades total</small>';
+      document.getElementById('meta-strike').innerHTML = '0.0% <small>0 trades total</small>';
       document.getElementById('meta-pf').textContent = '0.00';
       document.getElementById('meta-dd').textContent = '0.0%';
       document.getElementById('meta-avg-win-loss').textContent = '$0.00 / $0.00';
@@ -315,28 +149,20 @@
       document.getElementById('meta-won-lost').textContent = '0 / 0';
       return;
     }
-    updateDatePickersForPreset(mode);
-
-    // ✅ Ensure charts are initialized before populating them
     if (!assetBarChart || !equityChartInstance) {
       if (window.Analytics && typeof window.Analytics.renderCharts === 'function') {
         window.Analytics.renderCharts();
       }
     }
-
     try {
       const resp = await fetch(`/api/ledger/aggregated?mode=${mode}`);
       const data = await resp.json();
       currentAnalyticsData = data;
-      currentAnalyticsData.timeframe = mode;
-      const startingBalance = data.equityData && data.equityData.length > 0 ? data.equityData[0].equity : 0;
-      currentAnalyticsData.startingBalance = startingBalance;
+      const startingBalance = data.equityData?.[0]?.equity || 0;
       renderAssetBarChart(data.assetContributions || []);
       renderEquityCurve(data.equityData || [], startingBalance, mode);
       updateMetrics(data);
-    } catch (err) {
-      console.error('Analytics error:', err);
-    }
+    } catch (err) { console.error('Analytics error:', err); }
   };
 
   window.toggleDatePicker = function () {
@@ -344,13 +170,8 @@
     if (group) group.style.display = group.style.display === 'none' ? 'flex' : 'none';
   };
 
-  // Listen for live deltas from SSE
-  QuantCore.eventBus.on('analytics_delta', handleAnalyticsDelta);
-
-  // Expose for app.js to call on tab switch
   window.Analytics = {
     renderCharts,
-    handleDelta: handleAnalyticsDelta,
     clearCharts: () => {
       if (assetBarChart) assetBarChart.destroy();
       if (equityChartInstance) equityChartInstance.destroy();
