@@ -1042,6 +1042,14 @@ body.analytics-active .app-main {
 .desktop-manual-hint strong { color: var(--text-primary); font-size: 14px; }
 
 /* ============================================================
+   ALWAYS HIDE NAV DRAWER AND OVERLAY BY DEFAULT
+   ============================================================ */
+.nav-drawer,
+.nav-drawer-overlay {
+  display: none !important;
+}
+
+/* ============================================================
    DESKTOP-ONLY RULES
    ============================================================ */
 @media (min-width: 769px) {
@@ -1049,12 +1057,6 @@ body.analytics-active .app-main {
   .header-tabs { display: flex; }
   .mobile-market-view { display: none !important; }
   .mobile-profile-btn { display: none; }
-
-  /* ---- Hide nav drawer on desktop ---- */
-  .nav-drawer,
-  .nav-drawer-overlay {
-    display: none !important;
-  }
 
   /* ---- Hide mobile-only content inside tabs on desktop ---- */
   .mobile-home-screen,
