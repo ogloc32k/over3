@@ -408,14 +408,16 @@ function _syncBotCard(state) {
 }
 
 // ============================================================
-// MOBILE HOME EQUITY CHART
+// MOBILE HOME EQUITY CHART (fixed: default to 1W, hides empty state when no data)
 // ============================================================
 let mobileEquityChart = null;
 
 function loadMobileHomeData() {
   if (window.innerWidth > 768) return; // only on mobile
 
-  fetch('/api/ledger/aggregated?mode=session&account=' + (QuantCore.getGlobalState()?.tradingMode || 'demo'))
+  const account = window.QuantCore?.getGlobalState()?.tradingMode || 'demo';
+
+  fetch(`/api/ledger/aggregated?mode=1w&account=${account}`)
     .then(r => r.json())
     .then(data => {
       // Update summary stats
@@ -427,65 +429,69 @@ function loadMobileHomeData() {
       const ctx = document.getElementById('mobile-equity-chart');
       if (!ctx) return;
       if (mobileEquityChart) mobileEquityChart.destroy();
-      mobileEquityChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-          datasets: [{
-            label: 'Equity',
-            data: (data.equityData || []).map(p => ({ x: new Date(p.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }), y: p.equity })),
-            borderColor: '#10b981',
-            backgroundColor: 'rgba(16,185,129,0.1)',
-            fill: true,
-            tension: 0.3,
-            pointRadius: 0
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
-          scales: {
-            x: { display: true, ticks: { maxTicksLimit: 5 } },
-            y: { display: true }
+
+      const hasData = (data.equityData && data.equityData.length >= 2);
+
+      if (hasData) {
+        mobileEquityChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            datasets: [{
+              label: 'Equity',
+              data: data.equityData.map(p => ({
+                x: new Date(p.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+                y: p.equity
+              })),
+              borderColor: '#10b981',
+              backgroundColor: 'rgba(16,185,129,0.1)',
+              fill: true,
+              tension: 0.3,
+              pointRadius: 0
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } }
           }
-        }
-      });
-      // Show empty state if no data
+        });
+      }
+
+      // Show/hide empty state
       const emptyEl = document.getElementById('perf-empty');
-      if (emptyEl) emptyEl.style.display = (data.equityData || []).length < 2 ? 'flex' : 'none';
+      if (emptyEl) emptyEl.style.display = hasData ? 'none' : 'flex';
 
       // Asset performance bar chart
       const assetCtx = document.getElementById('mobile-asset-perf-chart');
       if (assetCtx) {
-        // destroy previous if exists
         Chart.getChart(assetCtx)?.destroy();
-        const labels = (data.assetContributions || []).map(a => a.name);
-        const values = (data.assetContributions || []).map(a => a.pnl);
-        const colors = values.map(v => v >= 0 ? '#10b981' : '#ef4444');
-        new Chart(assetCtx, {
-          type: 'bar',
-          data: {
-            labels,
-            datasets: [{
-              data: values,
-              backgroundColor: colors,
-              borderColor: colors,
-              borderWidth: 0,
-              borderRadius: 4
-            }]
-          },
-          options: {
-            indexAxis: 'y',
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-              x: { ticks: { callback: val => (val >= 0 ? '+' : '') + '$' + val.toFixed(2) } }
+        const hasAssets = (data.assetContributions && data.assetContributions.length > 0);
+        if (hasAssets) {
+          new Chart(assetCtx, {
+            type: 'bar',
+            data: {
+              labels: data.assetContributions.map(a => a.name),
+              datasets: [{
+                data: data.assetContributions.map(a => a.pnl),
+                backgroundColor: data.assetContributions.map(a => a.pnl >= 0 ? '#10b981' : '#ef4444'),
+                borderColor: data.assetContributions.map(a => a.pnl >= 0 ? '#10b981' : '#ef4444'),
+                borderWidth: 0,
+                borderRadius: 4
+              }]
+            },
+            options: {
+              indexAxis: 'y',
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { ticks: { callback: val => (val >= 0 ? '+' : '') + '$' + val.toFixed(2) } }
+              }
             }
-          }
-        });
+          });
+        }
         const assetEmpty = document.getElementById('asset-perf-empty');
-        if (assetEmpty) assetEmpty.style.display = (data.assetContributions || []).length === 0 ? 'flex' : 'none';
+        if (assetEmpty) assetEmpty.style.display = hasAssets ? 'none' : 'flex';
       }
     })
     .catch(err => console.error('Failed to load mobile home data:', err));
@@ -498,7 +504,7 @@ function setHomeTf(btn, mode) {
 
   const map = { '1W': '1w', '1M': '1m' };
   const apiMode = map[mode] || 'session';
-  const account = QuantCore.getGlobalState()?.tradingMode || 'demo';
+  const account = window.QuantCore?.getGlobalState()?.tradingMode || 'demo';
 
   fetch(`/api/ledger/aggregated?mode=${apiMode}&account=${account}`)
     .then(r => r.json())
@@ -510,32 +516,50 @@ function setHomeTf(btn, mode) {
       if (mobileEquityChart) { mobileEquityChart.destroy(); mobileEquityChart = null; }
       const ctx = document.getElementById('mobile-equity-chart');
       if (ctx) {
-        mobileEquityChart = new Chart(ctx, {
-          type: 'line',
-          data: {
-            datasets: [{
-              label: 'Equity',
-              data: (data.equityData || []).map(p => ({ x: new Date(p.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), y: p.equity })),
-              borderColor: '#10b981',
-              backgroundColor: 'rgba(16,185,129,0.1)',
-              fill: true, tension: 0.3, pointRadius: 0
-            }]
-          },
-          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-        });
+        const hasData = (data.equityData && data.equityData.length >= 2);
+        if (hasData) {
+          mobileEquityChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+              datasets: [{
+                label: 'Equity',
+                data: data.equityData.map(p => ({
+                  x: new Date(p.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+                  y: p.equity
+                })),
+                borderColor: '#10b981',
+                backgroundColor: 'rgba(16,185,129,0.1)',
+                fill: true,
+                tension: 0.3,
+                pointRadius: 0
+              }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+          });
+        }
+        const emptyEl = document.getElementById('perf-empty');
+        if (emptyEl) emptyEl.style.display = hasData ? 'none' : 'flex';
       }
 
       const assetCtx = document.getElementById('mobile-asset-perf-chart');
       if (assetCtx) {
         Chart.getChart(assetCtx)?.destroy();
-        new Chart(assetCtx, {
-          type: 'bar',
-          data: {
-            labels: (data.assetContributions || []).map(a => a.name),
-            datasets: [{ data: (data.assetContributions || []).map(a => a.pnl), backgroundColor: (data.assetContributions || []).map(a => a.pnl >= 0 ? '#10b981' : '#ef4444') }]
-          },
-          options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-        });
+        const hasAssets = (data.assetContributions && data.assetContributions.length > 0);
+        if (hasAssets) {
+          new Chart(assetCtx, {
+            type: 'bar',
+            data: {
+              labels: data.assetContributions.map(a => a.name),
+              datasets: [{
+                data: data.assetContributions.map(a => a.pnl),
+                backgroundColor: data.assetContributions.map(a => a.pnl >= 0 ? '#10b981' : '#ef4444')
+              }]
+            },
+            options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+          });
+        }
+        const assetEmpty = document.getElementById('asset-perf-empty');
+        if (assetEmpty) assetEmpty.style.display = hasAssets ? 'none' : 'flex';
       }
     });
 }
