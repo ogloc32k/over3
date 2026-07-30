@@ -36,6 +36,34 @@
 /* ---- Show mobile-only elements ---- */
 .mobile-profile-btn { display: flex !important; }
 
+/* ---- Nav Drawer ---- */
+.nav-drawer {
+  display: block !important;
+  position: fixed;
+  top: 0;
+  left: -100%;
+  width: 280px;
+  height: 100vh;
+  z-index: 1000;
+  transition: left 0.3s ease;
+  background: var(--bg-panel);
+  box-shadow: 4px 0 15px rgba(0,0,0,0.5);
+  padding: 20px;
+  overflow-y: auto;
+}
+.nav-drawer.open {
+  left: 0;
+}
+.nav-drawer-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 999;
+}
+.nav-drawer-overlay.open {
+  display: block;
+}
 
 /* ---- Home screen ---- */
 .mobile-home-screen {
