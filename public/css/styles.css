@@ -242,6 +242,13 @@ body.light {
   border: 1px solid rgba(59,130,246,0.3);
   color: var(--neon-blue);
 }
+.sp-balance {
+  font-size: 14px;
+  font-weight: 700;
+  font-family: 'Consolas', monospace;
+  color: var(--green-profit);
+  margin-top: 4px;
+}
 .sp-switch {
   margin-top: 4px;
   width: 100%;
@@ -259,126 +266,6 @@ body.light {
   background: var(--bg-surface);
   border-color: var(--neon-blue);
   color: var(--neon-blue);
-}
-
-.sidebar-metrics {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
-  border-radius: 6px;
-  padding: 8px 10px;
-  transition: background 0.3s, border-color 0.3s;
-}
-.sidebar-metrics .metric { text-align: center; padding: 4px 0; }
-.sidebar-metrics .metric .lbl { font-size: 11px; text-transform: uppercase; color: var(--text-secondary); font-weight: 600; letter-spacing: 0.5px; }
-.sidebar-metrics .metric .val { font-size: 14px; font-weight: 700; font-family: 'Consolas', monospace; color: var(--text-primary); }
-.sidebar-metrics .metric .val.green { color: var(--green-profit); }
-.sidebar-metrics .metric .val.red { color: var(--red-loss); }
-.sidebar-metrics .metric .val.orange { color: var(--orange-warn); }
-.sidebar-metrics .metric .val.blue { color: var(--neon-blue); }
-
-.sidebar-controls { display: flex; flex-direction: column; gap: 6px; }
-.sidebar-controls .row { display: flex; gap: 6px; }
-.sidebar-controls .btn {
-  padding: 8px 12px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  cursor: pointer;
-  border: 1px solid transparent;
-  transition: all 0.15s;
-  text-align: center;
-  touch-action: manipulation;
-  min-height: 34px;
-  line-height: 1.2;
-  flex: 1;
-  background: var(--bg-card);
-  color: var(--text-secondary);
-  border-color: var(--border-subtle);
-}
-.sidebar-controls .btn:active { transform: scale(0.96); }
-.sidebar-controls .btn.start { background: var(--green-profit); color: #0b0e14; border-color: var(--green-profit); }
-.sidebar-controls .btn.stop { background: var(--red-loss); color: #0b0e14; border-color: var(--red-loss); }
-.sidebar-controls .btn.swap { background: var(--bg-card); color: var(--text-primary); border-color: var(--border-subtle); }
-.sidebar-controls .btn.swap:hover { background: var(--bg-surface); }
-
-.sidebar-trade-btns { display: flex; gap: 6px; }
-.sidebar-trade-btns .btn {
-  flex: 1;
-  padding: 8px 12px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  cursor: pointer;
-  border: 1px solid var(--border-subtle);
-  transition: all 0.15s;
-  text-align: center;
-  touch-action: manipulation;
-  min-height: 34px;
-  line-height: 1.2;
-  background: var(--bg-card);
-  color: var(--text-secondary);
-}
-.sidebar-trade-btns .btn:active { transform: scale(0.96); }
-.sidebar-trade-btns .btn.call { border-color: var(--green-profit); color: var(--green-profit); }
-.sidebar-trade-btns .btn.call:hover { background: rgba(16,185,129,0.06); }
-.sidebar-trade-btns .btn.put { border-color: var(--red-loss); color: var(--red-loss); }
-.sidebar-trade-btns .btn.put:hover { background: rgba(239,68,68,0.06); }
-
-.sidebar-duration {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
-  border-radius: 4px;
-  padding: 4px 8px;
-  transition: background 0.3s, border-color 0.3s;
-}
-.sidebar-duration label { font-size: 11px; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; white-space: nowrap; }
-.sidebar-duration input,
-.sidebar-duration select {
-  background: var(--bg-terminal);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-primary);
-  padding: 4px 8px;
-  border-radius: 3px;
-  font-family: inherit;
-  font-size: 12px;
-  outline: none;
-  flex: 1;
-  min-height: 32px;
-}
-.sidebar-duration input:focus,
-.sidebar-duration select:focus { border-color: var(--neon-blue); }
-
-.sidebar-toggle-fixed {
-  position: fixed;
-  top: calc(var(--header-height) + 8px);
-  left: 8px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  padding: 4px 10px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 16px;
-  z-index: 50;
-  transition: all 0.15s;
-  line-height: 1;
-  min-height: 34px;
-  min-width: 34px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-}
-.sidebar-toggle-fixed:hover {
-  background: var(--bg-surface);
-  color: var(--text-primary);
 }
 
 /* ---- MAIN CONTENT ---- */
