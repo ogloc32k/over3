@@ -19,10 +19,18 @@ app.use(express.json());
 app.use((req, res, next) => { console.log(`📡 ${req.method} ${req.url}`); next(); });
 app.use(express.static(path.join(__dirname, 'public')));
 
-// SSE
-app.get('/api/logs', (req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
+// ============================================================
+// SSE STREAM (replaces /api/logs)
+// ============================================================
+app.get('/stream', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive'
+  });
   res.write('\n');
+
+  // Send initial state
   const initial = store.getStatePayload();
   res.write(`data: ${JSON.stringify(initial)}\n\n`);
 
@@ -31,85 +39,103 @@ app.get('/api/logs', (req, res) => {
     res.write(`data: ${JSON.stringify(payload)}\n\n`);
   };
   store.on('stateChanged', onChange);
+
   req.on('close', () => store.removeListener('stateChanged', onChange));
 });
 
-// REST
+// Helper to send analytics delta event (call when trade closes)
+function sendAnalyticsDelta(delta) {
+  // Notify all SSE clients about the delta
+  // (we need a list of active SSE connections — simplified here)
+  // We'll emit a custom event that the SSE handler can pick up.
+  // In a real multi-client setup you'd use a pub/sub or broadcast.
+  // For now, we emit via the store so the SSE loop picks it up.
+  store.emit('analyticsDelta', delta);
+}
+
+// ============================================================
+// REST API
+// ============================================================
 app.post('/api/control', (req, res) => {
   const { action, mode } = req.body;
   console.log('🟡 POST /api/control body:', req.body);
   try {
-    if (action === 'start') { store.updateState({ active: true, locked: false }); res.json({ message: 'Bot started' }); }
-    else if (action === 'stop') { store.updateState({ active: false }); res.json({ message: 'Bot stopped' }); }
-    else if (action === 'set_mode') {
+    if (action === 'start') {
+      store.updateState({ active: true, locked: false });
+      logger.info('Bot started');
+      res.json({ message: 'Bot started' });
+    } else if (action === 'stop') {
+      store.updateState({ active: false });
+      logger.info('Bot stopped');
+      res.json({ message: 'Bot stopped' });
+    } else if (action === 'set_mode') {
       if (derivClient) derivClient.setMode(mode);
       res.json({ message: `Switched to ${mode}` });
+    } else {
+      res.json({ error: 'Unknown action' });
     }
-    else res.json({ error: 'Unknown action' });
   } catch (err) { res.json({ error: err.message }); }
 });
 
 app.post('/api/trade/manual', (req, res) => {
-  try { derivClient?.buyContract(req.body); res.json({ message: 'Trade sent' }); }
-  catch(err) { res.json({ error: err.message }); }
+  try {
+    if (!derivClient) return res.json({ error: 'Deriv client not connected' });
+    derivClient.buyContract(req.body);
+    res.json({ message: 'Trade request sent' });
+  } catch (err) { res.json({ error: err.message }); }
 });
 
 app.get('/api/config', (req, res) => res.json(store.config || {}));
-app.post('/api/config', (req, res) => { store.config = { ...store.config, ...req.body }; res.json({ success: true }); });
+app.post('/api/config', (req, res) => {
+  try {
+    store.config = { ...store.config, ...req.body };
+    res.json({ success: true });
+  } catch (err) { res.json({ error: err.message }); }
+});
 
 app.get('/api/ledger/aggregated', (req, res) => res.json({
   totalProfit: 0, tradeCount: 0, winCount: 0, lossCount: 0,
   grossProfit: 0, grossLoss: 0, maxDrawdown: 0, totalDuration: 0,
-  assetContributions: [], equityData: [{ timestamp: Date.now(), equity: store.state.balance || 0 }]
+  assetContributions: [],
+  equityData: [{ timestamp: Date.now(), equity: store.state.balance || 0 }]
 }));
 
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// ==================== START ====================
+// ============================================================
+// START SERVER & DERIV CONNECTION
+// ============================================================
 const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
   console.log(`🚀 Server on port ${PORT}`);
 
   if (derivClient) {
     derivClient.on('balance', (data) => {
-      console.log('🔍 RAW BALANCE EVENT:', JSON.stringify(data), '| activeAccountId:', derivClient.activeAccountId);
-
-      // ✅ Block all events during transition
-      if (!derivClient.activeAccountId) {
-        console.log('⏩ Ignoring balance – no active account (transition in progress)');
-        return;
-      }
+      console.log('🔍 RAW BALANCE EVENT:', JSON.stringify(data));
 
       let balanceValue, currency, loginid;
-      if (data.balance !== undefined) {
-        if (typeof data.balance === 'object') {
-          balanceValue = data.balance.balance;
-          currency = data.balance.currency || 'USD';
-          loginid = data.balance.loginid;
-        } else {
-          balanceValue = data.balance;
-          currency = data.currency || 'USD';
-          loginid = data.loginid;
-        }
+      if (typeof data.balance === 'string' || typeof data.balance === 'number') {
+        balanceValue = data.balance;
+        currency = data.currency || 'USD';
+        loginid = data.loginid || derivClient.accountId;
+      } else if (data.balance && typeof data.balance === 'object') {
+        balanceValue = data.balance.balance;
+        currency = data.balance.currency || 'USD';
+        loginid = data.balance.loginid || derivClient.accountId;
       } else {
         console.error('❌ Unknown balance format');
         return;
       }
 
-      // ✅ Ignore stale events from old accounts
-      if (loginid && loginid !== derivClient.activeAccountId) {
-        console.log(`⏩ Ignoring balance for ${loginid} (active is ${derivClient.activeAccountId})`);
-        return;
-      }
+      if (!derivClient.activeAccountId) return; // transition
+      if (loginid && loginid !== derivClient.activeAccountId) return; // stale
 
-      // ✅ Use the isDemo flag from the event if available, otherwise from derivClient
-      const mode = data.isDemo !== undefined ? (data.isDemo ? 'demo' : 'real') : (derivClient.isDemo ? 'demo' : 'real');
-
-      console.log(`💰 Parsed balance: ${balanceValue} ${currency} (mode: ${mode})`);
+      const mode = derivClient.isDemo ? 'demo' : 'real';
       store.updateState({
         balance: parseFloat(balanceValue),
         currency,
-        loginid: derivClient.activeAccountId || loginid,
+        loginid: derivClient.activeAccountId,
         tradingMode: mode
       });
       logger.info(`💰 Balance updated: ${currency} ${balanceValue} (${mode})`);
@@ -120,7 +146,7 @@ const server = app.listen(PORT, () => {
     });
 
     derivClient.on('tick', (tick) => {
-      console.log(`📈 Tick: ${tick.symbol} ${tick.quote}`);
+      // Will be wired into the engine later
     });
 
     derivClient.connect();
