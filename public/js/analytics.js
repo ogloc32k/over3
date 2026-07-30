@@ -198,36 +198,45 @@
     } catch (e) { console.error('renderEquityCurve error:', e); }
   }
 
+  // UPDATED: now reads real fields from backend
   function updateMetrics(data) {
     try {
+      const totalProfit = data.totalProfit || 0;
+      const tradeCount = data.tradeCount || 0;
+      const winCount = data.winCount || 0;
+      const lossCount = data.lossCount || 0;
+      const strikeRate = data.strikeRate || 0;
+      const profitFactor = data.profitFactor || 0;
+      const maxDrawdown = data.maxDrawdown || 0;
+      const avgWin = data.avgWin || 0;
+      const avgLoss = data.avgLoss || 0;
+      const maxWinStreak = data.maxWinStreak || 0;
+      const maxLossStreak = Math.abs(data.maxLossStreak || 0);
+      const avgDuration = data.totalDuration ? (data.totalDuration / (tradeCount || 1)) : 0;
+
       const profitEl = document.getElementById('meta-profit');
-      if (profitEl) profitEl.textContent = `$${data.totalProfit.toFixed(2)}`;
-      const total = data.tradeCount || 0;
-      const wins = data.winCount || 0;
-      const strike = total > 0 ? (wins / total) * 100 : 0;
+      if (profitEl) profitEl.textContent = (totalProfit >= 0 ? '+$' : '-$') + Math.abs(totalProfit).toFixed(2);
+
       const strikeEl = document.getElementById('meta-strike');
-      if (strikeEl) strikeEl.innerHTML = `${strike.toFixed(1)}% <small style="display:block;font-size:8px;color:#787b86;font-weight:400;">${total} trades total</small>`;
-      const grossProfit = data.grossProfit || 0;
-      const grossLoss = data.grossLoss || 0;
-      let pf;
-      if (grossLoss === 0) pf = grossProfit > 0 ? '10.0+' : '0.00';
-      else pf = (grossProfit / grossLoss).toFixed(2);
+      if (strikeEl) strikeEl.innerHTML = `${strikeRate.toFixed(1)}% <small style="display:block;font-size:8px;color:#787b86;font-weight:400;">${tradeCount} trades total</small>`;
+
       const pfEl = document.getElementById('meta-pf');
-      if (pfEl) pfEl.textContent = pf;
-      const maxDD = data.maxDrawdown || 0;
+      if (pfEl) pfEl.textContent = typeof profitFactor === 'number' ? profitFactor.toFixed(2) : profitFactor;
+
       const ddEl = document.getElementById('meta-dd');
-      if (ddEl) ddEl.textContent = `-${maxDD.toFixed(2)}%`;
-      const losses = data.lossCount || 0;
-      const avgWin = wins > 0 ? grossProfit / wins : 0;
-      const avgLoss = losses > 0 ? grossLoss / losses : 0;
+      if (ddEl) ddEl.textContent = `-${maxDrawdown.toFixed(2)}%`;
+
       const avgEl = document.getElementById('meta-avg-win-loss');
       if (avgEl) avgEl.textContent = `$${avgWin.toFixed(2)} / $${avgLoss.toFixed(2)}`;
+
       const maxConsecEl = document.getElementById('meta-max-consec');
-      if (maxConsecEl) maxConsecEl.textContent = `W:${wins} / L:${losses}`;
+      if (maxConsecEl) maxConsecEl.textContent = `W:${maxWinStreak} / L:${maxLossStreak}`;
+
       const avgDurEl = document.getElementById('meta-avg-duration');
-      if (avgDurEl) avgDurEl.textContent = `${total > 0 ? (data.totalDuration || 0) / total : 0}s`;
+      if (avgDurEl) avgDurEl.textContent = `${avgDuration.toFixed(0)}s`;
+
       const wonLostEl = document.getElementById('meta-won-lost');
-      if (wonLostEl) wonLostEl.textContent = `${wins} / ${losses}`;
+      if (wonLostEl) wonLostEl.textContent = `${winCount} / ${lossCount}`;
     } catch (e) { console.error('updateMetrics error:', e); }
   }
 
@@ -279,9 +288,9 @@
     let startDate, endDate;
     switch (mode) {
       case '24h': startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000); endDate = now; break;
-      case 'week': startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); endDate = now; break;
-      case 'month': startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000); endDate = now; break;
-      case 'year': startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000); endDate = now; break;
+      case '1w': startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); endDate = now; break;
+      case '1m': startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000); endDate = now; break;
+      case '1y': startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000); endDate = now; break;
       default: return;
     }
     const formatDate = (d) => d.toISOString().split('T')[0];
@@ -313,10 +322,10 @@
       const data = await resp.json();
       currentAnalyticsData = data;
       currentAnalyticsData.timeframe = mode;
-      const startingBalance = data.equityData.length > 0 ? data.equityData[0].equity : 0;
+      const startingBalance = data.equityData && data.equityData.length > 0 ? data.equityData[0].equity : 0;
       currentAnalyticsData.startingBalance = startingBalance;
-      renderAssetBarChart(data.assetContributions);
-      renderEquityCurve(data.equityData, startingBalance, mode);
+      renderAssetBarChart(data.assetContributions || []);
+      renderEquityCurve(data.equityData || [], startingBalance, mode);
       updateMetrics(data);
     } catch (err) {
       console.error('Analytics error:', err);
