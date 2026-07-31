@@ -31,7 +31,7 @@
       .catch(err => console.error('Swap error:', err));
   };
 
-  // ✅ Updated fireManual – accepts optional overrides for mobile trade
+  // Manual trade – works from the Manual tab or mobile manual screen
   window.fireManual = function (type, overrides) {
     const duration  = overrides?.duration     ?? (parseInt(document.getElementById('manual-duration')?.value) || 7);
     const unit      = overrides?.durationUnit ?? document.getElementById('manual-unit')?.value ?? 't';
@@ -53,6 +53,8 @@
       price: price
     };
     if (stake !== undefined) body.stake = stake;
+
+    console.log('📈 Manual trade request:', body);   // <-- feedback in browser console
 
     fetch('/api/trade/manual', {
       method: 'POST',
