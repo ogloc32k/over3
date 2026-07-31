@@ -20,7 +20,9 @@ app.use(express.json());
 app.use((req, res, next) => { console.log(`📡 ${req.method} ${req.url}`); next(); });
 app.use(express.static(path.join(__dirname, 'public')));
 
-// SSE
+// ============================================================
+// SSE STREAM
+// ============================================================
 app.get('/stream', (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -40,7 +42,11 @@ app.get('/stream', (req, res) => {
   req.on('close', () => store.removeListener('stateChanged', onChange));
 });
 
-// REST
+// ============================================================
+// REST API
+// ============================================================
+
+// Control endpoint (start / stop / set_mode)
 app.post('/api/control', (req, res) => {
   const { action, mode } = req.body;
   console.log('🟡 POST /api/control body:', req.body);
@@ -54,6 +60,10 @@ app.post('/api/control', (req, res) => {
       store.addLog('info', '⏹️ Bot stopped');
       res.json({ message: 'Bot stopped' });
     } else if (action === 'set_mode') {
+      // ---- Block account switch if any trade is in progress ----
+      if (tradeInProgressCount() > 0) {
+        return res.json({ error: 'Cannot switch accounts while a trade is active. Wait for it to settle.' });
+      }
       if (derivClient) derivClient.setMode(mode);
       res.json({ message: `Switched to ${mode}` });
     }
@@ -61,6 +71,7 @@ app.post('/api/control', (req, res) => {
   } catch (err) { res.json({ error: err.message }); }
 });
 
+// Manual trade
 app.post('/api/trade/manual', async (req, res) => {
   try {
     if (!derivClient) return res.json({ error: 'Deriv client not connected' });
@@ -77,6 +88,7 @@ app.post('/api/trade/manual', async (req, res) => {
   } catch (err) { res.json({ error: err.message }); }
 });
 
+// Config
 app.get('/api/config', (req, res) => res.json(store.config || {}));
 app.post('/api/config', (req, res) => {
   try {
@@ -87,7 +99,7 @@ app.post('/api/config', (req, res) => {
 });
 
 // ============================================================
-// ANALYTICS – FULL ENDPOINT (restored)
+// ANALYTICS – FULL ENDPOINT
 // ============================================================
 app.get('/api/ledger/aggregated', async (req, res) => {
   try {
@@ -194,6 +206,15 @@ const server = app.listen(PORT, () => {
     const lastTradeCloseTime = {};
     const tradeInProgressSym = {};
 
+    // Helper to count active trades (used in set_mode guard)
+    global.tradeInProgressCount = () => {
+      let count = 0;
+      for (const sym in tradeInProgressSym) {
+        if (tradeInProgressSym[sym]) count++;
+      }
+      return count;
+    };
+
     store.on('configChanged', () => {
       store.tickBuffer.setMaxSize(store.config.ANALYSIS_WINDOW || 500);
     });
@@ -262,14 +283,16 @@ const server = app.listen(PORT, () => {
       }
     });
 
+    // -------------------- TRADE SETTLED --------------------
     derivClient.on('trade_settled', async (trade) => {
       if (trade.symbol) {
         tradeInProgressSym[trade.symbol] = false;
         lastTradeCloseTime[trade.symbol] = Date.now();
       }
 
-      const result = trade.profit > 0 ? 'WIN' : 'LOSS';
-      store.addLog('info', `🏁 Trade settled: ${trade.contract_type || '?'} ${trade.symbol || '?'} – ${result} $${(trade.profit || 0).toFixed(2)}`);
+      const profit = parseFloat(trade.profit || 0);
+      const result = profit > 0 ? 'WIN' : (profit < 0 ? 'LOSS' : 'BREAKEVEN');
+      store.addLog('info', `🏁 Trade settled: ${trade.contract_type || '?'} ${trade.symbol || '?'} – ${result} $${profit.toFixed(2)}`);
 
       try {
         const account = derivClient.isDemo ? 'demo' : 'real';
@@ -278,8 +301,8 @@ const server = app.listen(PORT, () => {
           contract_type: trade.contract_type,
           stake: parseFloat(trade.stake),
           payout: parseFloat(trade.payout || 0),
-          profit_loss: parseFloat(trade.profit || 0),
-          is_win: trade.profit > 0,
+          profit_loss: profit,
+          is_win: profit > 0,
           barrier: trade.barrier || null,
           exit_tick: trade.exit_price ? parseFloat(trade.exit_price) : null,
           contract_id: trade.contract_id,
@@ -292,8 +315,13 @@ const server = app.listen(PORT, () => {
 
         const { error } = await supabase.from('trading_ledger').insert(record);
         if (error) console.error('❌ Failed to insert trade:', error);
-        else console.log('✅ Trade recorded:', record.asset, record.profit_loss, 'account:', account);
+        else console.log('✅ Trade recorded:', record.asset, profit, 'account:', account);
       } catch (e) { console.error('❌ trade_settled handler error:', e); }
+
+      // Request fresh balance to update UI immediately
+      if (derivClient && derivClient.ws && derivClient.ws.readyState === WebSocket.OPEN) {
+        derivClient.send({ balance: 1 });
+      }
     });
 
     derivClient.connect();
