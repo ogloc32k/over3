@@ -23,8 +23,9 @@ class DerivClient {
     this._retryCount = 0;
     this._explicitClose = false;
 
-    this._lastBuyParams = null;
-    this._pendingTrades = {};
+    // trade tracking
+    this._lastBuyParams = null;       // holds symbol, stake, contract_type, duration, bot_name
+    this._pendingTrades = {};         // contract_id → pending info
   }
 
   setStore(storeInstance) { this._store = storeInstance; }
@@ -74,6 +75,7 @@ class DerivClient {
   }
 
   buyContract(params) {
+    // Remember trade parameters before sending
     this._lastBuyParams = {
       symbol: params.symbol,
       contract_type: params.contractType,
@@ -217,37 +219,93 @@ class DerivClient {
     }
   }
 
+  // ---------- Message handling ----------
   _handleMessage(msg) {
     if (msg.error) {
       console.error('Deriv error:', msg.error);
       return;
     }
 
+    // Tick
     if (msg.tick) {
       this._emit('tick', msg.tick);
       return;
     }
 
+    // Balance
     if (msg.balance) {
       this._emit('balance', msg.balance);
       return;
     }
 
-    if (msg.proposal_open_contract) {
-      this._emit('contract_result', msg.proposal_open_contract);
-      return;
-    }
-
+    // Trade confirmation (buy response) – store the contract_id
     if (msg.buy) {
+      const contractId = msg.buy.contract_id;
+      if (contractId && this._lastBuyParams) {
+        this._pendingTrades[contractId] = { ...this._lastBuyParams };
+        this._lastBuyParams = null;   // reset for next trade
+      }
       this._emit('buy_result', msg.buy);
       return;
     }
 
+    // Trade settlement (proposal_open_contract)
+    if (msg.proposal_open_contract) {
+      const settlement = msg.proposal_open_contract;
+      const contractId = settlement.contract_id;
+      const pending = contractId ? this._pendingTrades[contractId] : null;
+
+      // Always emit a generic event for other listeners
+      this._emit('contract_result', settlement);
+
+      // If we have pending info, build a structured trade_settled event
+      if (pending) {
+        delete this._pendingTrades[contractId];
+
+        this._emit('trade_settled', {
+          symbol: pending.symbol,
+          contract_type: pending.contract_type,
+          stake: pending.stake,
+          duration_ticks: pending.duration_ticks,
+          duration_unit: pending.duration_unit,
+          bot_name: pending.bot_name || 'manual',
+          contract_id: contractId,
+          entry_price: settlement.entry_spot,
+          exit_price: settlement.exit_spot,
+          payout: settlement.payout,
+          profit: settlement.profit,
+          barrier: settlement.barrier,
+          date_expiry: settlement.date_expiry,
+        });
+      } else {
+        // Fallback: emit trade_settled with just the settlement data
+        // (manual trades will still have pending info because we always set _lastBuyParams before sending)
+        this._emit('trade_settled', {
+          contract_id: contractId,
+          entry_price: settlement.entry_spot,
+          exit_price: settlement.exit_spot,
+          payout: settlement.payout,
+          profit: settlement.profit,
+          barrier: settlement.barrier,
+          date_expiry: settlement.date_expiry,
+          symbol: null,           // unknown without pending
+          contract_type: null,
+          stake: null,
+          duration_ticks: null,
+          duration_unit: null,
+          bot_name: 'manual'      // assume manual if we don't know
+        });
+      }
+      return;
+    }
+
+    // Historical data
     if (msg.history) {
       this._emit('history', msg.history);
       return;
     }
 
+    // Legacy msg_type handling
     if (msg.msg_type) {
       switch (msg.msg_type) {
         case 'tick': this._emit('tick', msg.tick); break;
