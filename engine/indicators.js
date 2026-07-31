@@ -4,14 +4,35 @@ function computeMetrics(symbol, prices, config = {}, bandwidthHistory = []) {
   if (!prices || prices.length < 2) return null;
 
   const lastPrice = prices[prices.length - 1];
-  const rsi = computeRSI(prices, config.RSI_PERIOD || 20);
-  const { upper, middle, lower, bandwidth } = computeBollinger(prices, config.BOLLINGER_PERIOD || 20, config.BOLLINGER_STD || 2);
-  const { support, resistance } = computeSupportResistance(prices);
-  const volatility = computeVolatility(prices);
 
-  // S/R distance percentages
-  const supportPct = support !== null ? ((lastPrice - support) / lastPrice) * 100 : null;
-  const resistancePct = resistance !== null ? ((resistance - lastPrice) / lastPrice) * 100 : null;
+  // Use configured lookback for S/R (default 500)
+  const lookback = config.ANALYSIS_WINDOW || 500;
+  const recentPrices = prices.slice(-lookback);
+
+  // Support = lowest low, Resistance = highest high in the lookback window
+  const support = Math.min(...recentPrices);
+  const resistance = Math.max(...recentPrices);
+
+  // Normalised channel split (Support% + Resistance% = 100%)
+  let supportPct = null;
+  let resistancePct = null;
+  const range = resistance - support;
+  if (range > 0) {
+    supportPct = ((resistance - lastPrice) / range) * 100;
+    resistancePct = ((lastPrice - support) / range) * 100;
+  } else {
+    supportPct = 50;
+    resistancePct = 50;
+  }
+
+  // Bollinger Bands
+  const { upper, middle, lower, bandwidth } = computeBollinger(prices, config.BOLLINGER_PERIOD || 20, config.BOLLINGER_STD || 2);
+
+  // RSI
+  const rsi = computeRSI(prices, config.RSI_PERIOD || 20);
+
+  // Volatility
+  const volatility = computeVolatility(prices);
 
   // Tick direction ratios (Rise/Fall %)
   const tickDirections = prices.slice(1).map((p, i) => p > prices[i] ? 1 : (p < prices[i] ? -1 : 0));
@@ -28,14 +49,14 @@ function computeMetrics(symbol, prices, config = {}, bandwidthHistory = []) {
     squeezePercentile = (count / bandwidthHistory.length) * 100;
   }
 
-  const isBreakout = resistance !== null && lastPrice > resistance;
-  const isBreakdown = support !== null && lastPrice < support;
+  const isBreakout = lastPrice > resistance;
+  const isBreakdown = lastPrice < support;
 
   const score = computeScore(rsi, isBreakout, isBreakdown, volatility, risePct, fallPct);
 
   return {
     price: lastPrice,
-    step: isBreakout || isBreakdown ? 3 : (resistancePct !== null && resistancePct < 1 ? 2 : 1),
+    step: isBreakout || isBreakdown ? 3 : (resistancePct < 5 ? 2 : 1),   // close to resistance edge
     support,
     resistance,
     isBreakout,
@@ -53,6 +74,8 @@ function computeMetrics(symbol, prices, config = {}, bandwidthHistory = []) {
     lastPrices: prices.slice(-20),
   };
 }
+
+// --- unchanged helper functions ---
 
 function computeRSI(prices, period) {
   if (prices.length < period + 1) return 50;
@@ -82,11 +105,10 @@ function computeBollinger(prices, period, stdDev) {
 }
 
 function computeSupportResistance(prices) {
+  // Not used externally, kept for backward compatibility if needed
   if (prices.length < 10) return { support: null, resistance: null };
   const recent = prices.slice(-50);
-  const support = Math.min(...recent);
-  const resistance = Math.max(...recent);
-  return { support, resistance };
+  return { support: Math.min(...recent), resistance: Math.max(...recent) };
 }
 
 function computeVolatility(prices) {
