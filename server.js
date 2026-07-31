@@ -158,6 +158,11 @@ const server = app.listen(PORT, () => {
 
   if (derivClient) {
     const indicators = require('./engine/indicators');
+    const bot = require('./engine/bot');
+
+    // Bot cooldown trackers
+    const lastTradeCloseTime = {};   // symbol → timestamp
+    const tradeInProgressSym = {};   // symbol → true/false
 
     store.on('configChanged', () => {
       store.tickBuffer.setMaxSize(store.config.ANALYSIS_WINDOW || 500);
@@ -189,26 +194,14 @@ const server = app.listen(PORT, () => {
       logger.info(`🔐 Authorized as ${data.loginid || derivClient.activeAccountId}`);
     });
 
-    derivClient.on('tick', (tick) => {
-      const symbol = tick.symbol;
-      const price = tick.quote;
-
-      store.tickBuffer.push(symbol, price);
-      const prices = store.tickBuffer.get(symbol);
-      if (prices.length < 2) return;
-
-      const history = store.getBandwidthHistory(symbol);
-      const computed = indicators.computeMetrics(symbol, prices, store.config || {}, history);
-
-      if (computed) {
-        if (computed.bandwidth !== null && computed.bandwidth !== undefined) {
-          store.pushBandwidth(symbol, computed.bandwidth);
-        }
-        store.updateMarketMetrics(symbol, computed);
-      }
-    });
-
+    // When a trade settles, release cooldown and lock
     derivClient.on('trade_settled', async (trade) => {
+      // clear lock
+      if (trade.symbol) {
+        tradeInProgressSym[trade.symbol] = false;
+        lastTradeCloseTime[trade.symbol] = Date.now();
+      }
+
       try {
         const account = derivClient.isDemo ? 'demo' : 'real';
         const record = {
@@ -232,6 +225,41 @@ const server = app.listen(PORT, () => {
         if (error) console.error('❌ Failed to insert trade:', error);
         else console.log('✅ Trade recorded:', record.asset, record.profit_loss, 'account:', account);
       } catch (e) { console.error('❌ trade_settled handler error:', e); }
+    });
+
+    derivClient.on('tick', (tick) => {
+      const symbol = tick.symbol;
+      const price = tick.quote;
+
+      store.tickBuffer.push(symbol, price);
+      const prices = store.tickBuffer.get(symbol);
+      if (prices.length < 2) return;
+
+      const history = store.getBandwidthHistory(symbol);
+      const computed = indicators.computeMetrics(symbol, prices, store.config || {}, history);
+
+      if (computed) {
+        if (computed.bandwidth !== null && computed.bandwidth !== undefined) {
+          store.pushBandwidth(symbol, computed.bandwidth);
+        }
+        store.updateMarketMetrics(symbol, computed);
+
+        // ---- Run the bot ----
+        if (store.state.active) {
+          const signal = bot.evaluate(symbol, computed, store.state, {
+            tradeInProgress: tradeInProgressSym[symbol] || false,
+            lastCloseTime: lastTradeCloseTime[symbol] || 0
+          });
+
+          if (signal) {
+            tradeInProgressSym[symbol] = true;
+            // Set bot name for ledger
+            signal.bot_name = 'sniper';
+            derivClient.buyContract(signal);
+            console.log(`🤖 Bot fired ${signal.contractType} on ${symbol}`);
+          }
+        }
+      }
     });
 
     derivClient.connect();
