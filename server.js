@@ -159,7 +159,6 @@ const server = app.listen(PORT, () => {
   if (derivClient) {
     const indicators = require('./engine/indicators');
 
-    // Buffer size change listener
     store.on('configChanged', () => {
       store.tickBuffer.setMaxSize(store.config.ANALYSIS_WINDOW || 500);
     });
@@ -190,7 +189,6 @@ const server = app.listen(PORT, () => {
       logger.info(`🔐 Authorized as ${data.loginid || derivClient.activeAccountId}`);
     });
 
-    // Tick pipeline
     derivClient.on('tick', (tick) => {
       const symbol = tick.symbol;
       const price = tick.quote;
@@ -199,8 +197,13 @@ const server = app.listen(PORT, () => {
       const prices = store.tickBuffer.get(symbol);
       if (prices.length < 2) return;
 
-      const computed = indicators.computeMetrics(symbol, prices, store.config || {});
+      const history = store.getBandwidthHistory(symbol);
+      const computed = indicators.computeMetrics(symbol, prices, store.config || {}, history);
+
       if (computed) {
+        if (computed.bandwidth !== null && computed.bandwidth !== undefined) {
+          store.pushBandwidth(symbol, computed.bandwidth);
+        }
         store.updateMarketMetrics(symbol, computed);
       }
     });
