@@ -1,4 +1,4 @@
-// services/deriv.js
+// deriv.js v10 – fixed proposal payload (underlying_symbol)
 const WebSocket = require('ws');
 
 const DERIV_APP_ID = process.env.DERIV_APP_ID;
@@ -85,7 +85,7 @@ class DerivClient {
       bot_name: params.bot_name || 'manual'
     };
 
-    // Step 1 – request a proposal (FLATTENED STRUCTURE – no `parameters` wrapper)
+    // Step 1 – request a proposal (FLATTENED, with underlying_symbol)
     const proposalReq = {
       proposal: 1,
       amount: params.stake,
@@ -94,7 +94,7 @@ class DerivClient {
       currency: 'USD',
       duration: params.duration,
       duration_unit: params.durationUnit || 't',
-      symbol: params.symbol
+      underlying_symbol: params.symbol      // ← FIX: was `symbol`
     };
 
     console.log('📤 Sending proposal:', JSON.stringify(proposalReq));
