@@ -231,8 +231,9 @@ function renderMobileMarkets() {
     const price   = m ? (m.formattedPrice || Number(m.price || 0).toFixed(2)) : '—';
     const sup     = m?.support    ? Number(m.support).toFixed(2)    : '—';
     const res     = m?.resistance ? Number(m.resistance).toFixed(2) : '—';
-    const risePct = m?.risePct    !== undefined ? Math.round(m.risePct) + '%'  : '—';
-    const fallPct = m?.fallPct    !== undefined ? Math.round(m.fallPct) + '%'  : '—';
+    // ✅ Use toFixed(1) for percentages
+    const risePct = m?.risePct !== undefined ? Number(m.risePct).toFixed(1) + '%' : '—';
+    const fallPct = m?.fallPct !== undefined ? Number(m.fallPct).toFixed(1) + '%' : '—';
 
     let badgeClass = '', badgeText = 'RANGE';
     if (m?.isBreakout)  { badgeClass = 'up';   badgeText = '▲ UP';   }
@@ -342,8 +343,9 @@ function updateManualInfo() {
   _setText('manual-price',  m ? (m.formattedPrice || Number(m.price || 0).toFixed(4)) : '—');
   _setText('mm-support',    m?.support    ? Number(m.support).toFixed(2)    : '—');
   _setText('mm-resistance', m?.resistance ? Number(m.resistance).toFixed(2) : '—');
-  _setText('mm-rise',       m?.risePct    !== undefined ? Math.round(m.risePct) + '%'  : '—');
-  _setText('mm-fall',       m?.fallPct    !== undefined ? Math.round(m.fallPct) + '%'  : '—');
+  // ✅ Use toFixed(1) for percentages
+  _setText('mm-rise',       m?.risePct !== undefined ? Number(m.risePct).toFixed(1) + '%' : '—');
+  _setText('mm-fall',       m?.fallPct !== undefined ? Number(m.fallPct).toFixed(1) + '%' : '—');
   _setText('mm-rsi',        m?.rsi        !== undefined ? Number(m.rsi).toFixed(1)     : '—');
   _setText('mm-vol',        m?.volatility !== undefined ? Number(m.volatility).toFixed(2) + '%' : '—');
 
