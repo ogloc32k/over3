@@ -61,8 +61,7 @@ app.post('/api/control', (req, res) => {
   } catch (err) { res.json({ error: err.message }); }
 });
 
-// Manual trade – with stake validation
-app.post('/api/trade/manual', async (req, res) => {   // async because buyContract is async
+app.post('/api/trade/manual', async (req, res) => {
   try {
     if (!derivClient) return res.json({ error: 'Deriv client not connected' });
 
@@ -87,8 +86,98 @@ app.post('/api/config', (req, res) => {
   } catch (err) { res.json({ error: err.message }); }
 });
 
-// Analytics (unchanged, omitted for brevity – it's the same as before)
-app.get('/api/ledger/aggregated', async (req, res) => { /* … unchanged … */ });
+// ============================================================
+// ANALYTICS – FULL ENDPOINT (restored)
+// ============================================================
+app.get('/api/ledger/aggregated', async (req, res) => {
+  try {
+    const { mode = 'session', account = 'demo', start: customStart, end: customEnd } = req.query;
+    const now = new Date();
+    let start, end;
+
+    const modeMap = { 'year': '1y', 'week': '1w', 'month': '1m', '24h': '24h', 'session': 'session' };
+    const cleanMode = modeMap[mode] || mode;
+
+    switch (cleanMode) {
+      case '24h': start = new Date(now.getTime() - 24*60*60*1000); break;
+      case '1w':  start = new Date(now.getTime() - 7*24*60*60*1000); break;
+      case '1m':  start = new Date(now.getTime() - 30*24*60*60*1000); break;
+      case '1y':  start = new Date(now.getTime() - 365*24*60*60*1000); break;
+      case 'custom':
+        if (customStart) start = new Date(customStart);
+        if (customEnd)   end   = new Date(customEnd);
+        if (!start) start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        break;
+      case 'session':
+      default: start = new Date(now.getFullYear(), now.getMonth(), now.getDate()); break;
+    }
+
+    let query = supabase.from('trading_ledger').select('*')
+      .eq('account', account).gte('created_at', start.toISOString());
+    if (end) query = query.lte('created_at', end.toISOString());
+    query = query.order('created_at', { ascending: true });
+
+    const { data: trades, error } = await query;
+
+    if (error || !trades || trades.length === 0) {
+      return res.json({
+        totalProfit: 0, tradeCount: 0, winCount: 0, lossCount: 0,
+        grossProfit: 0, grossLoss: 0, maxDrawdown: 0, totalDuration: 0,
+        avgWin: 0, avgLoss: 0, strikeRate: 0, profitFactor: 0,
+        assetContributions: [], equityData: []
+      });
+    }
+
+    let totalProfit=0, grossProfit=0, grossLoss=0, wins=0, losses=0, sumWin=0, sumLoss=0, sumDuration=0;
+    const assetMap = {};
+    const equityCurve = [];
+    let runningEquity=0, peakEquity=0, maxDrawdown=0;
+    let currentStreak=0, maxWinStreak=0, maxLossStreak=0;
+
+    for (const t of trades) {
+      const pnl = parseFloat(t.profit_loss);
+      totalProfit += pnl;
+      if (pnl > 0) { wins++; grossProfit += pnl; sumWin += pnl; }
+      else if (pnl < 0) { losses++; grossLoss += Math.abs(pnl); sumLoss += pnl; }
+      sumDuration += parseInt(t.duration_ticks) || 0;
+      const asset = t.asset || 'Unknown';
+      assetMap[asset] = (assetMap[asset] || 0) + pnl;
+      runningEquity += pnl;
+      equityCurve.push({ timestamp: t.created_at, equity: runningEquity });
+      if (runningEquity > peakEquity) peakEquity = runningEquity;
+      if (peakEquity > 0) { const dd = ((peakEquity - runningEquity) / peakEquity)*100; if (dd > maxDrawdown) maxDrawdown = dd; }
+      if (pnl > 0) currentStreak = currentStreak >= 0 ? currentStreak+1 : 1;
+      else currentStreak = currentStreak <= 0 ? currentStreak-1 : -1;
+      if (currentStreak > maxWinStreak) maxWinStreak = currentStreak;
+      if (currentStreak < maxLossStreak) maxLossStreak = currentStreak;
+    }
+
+    const total = trades.length;
+    const strikeRate = total>0 ? (wins/total)*100 : 0;
+    let profitFactor = 0;
+    if (grossLoss===0) profitFactor = grossProfit>0 ? parseFloat(grossProfit.toFixed(2)) : 0;
+    else profitFactor = grossProfit / grossLoss;
+    const avgWin = wins>0 ? sumWin/wins : 0;
+    const avgLoss = losses>0 ? Math.abs(sumLoss/losses) : 0;
+    const avgDuration = total>0 ? sumDuration/total : 0;
+    const assetContributions = Object.entries(assetMap).map(([name, pnl]) => ({ name, pnl }));
+
+    res.json({
+      totalProfit, tradeCount: total, winCount: wins, lossCount: losses,
+      grossProfit, grossLoss, maxDrawdown, totalDuration: sumDuration,
+      avgWin, avgLoss, strikeRate, profitFactor,
+      assetContributions, equityData: equityCurve
+    });
+  } catch (err) {
+    console.error('❌ Analytics error:', err);
+    res.json({
+      totalProfit: 0, tradeCount: 0, winCount: 0, lossCount: 0,
+      grossProfit: 0, grossLoss: 0, maxDrawdown: 0, totalDuration: 0,
+      avgWin: 0, avgLoss: 0, strikeRate: 0, profitFactor: 0,
+      assetContributions: [], equityData: []
+    });
+  }
+});
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
@@ -166,7 +255,7 @@ const server = app.listen(PORT, () => {
 
             tradeInProgressSym[symbol] = true;
             signal.bot_name = 'sniper';
-            derivClient.buyContract(signal);   // fire and forget (async)
+            derivClient.buyContract(signal);
             store.addLog('info', `🤖 Bot trade: ${signal.contractType} ${symbol}`);
           }
         }
