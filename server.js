@@ -46,7 +46,7 @@ app.get('/stream', (req, res) => {
 // REST API
 // ============================================================
 
-// ---------- Trade‑in‑progress tracker (must be declared here) ----------
+// ---------- Trade‑in‑progress tracker ----------
 const tradeInProgressSym = {};   // symbol → boolean
 
 function tradeInProgressCount() {
@@ -57,7 +57,7 @@ function tradeInProgressCount() {
   return count;
 }
 
-// Control endpoint
+// Control endpoint (start / stop / set_mode)
 app.post('/api/control', (req, res) => {
   const { action, mode } = req.body;
   console.log('🟡 POST /api/control body:', req.body);
@@ -82,7 +82,7 @@ app.post('/api/control', (req, res) => {
   } catch (err) { res.json({ error: err.message }); }
 });
 
-// Manual trade – now sets a lock
+// Manual trade – locks AFTER Deriv confirms
 app.post('/api/trade/manual', async (req, res) => {
   try {
     if (!derivClient) return res.json({ error: 'Deriv client not connected' });
@@ -93,10 +93,15 @@ app.post('/api/trade/manual', async (req, res) => {
     if (stake < 0.35) return res.json({ error: 'Minimum stake is $0.35' });
     if (stake > balance) return res.json({ error: `Stake cannot exceed balance of $${balance.toFixed(2)}` });
 
-    // Mark the symbol as having an active trade
-    tradeInProgressSym[req.body.symbol] = true;
+    // Fire trade – returns contract_id on success, null on failure
+    const contractId = await derivClient.buyContract({ ...req.body, stake });
 
-    await derivClient.buyContract({ ...req.body, stake });
+    if (!contractId) {
+      return res.json({ error: 'Trade execution failed on Deriv side' });
+    }
+
+    // Now lock the symbol (only after successful Deriv confirmation)
+    tradeInProgressSym[req.body.symbol] = true;
     store.addLog('info', `📈 Manual trade placed: ${req.body.contractType} ${req.body.symbol}`);
     res.json({ message: 'Trade request sent' });
   } catch (err) {
@@ -227,11 +232,7 @@ const server = app.listen(PORT, () => {
       store.tickBuffer.setMaxSize(store.config.ANALYSIS_WINDOW || 500);
     });
 
-    // ---------- Balance streaming ----------
-    // Subscribe to balance updates automatically (instead of polling)
-    if (derivClient.ws && derivClient.ws.readyState === WebSocket.OPEN) {
-      derivClient.send({ balance: 1, subscribe: 1 });
-    }
+    // Balance streaming is now started inside deriv.js on open
 
     derivClient.on('balance', (data) => {
       if (!derivClient.activeAccountId) return;
@@ -288,10 +289,13 @@ const server = app.listen(PORT, () => {
             const balance = store.state.balance ?? 0;
             if (stake < 0.35 || stake > balance) return;
 
-            tradeInProgressSym[symbol] = true;
-            signal.bot_name = 'sniper';
-            derivClient.buyContract(signal);
-            store.addLog('info', `🤖 Bot trade: ${signal.contractType} ${symbol}`);
+            // Bot fire – lock only after success
+            derivClient.buyContract(signal).then(contractId => {
+              if (contractId) {
+                tradeInProgressSym[symbol] = true;
+                store.addLog('info', `🤖 Bot trade: ${signal.contractType} ${symbol}`);
+              }
+            });
           }
         }
       }
@@ -333,7 +337,7 @@ const server = app.listen(PORT, () => {
         else console.log('✅ Trade recorded:', record.asset, profit, 'account:', account);
       } catch (e) { console.error('❌ trade_settled handler error:', e); }
 
-      // Balance update is now automatic via subscription – no explicit request needed
+      // Balance is already streaming – no explicit request needed
     });
 
     derivClient.connect();
