@@ -46,7 +46,18 @@ app.get('/stream', (req, res) => {
 // REST API
 // ============================================================
 
-// Control endpoint (start / stop / set_mode)
+// ---------- Trade‑in‑progress tracker (must be declared here) ----------
+const tradeInProgressSym = {};   // symbol → boolean
+
+function tradeInProgressCount() {
+  let count = 0;
+  for (const sym in tradeInProgressSym) {
+    if (tradeInProgressSym[sym]) count++;
+  }
+  return count;
+}
+
+// Control endpoint
 app.post('/api/control', (req, res) => {
   const { action, mode } = req.body;
   console.log('🟡 POST /api/control body:', req.body);
@@ -60,7 +71,7 @@ app.post('/api/control', (req, res) => {
       store.addLog('info', '⏹️ Bot stopped');
       res.json({ message: 'Bot stopped' });
     } else if (action === 'set_mode') {
-      // ---- Block account switch if any trade is in progress ----
+      // Guard: block switch if any trade is still open
       if (tradeInProgressCount() > 0) {
         return res.json({ error: 'Cannot switch accounts while a trade is active. Wait for it to settle.' });
       }
@@ -71,7 +82,7 @@ app.post('/api/control', (req, res) => {
   } catch (err) { res.json({ error: err.message }); }
 });
 
-// Manual trade
+// Manual trade – now sets a lock
 app.post('/api/trade/manual', async (req, res) => {
   try {
     if (!derivClient) return res.json({ error: 'Deriv client not connected' });
@@ -82,10 +93,17 @@ app.post('/api/trade/manual', async (req, res) => {
     if (stake < 0.35) return res.json({ error: 'Minimum stake is $0.35' });
     if (stake > balance) return res.json({ error: `Stake cannot exceed balance of $${balance.toFixed(2)}` });
 
+    // Mark the symbol as having an active trade
+    tradeInProgressSym[req.body.symbol] = true;
+
     await derivClient.buyContract({ ...req.body, stake });
     store.addLog('info', `📈 Manual trade placed: ${req.body.contractType} ${req.body.symbol}`);
     res.json({ message: 'Trade request sent' });
-  } catch (err) { res.json({ error: err.message }); }
+  } catch (err) {
+    // Unlock on error
+    if (req.body.symbol) tradeInProgressSym[req.body.symbol] = false;
+    res.json({ error: err.message });
+  }
 });
 
 // Config
@@ -204,20 +222,16 @@ const server = app.listen(PORT, () => {
     const bot = require('./engine/bot');
 
     const lastTradeCloseTime = {};
-    const tradeInProgressSym = {};
-
-    // Helper to count active trades (used in set_mode guard)
-    global.tradeInProgressCount = () => {
-      let count = 0;
-      for (const sym in tradeInProgressSym) {
-        if (tradeInProgressSym[sym]) count++;
-      }
-      return count;
-    };
 
     store.on('configChanged', () => {
       store.tickBuffer.setMaxSize(store.config.ANALYSIS_WINDOW || 500);
     });
+
+    // ---------- Balance streaming ----------
+    // Subscribe to balance updates automatically (instead of polling)
+    if (derivClient.ws && derivClient.ws.readyState === WebSocket.OPEN) {
+      derivClient.send({ balance: 1, subscribe: 1 });
+    }
 
     derivClient.on('balance', (data) => {
       if (!derivClient.activeAccountId) return;
@@ -285,6 +299,7 @@ const server = app.listen(PORT, () => {
 
     // -------------------- TRADE SETTLED --------------------
     derivClient.on('trade_settled', async (trade) => {
+      // Release lock
       if (trade.symbol) {
         tradeInProgressSym[trade.symbol] = false;
         lastTradeCloseTime[trade.symbol] = Date.now();
@@ -318,10 +333,7 @@ const server = app.listen(PORT, () => {
         else console.log('✅ Trade recorded:', record.asset, profit, 'account:', account);
       } catch (e) { console.error('❌ trade_settled handler error:', e); }
 
-      // Request fresh balance to update UI immediately
-      if (derivClient && derivClient.ws && derivClient.ws.readyState === WebSocket.OPEN) {
-        derivClient.send({ balance: 1 });
-      }
+      // Balance update is now automatic via subscription – no explicit request needed
     });
 
     derivClient.connect();
