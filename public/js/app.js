@@ -159,6 +159,9 @@ document.addEventListener('DOMContentLoaded', function () {
 // HOME + DRAWER SYNC
 // Called from core.js SSE handler after renderUI()
 // ============================================================
+
+let _lastTradingMode = null;   // track previous mode to prevent blinking
+
 function syncMobileUI(state) {
   if (!state) return;
 
@@ -195,9 +198,12 @@ function syncMobileUI(state) {
     if (activeTab.id === 'tab-manual'  && typeof updateManualInfo === 'function')  updateManualInfo();
   }
 
-  // Refresh analytics on account switch
-  if (typeof window.refreshAnalytics === 'function') {
-    window.refreshAnalytics();
+  // Refresh analytics ONLY when trading mode actually changes
+  if (mode !== _lastTradingMode) {
+    _lastTradingMode = mode;
+    if (typeof window.refreshAnalytics === 'function') {
+      window.refreshAnalytics();
+    }
   }
 }
 
@@ -408,7 +414,7 @@ function _syncBotCard(state) {
 }
 
 // ============================================================
-// MOBILE HOME EQUITY CHART (fixed: default to 1W, hides empty state when no data)
+// MOBILE HOME EQUITY CHART (default to 1W, hides empty state when no data)
 // ============================================================
 let mobileEquityChart = null;
 
