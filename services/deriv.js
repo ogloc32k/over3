@@ -24,8 +24,9 @@ class DerivClient {
     this._explicitClose = false;
 
     // trade tracking
-    this._lastBuyParams = null;       // holds symbol, stake, contract_type, duration, bot_name
-    this._pendingTrades = {};         // contract_id → pending info
+    this._lastBuyParams = null;
+    this._pendingTrades = {};
+    this._pendingCallbacks = {};   // proposal_id → resolve/reject
   }
 
   setStore(storeInstance) { this._store = storeInstance; }
@@ -74,8 +75,8 @@ class DerivClient {
     this.send(req);
   }
 
-  buyContract(params) {
-    // Remember trade parameters before sending
+  // ----- Trade execution (async) -----
+  async buyContract(params) {
     this._lastBuyParams = {
       symbol: params.symbol,
       contract_type: params.contractType,
@@ -85,18 +86,46 @@ class DerivClient {
       bot_name: params.bot_name || 'manual'
     };
 
-    this.send({
-      buy: params.contractId || 1,
-      price: params.stake,
-      parameters: {
-        amount: params.stake,
-        basis: 'stake',
-        contract_type: params.contractType,
-        currency: 'USD',
-        duration: params.duration,
-        duration_unit: params.durationUnit || 't',
-        symbol: params.symbol
+    // Step 1 – request a proposal
+    const proposalReq = {
+      proposal: 1,
+      symbol: params.symbol,
+      contract_type: params.contractType,
+      currency: 'USD',
+      amount: params.stake,
+      basis: 'stake',
+      duration: params.duration,
+      duration_unit: params.durationUnit || 't'
+    };
+
+    try {
+      const proposal = await this._sendAndWait('proposal', proposalReq);
+      if (!proposal || !proposal.proposal || !proposal.proposal.id) {
+        console.error('❌ Invalid proposal response:', proposal);
+        return;
       }
+
+      const proposalId = proposal.proposal.id;
+      // Step 2 – buy using the proposal ID
+      this.send({
+        buy: proposalId,
+        price: params.stake
+      });
+    } catch (err) {
+      console.error('❌ Proposal error:', err.message);
+    }
+  }
+
+  _sendAndWait(msgType, payload) {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Proposal timeout')), 10000);
+      const handler = (data) => {
+        clearTimeout(timeout);
+        this.off(msgType, handler);
+        resolve(data);
+      };
+      this.on(msgType, handler);
+      this.send(payload);
     });
   }
 
@@ -193,11 +222,11 @@ class DerivClient {
 
   _disconnect(explicit = false) {
     this._explicitClose = explicit;
-    if (this.ws) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.removeAllListeners();
       this.ws.close();
-      this.ws = null;
     }
+    this.ws = null;
     if (explicit) this._clearReconnectTimer();
   }
 
@@ -219,7 +248,6 @@ class DerivClient {
     }
   }
 
-  // ---------- Message handling ----------
   _handleMessage(msg) {
     if (msg.error) {
       console.error('Deriv error:', msg.error);
@@ -238,30 +266,33 @@ class DerivClient {
       return;
     }
 
-    // Trade confirmation (buy response) – store the contract_id
+    // Proposal response
+    if (msg.proposal) {
+      this._emit('proposal', msg);
+      return;
+    }
+
+    // Buy confirmation
     if (msg.buy) {
       const contractId = msg.buy.contract_id;
       if (contractId && this._lastBuyParams) {
         this._pendingTrades[contractId] = { ...this._lastBuyParams };
-        this._lastBuyParams = null;   // reset for next trade
+        this._lastBuyParams = null;
       }
       this._emit('buy_result', msg.buy);
       return;
     }
 
-    // Trade settlement (proposal_open_contract)
+    // Trade settlement
     if (msg.proposal_open_contract) {
       const settlement = msg.proposal_open_contract;
       const contractId = settlement.contract_id;
       const pending = contractId ? this._pendingTrades[contractId] : null;
 
-      // Always emit a generic event for other listeners
       this._emit('contract_result', settlement);
 
-      // If we have pending info, build a structured trade_settled event
       if (pending) {
         delete this._pendingTrades[contractId];
-
         this._emit('trade_settled', {
           symbol: pending.symbol,
           contract_type: pending.contract_type,
@@ -278,8 +309,6 @@ class DerivClient {
           date_expiry: settlement.date_expiry,
         });
       } else {
-        // Fallback: emit trade_settled with just the settlement data
-        // (manual trades will still have pending info because we always set _lastBuyParams before sending)
         this._emit('trade_settled', {
           contract_id: contractId,
           entry_price: settlement.entry_spot,
@@ -288,30 +317,28 @@ class DerivClient {
           profit: settlement.profit,
           barrier: settlement.barrier,
           date_expiry: settlement.date_expiry,
-          symbol: null,           // unknown without pending
-          contract_type: null,
-          stake: null,
-          duration_ticks: null,
-          duration_unit: null,
-          bot_name: 'manual'      // assume manual if we don't know
+          symbol: null, contract_type: null, stake: null,
+          duration_ticks: null, duration_unit: null,
+          bot_name: 'manual'
         });
       }
       return;
     }
 
-    // Historical data
+    // History
     if (msg.history) {
       this._emit('history', msg.history);
       return;
     }
 
-    // Legacy msg_type handling
+    // Legacy msg_type
     if (msg.msg_type) {
       switch (msg.msg_type) {
         case 'tick': this._emit('tick', msg.tick); break;
         case 'balance': this._emit('balance', msg.balance); break;
-        case 'proposal_open_contract': this._emit('contract_result', msg.proposal_open_contract); break;
+        case 'proposal': this._emit('proposal', msg); break;
         case 'buy': this._emit('buy_result', msg.buy); break;
+        case 'proposal_open_contract': this._emit('contract_result', msg.proposal_open_contract); break;
         case 'history': this._emit('history', msg.history); break;
       }
     }
