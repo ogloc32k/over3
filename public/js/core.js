@@ -20,14 +20,12 @@
     '1HZ10V': 2, '1HZ25V': 2, '1HZ50V': 2, '1HZ75V': 2, '1HZ100V': 2
   };
 
-  // ---------- Event bus ----------
   const eventBus = {
     _handlers: {},
     on(evt, fn) { (this._handlers[evt] = this._handlers[evt] || []).push(fn); },
     emit(evt, data) { (this._handlers[evt] || []).forEach(fn => fn(data)); }
   };
 
-  // ---------- Private state ----------
   let currentFocus = 'R_75';
   let globalState = null;
   let serverMode = 'demo';
@@ -36,7 +34,6 @@
   let reconnectAttempts = 0;
   const maxReconnectAttempts = 10;
 
-  // ---------- Utility functions ----------
   function formatPrice(symbol, raw) {
     if (raw === undefined || raw === null) return '—';
     const dec = MARKET_DECIMALS[symbol] || 2;
@@ -60,7 +57,6 @@
     return shortMap[name] || name;
   }
 
-  // ---------- Render engine ----------
   let lastRenderTime = 0;
   function renderUI(state) {
     const now = Date.now();
@@ -156,10 +152,15 @@
           rsiVal = metric.rsi !== undefined ? Number(metric.rsi).toFixed(1) : '—';
           if (metric.rsi !== undefined && metric.rsi > 70) rsiClass = 'overbought';
           else if (metric.rsi !== undefined && metric.rsi < 30) rsiClass = 'oversold';
-          if (metric.bandwidth !== null && metric.bandwidth !== undefined) {
+
+          // BB Squeeze – use percentile if available, else raw bandwidth
+          if (metric.squeezePercentile !== null && metric.squeezePercentile !== undefined) {
+            squeezeDisplay = metric.squeezePercentile.toFixed(0) + '%';
+            if (metric.squeezePercentile >= 90) squeezeClass = 'badge-squeeze';
+          } else if (metric.bandwidth !== null && metric.bandwidth !== undefined) {
             squeezeDisplay = metric.bandwidth.toFixed(2) + '%';
-            if (metric.bandwidth < 2.0) squeezeClass = 'badge-squeeze';
           }
+
           if (metric.tickDirections && metric.tickDirections.length > 0) {
             const dirs = metric.tickDirections.slice(-5);
             trendHtml = dirs.map(d => {
@@ -171,7 +172,6 @@
             trendHtml = '—';
           }
 
-          // ✅ Use toFixed(1) instead of Math.round for percentages
           supportPct = metric.supportPct !== undefined ? Number(metric.supportPct).toFixed(1) : null;
           resistancePct = metric.resistancePct !== undefined ? Number(metric.resistancePct).toFixed(1) : null;
           risePct = metric.risePct !== undefined ? Number(metric.risePct).toFixed(1) : null;
@@ -201,9 +201,7 @@
         tbody.appendChild(tr);
       }
 
-      // ---- Mobile view (legacy — silently no-ops if elements missing) ----
       try { renderMobileView(state); } catch(e) {}
-
     } catch (err) {
       console.error('❌ Error in renderUI:', err);
     }
@@ -226,7 +224,6 @@
     }
   }
 
-  // ---------- SSE ----------
   function connectSSE() {
     if (sse) { sse.close(); sse = null; }
     sse = new EventSource('/stream');
@@ -270,7 +267,6 @@
     };
   }
 
-  // ---------- Set focus market ----------
   function setFocusMarket(sym) {
     if (!sym) return;
     currentFocus = sym;
@@ -280,7 +276,6 @@
     if (chip) chip.classList.add('active');
   }
 
-  // ---------- Public API ----------
   window.QuantCore = {
     getCurrentFocus: () => currentFocus,
     getGlobalState: () => globalState,
