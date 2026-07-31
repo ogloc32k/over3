@@ -8,7 +8,7 @@
  * @param {string} symbol       - Deriv symbol, e.g. 'R_75'
  * @param {object} metrics      - computed marketMetrics for that symbol
  * @param {object} state        - global store state (balance, active, etc.)
- * @param {object} options      - { tradeInProgress: boolean, lastTradeTime: number, lastCloseTime: number }
+ * @param {object} options      - { tradeInProgress: boolean, lastCloseTime: number }
  * @returns {object|null}       - { contractType, duration, durationUnit, stake }
  */
 function evaluate(symbol, metrics, state, options = {}) {
@@ -47,7 +47,7 @@ function evaluate(symbol, metrics, state, options = {}) {
     fallPct >= 60 &&
     squeeze !== null && squeeze > 60
   ) {
-    // Runaway trend circuit breaker: if price has broken support by more than 0.5% (i.e. price < support * 0.995), it's a breakdown, cancel CALL.
+    // Runaway trend circuit breaker: if price has broken support by more than 0.5%
     if (metrics.support !== null && price < metrics.support * 0.995) {
       return null;   // breakout regime
     }
@@ -72,7 +72,7 @@ function evaluate(symbol, metrics, state, options = {}) {
     risePct >= 60 &&
     squeeze !== null && squeeze > 60
   ) {
-    // Runaway trend circuit breaker: if price has broken resistance by more than 0.5% (price > resistance * 1.005)
+    // Runaway trend circuit breaker: if price has broken resistance by more than 0.5%
     if (metrics.resistance !== null && price > metrics.resistance * 1.005) {
       return null;   // breakout regime
     }
