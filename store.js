@@ -6,6 +6,10 @@ const TickBuffer = require('./engine/tickBuffer');
 class Store extends EventEmitter {
   constructor() {
     super();
+
+    // create bandwidth history BEFORE calling _initMetrics
+    this.bandwidthHistory = {};
+
     this.state = {
       tradingMode: 'demo',
       balance: null,
@@ -22,7 +26,6 @@ class Store extends EventEmitter {
     };
     this.config = {};
     this.tickBuffer = new TickBuffer(500);
-    this.bandwidthHistory = {};
   }
 
   _initMetrics() {
