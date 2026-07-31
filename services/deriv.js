@@ -26,7 +26,6 @@ class DerivClient {
     // trade tracking
     this._lastBuyParams = null;
     this._pendingTrades = {};
-    this._pendingCallbacks = {};   // proposal_id → resolve/reject
   }
 
   setStore(storeInstance) { this._store = storeInstance; }
@@ -86,31 +85,36 @@ class DerivClient {
       bot_name: params.bot_name || 'manual'
     };
 
-    // Step 1 – request a proposal
+    // Step 1 – request a proposal (FLATTENED STRUCTURE – no `parameters` wrapper)
     const proposalReq = {
       proposal: 1,
-      symbol: params.symbol,
-      contract_type: params.contractType,
-      currency: 'USD',
       amount: params.stake,
       basis: 'stake',
+      contract_type: params.contractType,
+      currency: 'USD',
       duration: params.duration,
-      duration_unit: params.durationUnit || 't'
+      duration_unit: params.durationUnit || 't',
+      symbol: params.symbol
     };
+
+    console.log('📤 Sending proposal:', JSON.stringify(proposalReq));
 
     try {
       const proposal = await this._sendAndWait('proposal', proposalReq);
+      console.log('📥 Proposal response:', JSON.stringify(proposal));
+
       if (!proposal || !proposal.proposal || !proposal.proposal.id) {
         console.error('❌ Invalid proposal response:', proposal);
         return;
       }
 
       const proposalId = proposal.proposal.id;
-      // Step 2 – buy using the proposal ID
-      this.send({
+      const buyReq = {
         buy: proposalId,
         price: params.stake
-      });
+      };
+      console.log('📤 Sending buy:', JSON.stringify(buyReq));
+      this.send(buyReq);
     } catch (err) {
       console.error('❌ Proposal error:', err.message);
     }
