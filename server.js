@@ -322,12 +322,12 @@ const server = app.listen(PORT, () => {
           payout: parseFloat(trade.payout || 0),
           profit_loss: profit,
           is_win: profit > 0,
-          barrier: trade.barrier || null,
+          barrier: trade.barrier ? parseFloat(trade.barrier) : null,
           exit_tick: trade.exit_price ? parseFloat(trade.exit_price) : null,
           contract_id: trade.contract_id,
           entry_price: trade.entry_price ? parseFloat(trade.entry_price) : null,
           exit_price: trade.exit_price ? parseFloat(trade.exit_price) : null,
-          duration_ticks: trade.duration_ticks || 0,
+          duration_ticks: parseInt(trade.duration_ticks) || 0,
           bot_name: trade.bot_name || 'manual',
           account: account
         };
