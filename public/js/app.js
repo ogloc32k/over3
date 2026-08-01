@@ -53,6 +53,9 @@ function switchTab(tabId) {
   if (tabId === 'tab-logs') {
     if (typeof window.scrollLogsToBottom === 'function') window.scrollLogsToBottom();
   }
+  if (tabId === 'tab-bots' && typeof loadBotDailyPnl === 'function') {
+    loadBotDailyPnl();
+  }
 
   // Lazy-render tabs
   if (isMobile && tabId === 'tab-markets' && typeof renderMobileMarkets === 'function') renderMobileMarkets();
@@ -160,7 +163,7 @@ document.addEventListener('DOMContentLoaded', function () {
 // Called from core.js SSE handler after renderUI()
 // ============================================================
 
-let _lastTradingMode = null;   // track previous mode to prevent blinking
+let _lastTradingMode = null;
 
 function syncMobileUI(state) {
   if (!state) return;
@@ -198,7 +201,7 @@ function syncMobileUI(state) {
     if (activeTab.id === 'tab-manual'  && typeof updateManualInfo === 'function')  updateManualInfo();
   }
 
-  // Refresh analytics ONLY when trading mode actually changes
+  // Refresh analytics on account switch
   if (mode !== _lastTradingMode) {
     _lastTradingMode = mode;
     if (typeof window.refreshAnalytics === 'function') {
@@ -231,7 +234,6 @@ function renderMobileMarkets() {
     const price   = m ? (m.formattedPrice || Number(m.price || 0).toFixed(2)) : '—';
     const sup     = m?.support    ? Number(m.support).toFixed(2)    : '—';
     const res     = m?.resistance ? Number(m.resistance).toFixed(2) : '—';
-    // ✅ Use toFixed(1) for percentages
     const risePct = m?.risePct !== undefined ? Number(m.risePct).toFixed(1) + '%' : '—';
     const fallPct = m?.fallPct !== undefined ? Number(m.fallPct).toFixed(1) + '%' : '—';
 
@@ -343,7 +345,6 @@ function updateManualInfo() {
   _setText('manual-price',  m ? (m.formattedPrice || Number(m.price || 0).toFixed(4)) : '—');
   _setText('mm-support',    m?.support    ? Number(m.support).toFixed(2)    : '—');
   _setText('mm-resistance', m?.resistance ? Number(m.resistance).toFixed(2) : '—');
-  // ✅ Use toFixed(1) for percentages
   _setText('mm-rise',       m?.risePct !== undefined ? Number(m.risePct).toFixed(1) + '%' : '—');
   _setText('mm-fall',       m?.fallPct !== undefined ? Number(m.fallPct).toFixed(1) + '%' : '—');
   _setText('mm-rsi',        m?.rsi        !== undefined ? Number(m.rsi).toFixed(1)     : '—');
@@ -411,7 +412,7 @@ function _syncBotCard(state) {
   const pnl = v => '$' + Number(v || 0).toFixed(2);
 
   if (sp) { sp.textContent = pnl(state.sessionPnl); sp.style.color = (state.sessionPnl || 0) >= 0 ? 'var(--green-profit)' : 'var(--red-loss)'; }
-  if (dp) { dp.textContent = pnl(state.dailyPnl);   dp.style.color = (state.dailyPnl   || 0) >= 0 ? 'var(--green-profit)' : 'var(--red-loss)'; }
+  // Daily P&L is now fetched from Supabase via loadBotDailyPnl() – don't override it here
   if (rk) rk.textContent = pnl(state.currentStake);
 }
 
@@ -584,3 +585,21 @@ function setHomeTf(btn, mode) {
     });
 }
 window.setHomeTf = setHomeTf;
+
+// ============================================================
+// BOT DAILY P&L – fetch from Supabase and display on bot card
+// ============================================================
+function loadBotDailyPnl() {
+  const account = window.QuantCore?.getGlobalState()?.tradingMode || 'demo';
+  fetch(`/api/ledger/aggregated?mode=24h&account=${account}`)
+    .then(r => r.json())
+    .then(data => {
+      const dp = document.getElementById('bot-daily-pnl');
+      if (dp) {
+        const pnl = data.totalProfit || 0;
+        dp.textContent = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2);
+        dp.style.color = pnl >= 0 ? 'var(--green-profit)' : 'var(--red-loss)';
+      }
+    })
+    .catch(err => console.error('Failed to load bot daily P&L:', err));
+}
