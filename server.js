@@ -214,6 +214,21 @@ app.get('/api/ledger/aggregated', async (req, res) => {
   }
 });
 
+// ============================================================
+// TEMPORARY DEBUG – inspect bot state and locks
+// ============================================================
+app.get('/debug/state', (req, res) => {
+  res.json({
+    botActive: store.state.active,
+    balance: store.state.balance,
+    account: derivClient?.isDemo ? 'demo' : 'real',
+    activeAccountId: derivClient?.activeAccountId,
+    lockedSymbols: Object.entries(tradeInProgressSym)
+      .filter(([sym, locked]) => locked)
+      .map(([sym]) => sym)
+  });
+});
+
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
