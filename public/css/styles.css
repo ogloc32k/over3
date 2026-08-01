@@ -313,7 +313,7 @@ body.light {
 .analytics-container { flex: 1; min-height: 0; }
 
 /* ============================================================
-   SETTINGS – now scrollable
+   SETTINGS – now scrollable, unused sections hidden
    ============================================================ */
 .settings-grid {
   padding: 6px 0 80px;
@@ -418,6 +418,12 @@ body.light {
   font-size: 11px;
   flex: 1;
   text-align: right;
+}
+
+/* ---- Hide Timing & Cooldowns and Risk Management sections ---- */
+#tab-settings .settings-section:nth-child(2),
+#tab-settings .settings-section:nth-child(3) {
+  display: none !important;
 }
 
 /* ============================================================
@@ -739,7 +745,7 @@ body.light {
 }
 
 /* ============================================================
-   LOGS
+   LOGS – newest at top, scrollable
    ============================================================ */
 .log-stream {
   background: var(--bg-terminal);
@@ -751,7 +757,7 @@ body.light {
   font-size: 12px;
   font-family: 'Consolas', monospace;
   display: flex;
-  flex-direction: column;
+  flex-direction: column-reverse !important;   /* NEWEST LOG ENTRY AT TOP */
   min-height: 100px;
   transition: background 0.3s, border-color 0.3s;
 }
