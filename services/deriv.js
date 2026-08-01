@@ -1,4 +1,4 @@
-// services/deriv.js – v14: symbol in proposal, no double‑send
+// services/deriv.js – v15: proposal uses ONLY underlying_symbol
 const WebSocket = require('ws');
 
 const DERIV_APP_ID = process.env.DERIV_APP_ID;
@@ -90,7 +90,7 @@ class DerivClient {
       bot_name: params.bot_name || 'manual'
     };
 
-    // Step 1 – proposal (WS API uses `symbol`, we also include `underlying_symbol` for safety)
+    // Step 1 – proposal (ONLY underlying_symbol, no symbol)
     const proposalReq = {
       proposal: 1,
       amount: params.stake,
@@ -99,8 +99,7 @@ class DerivClient {
       currency: 'USD',
       duration: params.duration,
       duration_unit: params.durationUnit || 't',
-      symbol: tradeSymbol,
-      underlying_symbol: tradeSymbol
+      underlying_symbol: tradeSymbol       // <-- only this
     };
 
     console.log('📤 Sending proposal:', JSON.stringify(proposalReq));
@@ -118,7 +117,6 @@ class DerivClient {
       const buyReq = { buy: proposalId, price: params.stake };
       console.log('📤 Sending buy:', JSON.stringify(buyReq));
 
-      // _sendAndWait sends the payload – DO NOT call this.send(buyReq)
       const buyResult = await this._sendAndWait('buy', buyReq);
       console.log('📥 Buy response:', JSON.stringify(buyResult));
 
