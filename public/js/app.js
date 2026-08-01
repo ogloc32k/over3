@@ -407,12 +407,10 @@ function _syncBotCard(state) {
   }
 
   const sp  = document.getElementById('bot-session-pnl');
-  const dp  = document.getElementById('bot-daily-pnl');
   const rk  = document.getElementById('bot-risk');
   const pnl = v => '$' + Number(v || 0).toFixed(2);
 
   if (sp) { sp.textContent = pnl(state.sessionPnl); sp.style.color = (state.sessionPnl || 0) >= 0 ? 'var(--green-profit)' : 'var(--red-loss)'; }
-  // Daily P&L is now fetched from Supabase via loadBotDailyPnl() – don't override it here
   if (rk) rk.textContent = pnl(state.currentStake);
 }
 
