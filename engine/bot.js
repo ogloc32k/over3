@@ -41,53 +41,50 @@ function evaluate(symbol, metrics, state, options = {}) {
   const stake           = state.currentStake || (parseFloat(config.BOT_BASE_STAKE) || 0.35);
 
   // ────────────────────────────────────────────────────────────
-  //  CALL conditions (sniper bounce at support)
-  // ────────────────────────────────────────────────────────────
-  if (
-    supportPct !== null && supportPct <= 10 &&         // in extreme bottom zone
-    rsi < rsiOversold &&                               // deeply oversold
-    hasConsecutiveTicks(tickDirections, 'down', 4) &&   // panic selling into support
-    fallPct >= 60 &&                                   // sellers dominating
-    squeeze !== null && squeeze > squeezeThreshold      // bands are tight → coiled spring
-  ) {
-    // Runaway trend circuit breaker: price broke below support by more than 0.5 %
-    if (metrics.support !== null && price < metrics.support * 0.995) {
-      return null;   // breakout regime – cancel CALL
-    }
-    return {
-      symbol: symbol,
-      contractType: 'CALL',
-      duration: duration,
-      durationUnit: 's',
-      stake: stake
-    };
+//  CALL conditions (Realistic Sniper Bounce)
+// ────────────────────────────────────────────────────────────
+const isOversold = rsi !== null && rsi < (rsiOversold || 30);
+const isAtSupport = supportPct !== null && supportPct <= 20; // Bottom 20% zone
+const isPanicDown = hasConsecutiveTicks(tickDirections, 'down', 2); // 2 straight down ticks
+
+if (isAtSupport && isOversold && isPanicDown && (fallPct === null || fallPct >= 50)) {
+  // Circuit breaker: cancel if price blew past support by > 0.5%
+  if (metrics.support !== null && price < metrics.support * 0.995) {
+    return null;
   }
 
-  // ────────────────────────────────────────────────────────────
-  //  PUT conditions (sniper rejection at resistance)
-  // ────────────────────────────────────────────────────────────
-  if (
-    supportPct !== null && supportPct >= 90 &&         // in extreme top zone
-    rsi > rsiOverbought &&                             // deeply overbought
-    hasConsecutiveTicks(tickDirections, 'up', 4) &&     // hard drive into resistance
-    risePct >= 60 &&                                   // buyers dominating
-    squeeze !== null && squeeze > squeezeThreshold      // bands are tight → coiled spring
-  ) {
-    // Runaway trend circuit breaker: price broke above resistance by more than 0.5 %
-    if (metrics.resistance !== null && price > metrics.resistance * 1.005) {
-      return null;   // breakout regime – cancel PUT
-    }
-    return {
-      symbol: symbol,
-      contractType: 'PUT',
-      duration: duration,
-      durationUnit: 's',
-      stake: stake
-    };
-  }
-
-  return null;   // no confluence
+  return {
+    symbol: symbol,
+    contractType: 'CALL',
+    duration: duration,
+    durationUnit: 's',
+    stake: stake
+  };
 }
+
+// ────────────────────────────────────────────────────────────
+//  PUT conditions (Realistic Sniper Rejection)
+// ────────────────────────────────────────────────────────────
+const isOverbought = rsi !== null && rsi > (rsiOverbought || 70);
+const isAtResistance = supportPct !== null && supportPct >= 80; // Top 20% zone
+const isDriveUp = hasConsecutiveTicks(tickDirections, 'up', 2); // 2 straight up ticks
+
+if (isAtResistance && isOverbought && isDriveUp && (risePct === null || risePct >= 50)) {
+  // Circuit breaker: cancel if price blew past resistance by > 0.5%
+  if (metrics.resistance !== null && price > metrics.resistance * 1.005) {
+    return null;
+  }
+
+  return {
+    symbol: symbol,
+    contractType: 'PUT',
+    duration: duration,
+    durationUnit: 's',
+    stake: stake
+  };
+}
+
+return null; // No trade signal
 
 /**
  * Check if the last `count` tick directions are all the given direction.
