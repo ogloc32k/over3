@@ -1,8 +1,5 @@
-// engine/bot.js – DEBUG VERSION (prints on every evaluation)
+// engine/bot.js – TEST MODE (returns symbol, fires on any tick when active)
 function evaluate(symbol, metrics, state, options = {}) {
-  // --- UNCONDITIONAL LOG ---
-  console.log(`🔍 bot.evaluate called for ${symbol}`);
-
   if (!state.active) {
     console.log(`⛔ Bot inactive – ${symbol} skipped`);
     return null;
@@ -17,12 +14,13 @@ function evaluate(symbol, metrics, state, options = {}) {
     return null;
   }
   if (!metrics || metrics.lastPrices.length < 20) {
-    console.log(`⏳ Not enough ticks for ${symbol}: ${metrics ? metrics.lastPrices.length : 0}`);
+    console.log(`⏳ Not enough ticks for ${symbol}`);
     return null;
   }
 
   console.log(`✅ All guards passed for ${symbol} – firing test trade`);
   return {
+    symbol: symbol,            // ← REQUIRED
     contractType: 'CALL',
     duration: 7,
     durationUnit: 't',
