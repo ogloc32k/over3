@@ -1,4 +1,4 @@
-// services/deriv.js  – proposal uses underlying_symbol (fixed)
+// services/deriv.js – v12 FIXED underlying_symbol
 const WebSocket = require('ws');
 
 const DERIV_APP_ID = process.env.DERIV_APP_ID;
@@ -93,7 +93,7 @@ class DerivClient {
       currency: 'USD',
       duration: params.duration,
       duration_unit: params.durationUnit || 't',
-      underlying_symbol: params.symbol            // <-- FIX: was `symbol`
+      underlying_symbol: params.symbol
     };
 
     console.log('📤 Sending proposal:', JSON.stringify(proposalReq));
@@ -112,7 +112,6 @@ class DerivClient {
       console.log('📤 Sending buy:', JSON.stringify(buyReq));
       this.send(buyReq);
 
-      // Wait for buy confirmation to get contract_id
       const buyResult = await this._sendAndWait('buy', buyReq);
       console.log('📥 Buy response:', JSON.stringify(buyResult));
 
@@ -125,7 +124,6 @@ class DerivClient {
       this._pendingTrades[contractId] = { ...this._lastBuyParams };
       this._lastBuyParams = null;
 
-      // Subscribe to contract updates
       this.send({
         proposal_open_contract: 1,
         contract_id: contractId,
