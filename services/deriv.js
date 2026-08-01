@@ -1,4 +1,4 @@
-// services/deriv.js – v13: removed double‑send, fixed field to `symbol`
+// services/deriv.js – v14: symbol in proposal, no double‑send
 const WebSocket = require('ws');
 
 const DERIV_APP_ID = process.env.DERIV_APP_ID;
@@ -75,8 +75,14 @@ class DerivClient {
 
   // ----- Trade execution (async) -----
   async buyContract(params) {
+    const tradeSymbol = params.symbol;
+    if (!tradeSymbol) {
+      console.error('❌ Cannot buy contract: symbol is missing from params', params);
+      return null;
+    }
+
     this._lastBuyParams = {
-      symbol: params.symbol,
+      symbol: tradeSymbol,
       contract_type: params.contractType,
       stake: params.stake || 0,
       duration_ticks: params.duration,
@@ -84,7 +90,7 @@ class DerivClient {
       bot_name: params.bot_name || 'manual'
     };
 
-    // Step 1 – proposal (WebSocket API uses `symbol`, not `underlying_symbol`)
+    // Step 1 – proposal (WS API uses `symbol`, we also include `underlying_symbol` for safety)
     const proposalReq = {
       proposal: 1,
       amount: params.stake,
@@ -93,7 +99,8 @@ class DerivClient {
       currency: 'USD',
       duration: params.duration,
       duration_unit: params.durationUnit || 't',
-      symbol: params.symbol          // ← WebSocket field name
+      symbol: tradeSymbol,
+      underlying_symbol: tradeSymbol
     };
 
     console.log('📤 Sending proposal:', JSON.stringify(proposalReq));
@@ -111,7 +118,7 @@ class DerivClient {
       const buyReq = { buy: proposalId, price: params.stake };
       console.log('📤 Sending buy:', JSON.stringify(buyReq));
 
-      // _sendAndWait already sends the payload internally – DO NOT call this.send(buyReq)
+      // _sendAndWait sends the payload – DO NOT call this.send(buyReq)
       const buyResult = await this._sendAndWait('buy', buyReq);
       console.log('📥 Buy response:', JSON.stringify(buyResult));
 
@@ -146,7 +153,7 @@ class DerivClient {
         resolve(data);
       };
       this.on(msgType, handler);
-      this.send(payload);   // single send here
+      this.send(payload);
     });
   }
 
