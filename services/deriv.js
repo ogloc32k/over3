@@ -1,4 +1,4 @@
-// services/deriv.js – v12 FIXED underlying_symbol
+// services/deriv.js – v13: removed double‑send, fixed field to `symbol`
 const WebSocket = require('ws');
 
 const DERIV_APP_ID = process.env.DERIV_APP_ID;
@@ -84,7 +84,7 @@ class DerivClient {
       bot_name: params.bot_name || 'manual'
     };
 
-    // Step 1 – proposal (FLATTENED, with underlying_symbol)
+    // Step 1 – proposal (WebSocket API uses `symbol`, not `underlying_symbol`)
     const proposalReq = {
       proposal: 1,
       amount: params.stake,
@@ -93,7 +93,7 @@ class DerivClient {
       currency: 'USD',
       duration: params.duration,
       duration_unit: params.durationUnit || 't',
-      underlying_symbol: params.symbol
+      symbol: params.symbol          // ← WebSocket field name
     };
 
     console.log('📤 Sending proposal:', JSON.stringify(proposalReq));
@@ -110,8 +110,8 @@ class DerivClient {
       const proposalId = proposal.proposal.id;
       const buyReq = { buy: proposalId, price: params.stake };
       console.log('📤 Sending buy:', JSON.stringify(buyReq));
-      this.send(buyReq);
 
+      // _sendAndWait already sends the payload internally – DO NOT call this.send(buyReq)
       const buyResult = await this._sendAndWait('buy', buyReq);
       console.log('📥 Buy response:', JSON.stringify(buyResult));
 
@@ -146,7 +146,7 @@ class DerivClient {
         resolve(data);
       };
       this.on(msgType, handler);
-      this.send(payload);
+      this.send(payload);   // single send here
     });
   }
 
@@ -300,15 +300,13 @@ class DerivClient {
     }
 
     if (msg.history) { this._emit('history', msg.history); return; }
+
     if (msg.msg_type) {
       switch (msg.msg_type) {
         case 'tick': this._emit('tick', msg.tick); break;
         case 'balance': this._emit('balance', msg.balance); break;
         case 'proposal': this._emit('proposal', msg); break;
         case 'buy': this._emit('buy', msg); break;
-        case 'proposal_open_contract':
-          if (msg.proposal_open_contract.is_sold === 1) this._handleMessage(msg.proposal_open_contract);
-          break;
         case 'history': this._emit('history', msg.history); break;
       }
     }
