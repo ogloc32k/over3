@@ -1,4 +1,4 @@
-// server.js – Final Production Version
+// server.js – Final Production Version (TP/SL based on daily P&L)
 require('dotenv').config();
 
 process.on('uncaughtException', err => { console.error('🔥 UNCAUGHT EXCEPTION', err); process.exit(1); });
@@ -334,7 +334,7 @@ const server = app.listen(PORT, () => {
       }
     });
 
-    // -------------------- TRADE SETTLED --------------------
+    // -------------------- TRADE SETTLED (daily P&L TP/SL) --------------------
     derivClient.on('trade_settled', async (trade) => {
       tradeInProgressSym['global'] = false;
       delete lockTimestamps['global'];
@@ -345,14 +345,14 @@ const server = app.listen(PORT, () => {
       const sym = trade.symbol || '?';
       store.addLog('info', `🏁 Trade settled: ${trade.contract_type || '?'} ${sym} – ${result} $${profit.toFixed(2)}`);
 
-      // Update P&L
+      // Update P&L (both session and daily)
       const prevSession = store.state.sessionPnl || 0;
-      const prevDaily = store.state.dailyPnl || 0;
+      const prevDaily   = store.state.dailyPnl   || 0;
       const newSessionPnl = prevSession + profit;
-      const newDailyPnl = prevDaily + profit;
+      const newDailyPnl   = prevDaily   + profit;
       store.updateState({
         sessionPnl: newSessionPnl,
-        dailyPnl: newDailyPnl
+        dailyPnl:   newDailyPnl
       });
 
       // Martingale stake
@@ -365,20 +365,20 @@ const server = app.listen(PORT, () => {
         store.addLog('info', `📈 Stake doubled to $${newStake.toFixed(2)} after loss`);
       }
 
-      // Take Profit / Stop Loss
+      // Take Profit / Stop Loss – based on DAILY P&L
       const tp = parseFloat(store.config?.BOT_TAKE_PROFIT) || 5;
       const sl = parseFloat(store.config?.BOT_STOP_LOSS) || 10;
 
-      if (newSessionPnl >= tp) {
+      if (newDailyPnl >= tp) {
         store.updateState({ active: false });
         const resetTime = getNextMidnightEAT();
         store.updateState({ botResetTime: resetTime });
-        store.addLog('info', `🛑 Take Profit reached ($${newSessionPnl.toFixed(2)}). Bot paused until ${new Date(resetTime).toLocaleTimeString()}`);
-      } else if (newSessionPnl <= -sl) {
+        store.addLog('info', `🛑 Take Profit reached ($${newDailyPnl.toFixed(2)}). Bot paused until ${new Date(resetTime).toLocaleTimeString()}`);
+      } else if (newDailyPnl <= -sl) {
         store.updateState({ active: false });
         const resetTime = getNextMidnightEAT();
         store.updateState({ botResetTime: resetTime });
-        store.addLog('info', `🛑 Stop Loss hit (-$${Math.abs(newSessionPnl).toFixed(2)}). Bot paused until ${new Date(resetTime).toLocaleTimeString()}`);
+        store.addLog('info', `🛑 Stop Loss hit (-$${Math.abs(newDailyPnl).toFixed(2)}). Bot paused until ${new Date(resetTime).toLocaleTimeString()}`);
       }
 
       // Supabase
@@ -414,10 +414,8 @@ const server = app.listen(PORT, () => {
 // Helper: next midnight East Africa Time (UTC+3)
 function getNextMidnightEAT() {
   const now = new Date();
-  // Convert current UTC to EAT
   const eatOffset = 3 * 60 * 60 * 1000;
   const eatNow = new Date(now.getTime() + eatOffset);
-  // Next midnight EAT
   const nextMidnightEAT = new Date(eatNow);
   nextMidnightEAT.setUTCHours(21, 0, 0, 0); // 21:00 UTC = 00:00 EAT
   if (nextMidnightEAT <= now) {
