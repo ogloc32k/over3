@@ -1,331 +1,360 @@
-// services/deriv.js  – proposal uses underlying_symbol (fixed)
-const WebSocket = require('ws');
+// server.js
+require('dotenv').config();
 
-const DERIV_APP_ID = process.env.DERIV_APP_ID;
-const DERIV_PAT = process.env.DERIV_PAT;
+process.on('uncaughtException', err => { console.error('🔥 UNCAUGHT EXCEPTION', err); process.exit(1); });
+process.on('unhandledRejection', reason => { console.error('🔥 UNHANDLED REJECTION', reason); process.exit(1); });
 
-if (!DERIV_APP_ID || !DERIV_PAT) {
-  console.error('❌ DERIV_APP_ID or DERIV_PAT missing');
+const express = require('express');
+const path = require('path');
+const supabase = require('./services/supabase');
+
+let store, logger, derivClient;
+try { store = require('./store'); console.log('✅ Store loaded'); } catch(e) { console.error('❌ store.js:', e); process.exit(1); }
+try { logger = require('./logger'); console.log('✅ Logger loaded'); } catch(e) { console.error('❌ logger.js:', e); process.exit(1); }
+try { derivClient = require('./services/deriv'); console.log('✅ Deriv client loaded'); } catch(e) { console.error('❌ deriv.js:', e); derivClient = null; }
+
+if (derivClient) derivClient.setStore(store);
+
+const app = express();
+app.use(express.json());
+app.use((req, res, next) => { console.log(`📡 ${req.method} ${req.url}`); next(); });
+app.use(express.static(path.join(__dirname, 'public')));
+
+// ============================================================
+// SSE STREAM
+// ============================================================
+app.get('/stream', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive'
+  });
+  res.write('\n');
+
+  const initial = store.getStatePayload();
+  res.write(`data: ${JSON.stringify(initial)}\n\n`);
+
+  const onChange = () => {
+    const payload = store.getStatePayload();
+    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  };
+  store.on('stateChanged', onChange);
+  req.on('close', () => store.removeListener('stateChanged', onChange));
+});
+
+// ============================================================
+// REST API
+// ============================================================
+
+// ---------- Trade‑in‑progress tracker ----------
+const tradeInProgressSym = {};   // symbol → boolean
+
+function tradeInProgressCount() {
+  let count = 0;
+  for (const sym in tradeInProgressSym) {
+    if (tradeInProgressSym[sym]) count++;
+  }
+  return count;
 }
 
-class DerivClient {
-  constructor() {
-    this.ws = null;
-    this.listeners = {};
-    this.accountId = null;
-    this.activeAccountId = null;
-    this.isDemo = true;
-    this._store = null;
-    this._connecting = false;
-    this._reconnectTimer = null;
-    this._reconnectDelay = 1000;
-    this._maxReconnectDelay = 30000;
-    this._retryCount = 0;
-    this._explicitClose = false;
-
-    this._lastBuyParams = null;
-    this._pendingTrades = {};
-  }
-
-  setStore(storeInstance) { this._store = storeInstance; }
-
-  connect() {
-    if (this._connecting) return;
-    this._connecting = true;
-    this._clearReconnectTimer();
-    console.log(`🔵 connect() – isDemo = ${this.isDemo}`);
-    this._connectViaOtp()
-      .then(() => {
-        console.log('✅ Connected to Deriv');
-        this._retryCount = 0;
-        this._reconnectDelay = 1000;
-      })
-      .catch(err => {
-        console.error('❌ Deriv connection failed:', err.message);
-        this._scheduleReconnect();
-      })
-      .finally(() => {
-        this._connecting = false;
-      });
-  }
-
-  setMode(mode) {
-    console.log(`🔵 setMode(${mode})`);
-    this.isDemo = (mode === 'real') ? false : true;
-    this.activeAccountId = null;
-
-    if (this._store) {
-      this._store.updateState({
-        tradingMode: this.isDemo ? 'demo' : 'real',
-        balance: null
-      });
-    }
-
-    this._disconnect(true);
-    this.accountId = null;
-    this.connect();
-  }
-
-  requestHistory(symbol, start, end, count) {
-    const req = { ticks_history: symbol, adjust_start_time: 1, style: 'ticks', granularity: 1 };
-    if (count) req.count = count;
-    else { req.start = start || Math.floor(Date.now()/1000)-3600; req.end = end || Math.floor(Date.now()/1000); }
-    this.send(req);
-  }
-
-  // ----- Trade execution (async) -----
-  async buyContract(params) {
-    this._lastBuyParams = {
-      symbol: params.symbol,
-      contract_type: params.contractType,
-      stake: params.stake || 0,
-      duration_ticks: params.duration,
-      duration_unit: params.durationUnit || 't',
-      bot_name: params.bot_name || 'manual'
-    };
-
-    // Step 1 – proposal (FLATTENED, with underlying_symbol)
-    const proposalReq = {
-      proposal: 1,
-      amount: params.stake,
-      basis: 'stake',
-      contract_type: params.contractType,
-      currency: 'USD',
-      duration: params.duration,
-      duration_unit: params.durationUnit || 't',
-      underlying_symbol: params.symbol            // <-- FIX: was `symbol`
-    };
-
-    console.log('📤 Sending proposal:', JSON.stringify(proposalReq));
-
-    try {
-      const proposal = await this._sendAndWait('proposal', proposalReq);
-      console.log('📥 Proposal response:', JSON.stringify(proposal));
-
-      if (!proposal || !proposal.proposal || !proposal.proposal.id) {
-        console.error('❌ Invalid proposal response:', proposal);
-        return null;
+// Control endpoint (start / stop / set_mode)
+app.post('/api/control', (req, res) => {
+  const { action, mode } = req.body;
+  console.log('🟡 POST /api/control body:', req.body);
+  try {
+    if (action === 'start') {
+      store.updateState({ active: true, locked: false });
+      store.addLog('info', '✅ Bot started');
+      res.json({ message: 'Bot started' });
+    } else if (action === 'stop') {
+      store.updateState({ active: false });
+      store.addLog('info', '⏹️ Bot stopped');
+      res.json({ message: 'Bot stopped' });
+    } else if (action === 'set_mode') {
+      if (tradeInProgressCount() > 0) {
+        return res.json({ error: 'Cannot switch accounts while a trade is active. Wait for it to settle.' });
       }
+      if (derivClient) derivClient.setMode(mode);
+      res.json({ message: `Switched to ${mode}` });
+    }
+    else res.json({ error: 'Unknown action' });
+  } catch (err) { res.json({ error: err.message }); }
+});
 
-      const proposalId = proposal.proposal.id;
-      const buyReq = { buy: proposalId, price: params.stake };
-      console.log('📤 Sending buy:', JSON.stringify(buyReq));
-      this.send(buyReq);
+// Manual trade – locks AFTER Deriv confirms
+app.post('/api/trade/manual', async (req, res) => {
+  try {
+    if (!derivClient) return res.json({ error: 'Deriv client not connected' });
 
-      // Wait for buy confirmation to get contract_id
-      const buyResult = await this._sendAndWait('buy', buyReq);
-      console.log('📥 Buy response:', JSON.stringify(buyResult));
+    const stake = parseFloat(req.body.stake) || store.state.currentStake || 0.35;
+    const balance = store.state.balance ?? 0;
 
-      if (!buyResult || !buyResult.buy || !buyResult.buy.contract_id) {
-        console.error('❌ Invalid buy response:', buyResult);
-        return null;
-      }
+    if (stake < 0.35) return res.json({ error: 'Minimum stake is $0.35' });
+    if (stake > balance) return res.json({ error: `Stake cannot exceed balance of $${balance.toFixed(2)}` });
 
-      const contractId = buyResult.buy.contract_id;
-      this._pendingTrades[contractId] = { ...this._lastBuyParams };
-      this._lastBuyParams = null;
+    const contractId = await derivClient.buyContract({ ...req.body, stake });
+    if (!contractId) {
+      return res.json({ error: 'Trade execution failed on Deriv side' });
+    }
 
-      // Subscribe to contract updates
-      this.send({
-        proposal_open_contract: 1,
-        contract_id: contractId,
-        subscribe: 1
+    tradeInProgressSym[req.body.symbol] = true;
+    store.addLog('info', `📈 Manual trade placed: ${req.body.contractType} ${req.body.symbol}`);
+    res.json({ message: 'Trade request sent' });
+  } catch (err) {
+    if (req.body.symbol) tradeInProgressSym[req.body.symbol] = false;
+    res.json({ error: err.message });
+  }
+});
+
+// Config
+app.get('/api/config', (req, res) => res.json(store.config || {}));
+app.post('/api/config', (req, res) => {
+  try {
+    store.config = { ...store.config, ...req.body };
+    store.emit('configChanged');
+    res.json({ success: true });
+  } catch (err) { res.json({ error: err.message }); }
+});
+
+// ============================================================
+// ANALYTICS – FULL ENDPOINT
+// ============================================================
+app.get('/api/ledger/aggregated', async (req, res) => {
+  try {
+    const { mode = 'session', account = 'demo', start: customStart, end: customEnd } = req.query;
+    const now = new Date();
+    let start, end;
+
+    const modeMap = { 'year': '1y', 'week': '1w', 'month': '1m', '24h': '24h', 'session': 'session' };
+    const cleanMode = modeMap[mode] || mode;
+
+    switch (cleanMode) {
+      case '24h': start = new Date(now.getTime() - 24*60*60*1000); break;
+      case '1w':  start = new Date(now.getTime() - 7*24*60*60*1000); break;
+      case '1m':  start = new Date(now.getTime() - 30*24*60*60*1000); break;
+      case '1y':  start = new Date(now.getTime() - 365*24*60*60*1000); break;
+      case 'custom':
+        if (customStart) start = new Date(customStart);
+        if (customEnd)   end   = new Date(customEnd);
+        if (!start) start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        break;
+      case 'session':
+      default: start = new Date(now.getFullYear(), now.getMonth(), now.getDate()); break;
+    }
+
+    let query = supabase.from('trading_ledger').select('*')
+      .eq('account', account).gte('created_at', start.toISOString());
+    if (end) query = query.lte('created_at', end.toISOString());
+    query = query.order('created_at', { ascending: true });
+
+    const { data: trades, error } = await query;
+
+    if (error || !trades || trades.length === 0) {
+      return res.json({
+        totalProfit: 0, tradeCount: 0, winCount: 0, lossCount: 0,
+        grossProfit: 0, grossLoss: 0, maxDrawdown: 0, totalDuration: 0,
+        avgWin: 0, avgLoss: 0, strikeRate: 0, profitFactor: 0,
+        assetContributions: [], equityData: []
       });
-
-      return contractId;
-    } catch (err) {
-      console.error('❌ Trade execution error:', err.message);
-      return null;
     }
-  }
 
-  _sendAndWait(msgType, payload) {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error(`${msgType} timeout`)), 15000);
-      const handler = (data) => {
-        clearTimeout(timeout);
-        this.off(msgType, handler);
-        resolve(data);
-      };
-      this.on(msgType, handler);
-      this.send(payload);
+    let totalProfit=0, grossProfit=0, grossLoss=0, wins=0, losses=0, sumWin=0, sumLoss=0, sumDuration=0;
+    const assetMap = {};
+    const equityCurve = [];
+    let runningEquity=0, peakEquity=0, maxDrawdown=0;
+    let currentStreak=0, maxWinStreak=0, maxLossStreak=0;
+
+    for (const t of trades) {
+      const pnl = parseFloat(t.profit_loss);
+      totalProfit += pnl;
+      if (pnl > 0) { wins++; grossProfit += pnl; sumWin += pnl; }
+      else if (pnl < 0) { losses++; grossLoss += Math.abs(pnl); sumLoss += pnl; }
+      sumDuration += parseInt(t.duration_ticks) || 0;
+      const asset = t.asset || 'Unknown';
+      assetMap[asset] = (assetMap[asset] || 0) + pnl;
+      runningEquity += pnl;
+      equityCurve.push({ timestamp: t.created_at, equity: runningEquity });
+      if (runningEquity > peakEquity) peakEquity = runningEquity;
+      if (peakEquity > 0) { const dd = ((peakEquity - runningEquity) / peakEquity)*100; if (dd > maxDrawdown) maxDrawdown = dd; }
+      if (pnl > 0) currentStreak = currentStreak >= 0 ? currentStreak+1 : 1;
+      else currentStreak = currentStreak <= 0 ? currentStreak-1 : -1;
+      if (currentStreak > maxWinStreak) maxWinStreak = currentStreak;
+      if (currentStreak < maxLossStreak) maxLossStreak = currentStreak;
+    }
+
+    const total = trades.length;
+    const strikeRate = total>0 ? (wins/total)*100 : 0;
+    let profitFactor = 0;
+    if (grossLoss===0) profitFactor = grossProfit>0 ? parseFloat(grossProfit.toFixed(2)) : 0;
+    else profitFactor = grossProfit / grossLoss;
+    const avgWin = wins>0 ? sumWin/wins : 0;
+    const avgLoss = losses>0 ? Math.abs(sumLoss/losses) : 0;
+    const avgDuration = total>0 ? sumDuration/total : 0;
+    const assetContributions = Object.entries(assetMap).map(([name, pnl]) => ({ name, pnl }));
+
+    res.json({
+      totalProfit, tradeCount: total, winCount: wins, lossCount: losses,
+      grossProfit, grossLoss, maxDrawdown, totalDuration: sumDuration,
+      avgWin, avgLoss, strikeRate, profitFactor,
+      assetContributions, equityData: equityCurve
+    });
+  } catch (err) {
+    console.error('❌ Analytics error:', err);
+    res.json({
+      totalProfit: 0, tradeCount: 0, winCount: 0, lossCount: 0,
+      grossProfit: 0, grossLoss: 0, maxDrawdown: 0, totalDuration: 0,
+      avgWin: 0, avgLoss: 0, strikeRate: 0, profitFactor: 0,
+      assetContributions: [], equityData: []
     });
   }
+});
 
-  // ---------- INTERNAL ----------
-  async _connectViaOtp() {
-    if (!this.accountId) {
-      const accounts = await this._fetchAccounts();
-      const target = accounts.find(a => a.is_virtual === this.isDemo)
-                     || accounts.find(a => a.is_virtual === true);
-      if (!target) throw new Error('No accounts available');
+// ============================================================
+// TEMPORARY DEBUG – inspect bot state and locks
+// ============================================================
+app.get('/debug/state', (req, res) => {
+  res.json({
+    botActive: store.state.active,
+    balance: store.state.balance,
+    account: derivClient?.isDemo ? 'demo' : 'real',
+    activeAccountId: derivClient?.activeAccountId,
+    lockedSymbols: Object.entries(tradeInProgressSym)
+      .filter(([sym, locked]) => locked)
+      .map(([sym]) => sym)
+  });
+});
 
-      this.accountId = target.loginid;
-      this.activeAccountId = target.loginid;
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-      this._emit('balance', {
-        balance: target.balance,
-        currency: target.currency || 'USD',
-        loginid: target.loginid,
-        isDemo: this.isDemo
+// ==================== START SERVER & DERIV ====================
+const PORT = process.env.PORT || 3000;
+const server = app.listen(PORT, () => {
+  console.log(`🚀 Server on port ${PORT}`);
+
+  if (derivClient) {
+    const indicators = require('./engine/indicators');
+    const bot = require('./engine/bot');
+
+    const lastTradeCloseTime = {};
+    const lastProposalTime = {};     // per‑symbol proposal cooldown
+
+    store.on('configChanged', () => {
+      store.tickBuffer.setMaxSize(store.config.ANALYSIS_WINDOW || 500);
+    });
+
+    derivClient.on('balance', (data) => {
+      if (!derivClient.activeAccountId) return;
+
+      let balanceValue, currency, loginid;
+      if (typeof data.balance === 'string' || typeof data.balance === 'number') {
+        balanceValue = data.balance; currency = data.currency || 'USD'; loginid = data.loginid || derivClient.accountId;
+      } else if (data.balance && typeof data.balance === 'object') {
+        balanceValue = data.balance.balance; currency = data.balance.currency || 'USD'; loginid = data.balance.loginid;
+      } else return;
+
+      if (loginid && loginid !== derivClient.activeAccountId) return;
+
+      const mode = data.isDemo !== undefined ? (data.isDemo ? 'demo' : 'real') : (derivClient.isDemo ? 'demo' : 'real');
+      store.updateState({
+        balance: parseFloat(balanceValue),
+        currency,
+        loginid: derivClient.activeAccountId,
+        tradingMode: mode
       });
-      console.log(`🔑 Account: ${this.accountId} balance=${target.balance}`);
-    }
-
-    const otpUrl = `https://api.derivws.com/trading/v1/options/accounts/${this.accountId}/otp`;
-    const otpResp = await fetch(otpUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${DERIV_PAT}`,
-        'Deriv-App-ID': DERIV_APP_ID,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({})
+      logger.info(`💰 Balance updated: ${currency} ${balanceValue} (${mode})`);
     });
 
-    const otpText = await otpResp.text();
-    if (!otpResp.ok || otpText.startsWith('<!DOCTYPE')) throw new Error(`OTP failed: ${otpResp.status}`);
-    const data = JSON.parse(otpText);
-    if (data.errors) throw new Error('OTP API error: ' + JSON.stringify(data.errors));
-
-    const wsUrl = data.data?.url || data.websocket_url;
-    if (!wsUrl) throw new Error('No WebSocket URL');
-    this._openWebSocket(wsUrl);
-  }
-
-  async _fetchAccounts() {
-    const url = 'https://api.derivws.com/trading/v1/options/accounts';
-    const resp = await fetch(url, {
-      headers: { 'Authorization': `Bearer ${DERIV_PAT}`, 'Deriv-App-ID': DERIV_APP_ID }
-    });
-    const text = await resp.text();
-    if (!resp.ok || text.startsWith('<!DOCTYPE')) throw new Error(`Accounts failed: ${resp.status}`);
-    const json = JSON.parse(text);
-    if (json.errors) throw new Error('Accounts error: ' + JSON.stringify(json.errors));
-    const raw = json.data || json.accounts;
-    if (!Array.isArray(raw) || raw.length === 0) throw new Error('No accounts');
-    return raw.map(acc => ({
-      loginid: acc.account_id || acc.loginid,
-      is_virtual: !!(acc.account_type === 'demo' || acc.is_virtual),
-      balance: acc.balance,
-      currency: acc.currency,
-    }));
-  }
-
-  _openWebSocket(wsUrl) {
-    this._disconnect(false);
-    this.ws = new WebSocket(wsUrl);
-    this.ws.on('open', () => {
-      console.log('🔌 WebSocket connected (authenticated)');
-      this._emit('authorized', { loginid: this.accountId });
-      this._subscribeTicks();
-      this.send({ balance: 1, subscribe: 1 });
+    derivClient.on('authorized', (data) => {
+      logger.info(`🔐 Authorized as ${data.loginid || derivClient.activeAccountId}`);
     });
 
-    this.ws.on('message', (data) => {
-      try {
-        const msg = JSON.parse(data);
-        this._handleMessage(msg);
-      } catch (e) {
-        console.error('❌ WS parse error:', e);
-      }
-    });
+    derivClient.on('tick', (tick) => {
+      const symbol = tick.symbol;
+      const price = tick.quote;
 
-    this.ws.on('close', (code, reason) => {
-      console.log(`⚠️ WS closed (${code}). Reason: ${reason?.toString()}`);
-      this.ws = null;
-      if (!this._explicitClose) this._scheduleReconnect();
-      this._explicitClose = false;
-    });
+      store.tickBuffer.push(symbol, price);
+      const prices = store.tickBuffer.get(symbol);
+      if (prices.length < 2) return;
 
-    this.ws.on('error', (err) => console.error('❌ WS error:', err.message));
-  }
+      const history = store.getBandwidthHistory(symbol);
+      const computed = indicators.computeMetrics(symbol, prices, store.config || {}, history);
 
-  _disconnect(explicit = false) {
-    this._explicitClose = explicit;
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.removeAllListeners();
-      this.ws.close();
-    }
-    this.ws = null;
-    if (explicit) this._clearReconnectTimer();
-  }
+      if (computed) {
+        if (computed.bandwidth !== null && computed.bandwidth !== undefined) {
+          store.pushBandwidth(symbol, computed.bandwidth);
+        }
+        store.updateMarketMetrics(symbol, computed);
 
-  _scheduleReconnect() {
-    if (this._reconnectTimer) return;
-    this._retryCount++;
-    const delay = Math.min(this._reconnectDelay * Math.pow(2, this._retryCount - 1), this._maxReconnectDelay);
-    console.log(`⏳ Reconnecting in ${delay/1000}s (attempt ${this._retryCount})`);
-    this._reconnectTimer = setTimeout(() => {
-      this._reconnectTimer = null;
-      this.connect();
-    }, delay);
-  }
+        // Sniper Bot (currently running test bot – replace engine/bot.js for real strategy)
+        if (store.state.active) {
+          // Proposal rate‑limiter: at most one proposal per symbol every 2 seconds
+          const now = Date.now();
+          if (lastProposalTime[symbol] && (now - lastProposalTime[symbol] < 2000)) {
+            return;
+          }
 
-  _clearReconnectTimer() {
-    if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
-  }
-
-  _handleMessage(msg) {
-    if (msg.error) { console.error('Deriv error:', msg.error); return; }
-
-    if (msg.tick) { this._emit('tick', msg.tick); return; }
-    if (msg.balance) { this._emit('balance', msg.balance); return; }
-    if (msg.proposal) { this._emit('proposal', msg); return; }
-    if (msg.buy) { this._emit('buy', msg); return; }
-
-    if (msg.proposal_open_contract) {
-      const settlement = msg.proposal_open_contract;
-      if (settlement.is_sold === 1) {
-        const contractId = settlement.contract_id;
-        const pending = contractId ? this._pendingTrades[contractId] : null;
-        if (pending) {
-          delete this._pendingTrades[contractId];
-          this._emit('trade_settled', {
-            symbol: pending.symbol,
-            contract_type: pending.contract_type,
-            stake: pending.stake,
-            duration_ticks: pending.duration_ticks,
-            duration_unit: pending.duration_unit,
-            bot_name: pending.bot_name || 'manual',
-            contract_id: contractId,
-            entry_price: settlement.entry_spot,
-            exit_price: settlement.exit_spot,
-            payout: settlement.payout,
-            profit: settlement.profit,
-            barrier: settlement.barrier,
-            date_expiry: settlement.date_expiry,
+          const signal = bot.evaluate(symbol, computed, store.state, {
+            tradeInProgress: tradeInProgressSym[symbol] || false,
+            lastCloseTime: lastTradeCloseTime[symbol] || 0
           });
+
+          if (signal) {
+            const stake = signal.stake || store.state.currentStake || 0.35;
+            const balance = store.state.balance ?? 0;
+            if (stake < 0.35 || stake > balance) return;
+
+            lastProposalTime[symbol] = now;
+
+            derivClient.buyContract(signal).then(contractId => {
+              if (contractId) {
+                tradeInProgressSym[symbol] = true;
+                store.addLog('info', `🤖 Bot trade: ${signal.contractType} ${symbol}`);
+              }
+            });
+          }
         }
       }
-      return;
-    }
+    });
 
-    if (msg.history) { this._emit('history', msg.history); return; }
-    if (msg.msg_type) {
-      switch (msg.msg_type) {
-        case 'tick': this._emit('tick', msg.tick); break;
-        case 'balance': this._emit('balance', msg.balance); break;
-        case 'proposal': this._emit('proposal', msg); break;
-        case 'buy': this._emit('buy', msg); break;
-        case 'proposal_open_contract':
-          if (msg.proposal_open_contract.is_sold === 1) this._handleMessage(msg.proposal_open_contract);
-          break;
-        case 'history': this._emit('history', msg.history); break;
+    // -------------------- TRADE SETTLED --------------------
+    derivClient.on('trade_settled', async (trade) => {
+      if (trade.symbol) {
+        tradeInProgressSym[trade.symbol] = false;
+        lastTradeCloseTime[trade.symbol] = Date.now();
       }
-    }
+
+      const profit = parseFloat(trade.profit || 0);
+      const result = profit > 0 ? 'WIN' : (profit < 0 ? 'LOSS' : 'BREAKEVEN');
+      store.addLog('info', `🏁 Trade settled: ${trade.contract_type || '?'} ${trade.symbol || '?'} – ${result} $${profit.toFixed(2)}`);
+
+      try {
+        const account = derivClient.isDemo ? 'demo' : 'real';
+        const record = {
+          asset: trade.symbol,
+          contract_type: trade.contract_type,
+          stake: parseFloat(trade.stake),
+          payout: parseFloat(trade.payout || 0),
+          profit_loss: profit,
+          is_win: profit > 0,
+          barrier: trade.barrier ? parseFloat(trade.barrier) : null,
+          exit_tick: trade.exit_price ? parseFloat(trade.exit_price) : null,
+          contract_id: trade.contract_id,
+          entry_price: trade.entry_price ? parseFloat(trade.entry_price) : null,
+          exit_price: trade.exit_price ? parseFloat(trade.exit_price) : null,
+          duration_ticks: parseInt(trade.duration_ticks) || 0,
+          bot_name: trade.bot_name || 'manual',
+          account: account
+        };
+
+        const { error } = await supabase.from('trading_ledger').insert(record);
+        if (error) console.error('❌ Failed to insert trade:', error);
+        else console.log('✅ Trade recorded:', record.asset, profit, 'account:', account);
+      } catch (e) { console.error('❌ trade_settled handler error:', e); }
+    });
+
+    derivClient.connect();
   }
+});
 
-  _subscribeTicks() {
-    const symbols = ['R_10','R_25','R_50','R_75','R_100','1HZ10V','1HZ25V','1HZ50V','1HZ75V','1HZ100V'];
-    symbols.forEach(s => this.send({ ticks: s, subscribe: 1 }));
-    console.log('📊 Subscribed to ticks');
-  }
-
-  send(data) { if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(data)); }
-  on(e, cb) { if (!this.listeners[e]) this.listeners[e] = []; this.listeners[e].push(cb); }
-  off(e, cb) { if (!this.listeners[e]) return; this.listeners[e] = this.listeners[e].filter(c => c !== cb); }
-  _emit(e, d) { (this.listeners[e] || []).forEach(cb => cb(d)); }
-}
-
-module.exports = new DerivClient();
+process.on('SIGTERM', () => server.close(() => process.exit(0)));
