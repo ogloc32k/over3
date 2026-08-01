@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>QUANTCORE // TERMINAL v6.0</title>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <link rel="stylesheet" href="css/styles.css?v=16">
-  <link rel="stylesheet" href="css/styles-mobile.css?v=16" media="(max-width: 768px)">
+  <link rel="stylesheet" href="css/styles.css?v=17">
+  <link rel="stylesheet" href="css/styles-mobile.css?v=17" media="(max-width: 768px)">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
@@ -55,6 +55,12 @@
   <!-- ====== HEADER ====== -->
   <header class="app-header">
     <div class="left">
+      <!-- Mobile profile button FIRST (hidden on desktop) -->
+      <button class="mobile-profile-btn" id="mobileProfileBtn" onclick="openNavDrawer()">
+        <span class="profile-avatar">👤</span>
+        <span class="profile-mode" id="header-profile-mode">DEMO</span>
+      </button>
+      <!-- Brand -->
       <div class="app-brand">QUANTCORE<span>//</span>TERMINAL <small>v6.0</small></div>
       <div class="header-tabs">
         <button class="nav-tab active" data-tab="tab-home">Home</button>
@@ -64,10 +70,6 @@
         <button class="nav-tab" data-tab="tab-logs">Logs</button>
         <button class="nav-tab" data-tab="tab-settings">Settings</button>
       </div>
-      <button class="mobile-profile-btn" id="mobileProfileBtn" onclick="openNavDrawer()">
-        <span class="profile-avatar">👤</span>
-        <span class="profile-mode" id="header-profile-mode">DEMO</span>
-      </button>
     </div>
     <div class="header-right">
       <span class="header-status" id="header-status">● IDLE</span>
@@ -228,8 +230,8 @@
             <div class="bot-card" id="botCard-quantcore">
               <div class="bot-card-header">
                 <div class="bot-info">
-                  <div class="bot-name">QuantCore v6</div>
-                  <div class="bot-desc">Bollinger Breakout · Volatility Indices</div>
+                  <div class="bot-name">Sniper Bot</div>
+                  <div class="bot-desc">Confluence Strategy · All Volatility Indices</div>
                 </div>
                 <div class="bot-status-badge idle" id="bot-status-badge">IDLE</div>
               </div>
@@ -300,45 +302,20 @@
         <div class="log-stream" id="log-stream"></div>
       </div>
 
-      <!-- SETTINGS -->
+      <!-- SETTINGS (only sniper bot parameters) -->
       <div id="tab-settings" class="tab-page">
         <div class="settings-grid">
           <div class="settings-section">
-            <h4>📊 Breakout Parameters</h4>
+            <h4>🤖 Sniper Bot Configuration</h4>
             <div class="settings-subgrid">
-              <div class="setting-item"><label>Analysis Window <span class="hint">(ticks)</span></label><input type="number" id="config-ANALYSIS_WINDOW" step="1" value="500" /></div>
-              <div class="setting-item"><label>Bollinger Period <span class="hint">(ticks)</span></label><input type="number" id="config-BOLLINGER_PERIOD" step="1" value="20" /></div>
-              <div class="setting-item"><label>Bollinger Std Dev</label><input type="number" id="config-BOLLINGER_STD" step="0.1" value="2" /></div>
-              <div class="setting-item"><label>RSI Period <span class="hint">(ticks)</span></label><input type="number" id="config-RSI_PERIOD" step="1" value="20" /></div>
-              <div class="setting-item"><label>Oversold Threshold <span class="hint">%</span></label><input type="number" id="config-OVERSOLD_THRESHOLD" step="1" value="30" /></div>
-              <div class="setting-item"><label>Overbought Threshold <span class="hint">%</span></label><input type="number" id="config-OVERBOUGHT_THRESHOLD" step="1" value="70" /></div>
-              <div class="setting-item"><label>Min Volatility <span class="hint">%</span></label><input type="number" id="config-MIN_VOLATILITY_PERCENT" step="0.01" value="0.06" /></div>
-              <div class="setting-item"><label>Duration <span class="hint">ticks</span></label><input type="number" id="config-DURATION_SECONDS" step="1" value="7" /></div>
-            </div>
-          </div>
-          <div class="settings-section">
-            <h4>⏱ Timing & Cooldowns</h4>
-            <div class="settings-subgrid">
-              <div class="setting-item"><label>Trigger Interval <span class="hint">(seconds)</span></label><input type="number" id="config-MIN_TRIGGER_INTERVAL_SECONDS" step="1" value="300" /></div>
-              <div class="setting-item"><label>Max Consecutive Losses</label><select id="config-MAX_CONSECUTIVE_LOSSES"><option value="1">1</option><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option><option value="5">5</option></select></div>
-              <div class="setting-item"><label>Loss Cooldown <span class="hint">(minutes)</span></label><input type="number" id="config-LOSS_COOLDOWN_MINUTES" step="1" value="5" /></div>
-            </div>
-          </div>
-          <div class="settings-section">
-            <h4>💰 Risk Management</h4>
-            <div class="settings-subgrid">
-              <div class="setting-item"><label>Risk per Trade <span class="hint">%</span></label><input type="number" id="config-RISK_PERCENT" step="0.1" value="1" /></div>
-              <div class="setting-item"><label>Daily TP <span class="hint">%</span></label><input type="number" id="config-TP_PERCENT" step="0.1" value="5" /></div>
-              <div class="setting-item"><label>Daily SL <span class="hint">%</span></label><input type="number" id="config-SL_PERCENT" step="0.1" value="10" /></div>
-              <div class="setting-item"><label>Min Stake <span class="hint">$</span></label><input type="number" id="config-MIN_STAKE" step="0.01" value="0.35" /></div>
-            </div>
-          </div>
-          <div class="settings-section">
-            <h4>⚙️ Trade Execution</h4>
-            <div class="settings-subgrid">
-              <div class="setting-item"><label>Cooldown Ticks</label><input type="number" id="config-COOLDOWN_TICKS" step="1" value="5" /></div>
-              <div class="setting-item"><label>Settlement Timeout <span class="hint">(seconds)</span></label><input type="number" id="config-SETTLEMENT_TIMEOUT_SECONDS" step="1" value="15" /></div>
-              <div class="setting-item"><label>P&L Sync <span class="hint">(seconds)</span></label><input type="number" id="config-PNL_SYNC_INTERVAL_SECONDS" step="1" value="300" /></div>
+              <div class="setting-item"><label>Trade Duration (seconds)</label><input type="number" id="config-BOT_DURATION" step="1" value="70" /></div>
+              <div class="setting-item"><label>Base Stake ($)</label><input type="number" id="config-BOT_BASE_STAKE" step="0.01" value="0.35" /></div>
+              <div class="setting-item"><label>Take Profit ($)</label><input type="number" id="config-BOT_TAKE_PROFIT" step="0.01" value="5" /></div>
+              <div class="setting-item"><label>Stop Loss ($)</label><input type="number" id="config-BOT_STOP_LOSS" step="0.01" value="10" /></div>
+              <div class="setting-item"><label>Cooldown (seconds)</label><input type="number" id="config-BOT_COOLDOWN" step="1" value="5" /></div>
+              <div class="setting-item"><label>BB Squeeze Threshold (%)</label><input type="number" id="config-BOT_SQUEEZE" step="1" value="60" /></div>
+              <div class="setting-item"><label>RSI Oversold</label><input type="number" id="config-BOT_RSI_OVERSOLD" step="1" value="30" /></div>
+              <div class="setting-item"><label>RSI Overbought</label><input type="number" id="config-BOT_RSI_OVERBOUGHT" step="1" value="70" /></div>
             </div>
           </div>
         </div>
