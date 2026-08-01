@@ -1,4 +1,4 @@
-// engine/bot.js – TEST MODE (returns symbol, fires on any tick when active)
+// engine/bot.js – TEST MODE (short cooldown, stake comes from state)
 function evaluate(symbol, metrics, state, options = {}) {
   if (!state.active) {
     console.log(`⛔ Bot inactive – ${symbol} skipped`);
@@ -9,7 +9,8 @@ function evaluate(symbol, metrics, state, options = {}) {
     return null;
   }
   const now = Date.now();
-  if (options.lastCloseTime && (now - options.lastCloseTime < 30000)) {
+  // Cooldown reduced to 5 seconds for fast testing
+  if (options.lastCloseTime && (now - options.lastCloseTime < 5000)) {
     console.log(`⏳ Cooldown for ${symbol}`);
     return null;
   }
@@ -20,11 +21,11 @@ function evaluate(symbol, metrics, state, options = {}) {
 
   console.log(`✅ All guards passed for ${symbol} – firing test trade`);
   return {
-    symbol: symbol,            // ← REQUIRED
+    symbol: symbol,
     contractType: 'CALL',
     duration: 7,
     durationUnit: 't',
-    stake: 0.35
+    stake: state.currentStake || 0.35        // ← uses the dynamic stake
   };
 }
 
