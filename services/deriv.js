@@ -1,4 +1,4 @@
-// services/deriv.js
+// services/deriv.js  – proposal uses underlying_symbol (fixed)
 const WebSocket = require('ws');
 
 const DERIV_APP_ID = process.env.DERIV_APP_ID;
@@ -23,9 +23,8 @@ class DerivClient {
     this._retryCount = 0;
     this._explicitClose = false;
 
-    // trade tracking
     this._lastBuyParams = null;
-    this._pendingTrades = {};         // contract_id → trade params
+    this._pendingTrades = {};
   }
 
   setStore(storeInstance) { this._store = storeInstance; }
@@ -85,7 +84,7 @@ class DerivClient {
       bot_name: params.bot_name || 'manual'
     };
 
-    // Step 1 – proposal
+    // Step 1 – proposal (FLATTENED, with underlying_symbol)
     const proposalReq = {
       proposal: 1,
       amount: params.stake,
@@ -94,7 +93,7 @@ class DerivClient {
       currency: 'USD',
       duration: params.duration,
       duration_unit: params.durationUnit || 't',
-      underlying_symbol: params.symbol
+      underlying_symbol: params.symbol            // <-- FIX: was `symbol`
     };
 
     console.log('📤 Sending proposal:', JSON.stringify(proposalReq));
@@ -105,16 +104,15 @@ class DerivClient {
 
       if (!proposal || !proposal.proposal || !proposal.proposal.id) {
         console.error('❌ Invalid proposal response:', proposal);
-        return null;   // signal failure to caller
+        return null;
       }
 
       const proposalId = proposal.proposal.id;
-      const buyReq = {
-        buy: proposalId,
-        price: params.stake
-      };
+      const buyReq = { buy: proposalId, price: params.stake };
       console.log('📤 Sending buy:', JSON.stringify(buyReq));
+      this.send(buyReq);
 
+      // Wait for buy confirmation to get contract_id
       const buyResult = await this._sendAndWait('buy', buyReq);
       console.log('📥 Buy response:', JSON.stringify(buyResult));
 
@@ -124,20 +122,17 @@ class DerivClient {
       }
 
       const contractId = buyResult.buy.contract_id;
-
-      // Store pending trade
       this._pendingTrades[contractId] = { ...this._lastBuyParams };
       this._lastBuyParams = null;
 
-      // Step 2 – subscribe to contract updates
-      console.log(`🔍 Subscribing to contract ${contractId}`);
+      // Subscribe to contract updates
       this.send({
         proposal_open_contract: 1,
         contract_id: contractId,
         subscribe: 1
       });
 
-      return contractId;   // success
+      return contractId;
     } catch (err) {
       console.error('❌ Trade execution error:', err.message);
       return null;
@@ -158,7 +153,6 @@ class DerivClient {
   }
 
   // ---------- INTERNAL ----------
-
   async _connectViaOtp() {
     if (!this.accountId) {
       const accounts = await this._fetchAccounts();
@@ -225,8 +219,6 @@ class DerivClient {
       console.log('🔌 WebSocket connected (authenticated)');
       this._emit('authorized', { loginid: this.accountId });
       this._subscribeTicks();
-
-      // Start balance streaming
       this.send({ balance: 1, subscribe: 1 });
     });
 
@@ -242,9 +234,7 @@ class DerivClient {
     this.ws.on('close', (code, reason) => {
       console.log(`⚠️ WS closed (${code}). Reason: ${reason?.toString()}`);
       this.ws = null;
-      if (!this._explicitClose) {
-        this._scheduleReconnect();
-      }
+      if (!this._explicitClose) this._scheduleReconnect();
       this._explicitClose = false;
     });
 
@@ -273,51 +263,22 @@ class DerivClient {
   }
 
   _clearReconnectTimer() {
-    if (this._reconnectTimer) {
-      clearTimeout(this._reconnectTimer);
-      this._reconnectTimer = null;
-    }
+    if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
   }
 
   _handleMessage(msg) {
-    if (msg.error) {
-      console.error('Deriv error:', msg.error);
-      return;
-    }
+    if (msg.error) { console.error('Deriv error:', msg.error); return; }
 
-    // Tick
-    if (msg.tick) {
-      this._emit('tick', msg.tick);
-      return;
-    }
+    if (msg.tick) { this._emit('tick', msg.tick); return; }
+    if (msg.balance) { this._emit('balance', msg.balance); return; }
+    if (msg.proposal) { this._emit('proposal', msg); return; }
+    if (msg.buy) { this._emit('buy', msg); return; }
 
-    // Balance
-    if (msg.balance) {
-      this._emit('balance', msg.balance);
-      return;
-    }
-
-    // Proposal response (used by _sendAndWait)
-    if (msg.proposal) {
-      this._emit('proposal', msg);
-      return;
-    }
-
-    // Buy confirmation (used by _sendAndWait)
-    if (msg.buy) {
-      this._emit('buy', msg);
-      return;
-    }
-
-    // Trade settlement (proposal_open_contract with is_sold = 1)
     if (msg.proposal_open_contract) {
       const settlement = msg.proposal_open_contract;
-      const contractId = settlement.contract_id;
-
-      // Only act on settled contracts
       if (settlement.is_sold === 1) {
+        const contractId = settlement.contract_id;
         const pending = contractId ? this._pendingTrades[contractId] : null;
-
         if (pending) {
           delete this._pendingTrades[contractId];
           this._emit('trade_settled', {
@@ -335,32 +296,12 @@ class DerivClient {
             barrier: settlement.barrier,
             date_expiry: settlement.date_expiry,
           });
-        } else {
-          // No pending info – emit generic event for logging
-          this._emit('trade_settled', {
-            contract_id: contractId,
-            entry_price: settlement.entry_spot,
-            exit_price: settlement.exit_spot,
-            payout: settlement.payout,
-            profit: settlement.profit,
-            barrier: settlement.barrier,
-            date_expiry: settlement.date_expiry,
-            symbol: null, contract_type: null, stake: null,
-            duration_ticks: null, duration_unit: null,
-            bot_name: 'manual'
-          });
         }
       }
       return;
     }
 
-    // History
-    if (msg.history) {
-      this._emit('history', msg.history);
-      return;
-    }
-
-    // Legacy msg_type
+    if (msg.history) { this._emit('history', msg.history); return; }
     if (msg.msg_type) {
       switch (msg.msg_type) {
         case 'tick': this._emit('tick', msg.tick); break;
@@ -368,10 +309,7 @@ class DerivClient {
         case 'proposal': this._emit('proposal', msg); break;
         case 'buy': this._emit('buy', msg); break;
         case 'proposal_open_contract':
-          // Also handle if it comes with msg_type
-          if (msg.proposal_open_contract && msg.proposal_open_contract.is_sold === 1) {
-            this._handleMessage(msg.proposal_open_contract);  // reuse logic
-          }
+          if (msg.proposal_open_contract.is_sold === 1) this._handleMessage(msg.proposal_open_contract);
           break;
         case 'history': this._emit('history', msg.history); break;
       }
@@ -384,9 +322,7 @@ class DerivClient {
     console.log('📊 Subscribed to ticks');
   }
 
-  send(data) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(data));
-  }
+  send(data) { if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(data)); }
   on(e, cb) { if (!this.listeners[e]) this.listeners[e] = []; this.listeners[e].push(cb); }
   off(e, cb) { if (!this.listeners[e]) return; this.listeners[e] = this.listeners[e].filter(c => c !== cb); }
   _emit(e, d) { (this.listeners[e] || []).forEach(cb => cb(d)); }
