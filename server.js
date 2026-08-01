@@ -1,4 +1,4 @@
-// server.js – v16: lock cleanup, live P&L, stake multiplier
+// server.js – v17: single global lock, martingale, TP/SL support
 require('dotenv').config();
 
 process.on('uncaughtException', err => { console.error('🔥 UNCAUGHT EXCEPTION', err); process.exit(1); });
@@ -31,11 +31,10 @@ app.get('/stream', (req, res) => {
 });
 
 // REST
-const tradeInProgressSym = {};
-function tradeInProgressCount() {
-  let count = 0;
-  for (const sym in tradeInProgressSym) if (tradeInProgressSym[sym]) count++;
-  return count;
+const tradeInProgressSym = {};   // we now use a single key 'global'
+
+function isTradeActive() {
+  return tradeInProgressSym['global'] === true;
 }
 
 app.post('/api/control', (req, res) => {
@@ -48,12 +47,11 @@ app.post('/api/control', (req, res) => {
       res.json({ message: 'Bot started' });
     } else if (action === 'stop') {
       store.updateState({ active: false });
-      // Release all locks immediately
-      for (const sym in tradeInProgressSym) tradeInProgressSym[sym] = false;
+      tradeInProgressSym['global'] = false;   // unlock
       store.addLog('info', '⏹️ Bot stopped');
       res.json({ message: 'Bot stopped' });
     } else if (action === 'set_mode') {
-      if (tradeInProgressCount() > 0) return res.json({ error: 'Cannot switch accounts while a trade is active.' });
+      if (isTradeActive()) return res.json({ error: 'Cannot switch accounts while a trade is active.' });
       if (derivClient) derivClient.setMode(mode);
       res.json({ message: `Switched to ${mode}` });
     } else res.json({ error: 'Unknown action' });
@@ -69,11 +67,11 @@ app.post('/api/trade/manual', async (req, res) => {
     if (stake > balance) return res.json({ error: `Stake cannot exceed balance of $${balance.toFixed(2)}` });
     const contractId = await derivClient.buyContract({ ...req.body, stake });
     if (!contractId) return res.json({ error: 'Trade execution failed on Deriv side' });
-    tradeInProgressSym[req.body.symbol] = true;
+    tradeInProgressSym['global'] = true;
     store.addLog('info', `📈 Manual trade placed: ${req.body.contractType} ${req.body.symbol}`);
     res.json({ message: 'Trade request sent' });
   } catch (err) {
-    if (req.body.symbol) tradeInProgressSym[req.body.symbol] = false;
+    tradeInProgressSym['global'] = false;
     res.json({ error: err.message });
   }
 });
@@ -82,7 +80,7 @@ app.get('/api/config', (req, res) => res.json(store.config || {}));
 app.post('/api/config', (req, res) => { store.config = { ...store.config, ...req.body }; store.emit('configChanged'); res.json({ success: true }); });
 
 // Analytics (unchanged)
-app.get('/api/ledger/aggregated', async (req, res) => { /* same as before */ });
+app.get('/api/ledger/aggregated', async (req, res) => { /* ... same as before ... */ });
 
 app.get('/debug/state', (req, res) => {
   res.json({
@@ -90,9 +88,7 @@ app.get('/debug/state', (req, res) => {
     balance: store.state.balance,
     account: derivClient?.isDemo ? 'demo' : 'real',
     activeAccountId: derivClient?.activeAccountId,
-    lockedSymbols: Object.entries(tradeInProgressSym)
-      .filter(([sym, locked]) => locked)
-      .map(([sym]) => sym)
+    tradeActive: isTradeActive()
   });
 });
 
@@ -108,21 +104,8 @@ const server = app.listen(PORT, () => {
     const indicators = require('./engine/indicators');
     const bot = require('./engine/bot');
 
-    const lastTradeCloseTime = {};
-    const lastProposalTime = {};
-    const lockTimestamps = {};        // symbol → Date.now() when locked
-
-    // Automatic lock cleanup every 30 seconds
-    setInterval(() => {
-      const now = Date.now();
-      for (const sym in tradeInProgressSym) {
-        if (tradeInProgressSym[sym] && lockTimestamps[sym] && (now - lockTimestamps[sym] > 120000)) {
-          console.log(`🔓 Force‑unlocking ${sym} – trade assumed settled`);
-          tradeInProgressSym[sym] = false;
-          delete lockTimestamps[sym];
-        }
-      }
-    }, 30000);
+    let lastTradeCloseTime = 0;           // single global cooldown
+    let lastProposalTime = 0;
 
     store.on('configChanged', () => store.tickBuffer.setMaxSize(store.config.ANALYSIS_WINDOW || 500));
 
@@ -156,25 +139,24 @@ const server = app.listen(PORT, () => {
         if (computed.bandwidth !== null && computed.bandwidth !== undefined) store.pushBandwidth(symbol, computed.bandwidth);
         store.updateMarketMetrics(symbol, computed);
 
-        if (store.state.active) {
+        if (store.state.active && !isTradeActive()) {
           const now = Date.now();
-          if (lastProposalTime[symbol] && (now - lastProposalTime[symbol] < 2000)) return;
+          if (lastProposalTime && (now - lastProposalTime < 2000)) return;
 
           const signal = bot.evaluate(symbol, computed, store.state, {
-            tradeInProgress: tradeInProgressSym[symbol] || false,
-            lastCloseTime: lastTradeCloseTime[symbol] || 0
+            tradeInProgress: isTradeActive(),
+            lastCloseTime: lastTradeCloseTime
           });
           if (signal) {
             const stake = signal.stake || store.state.currentStake || 0.35;
             const balance = store.state.balance ?? 0;
             if (stake < 0.35 || stake > balance) return;
-            lastProposalTime[symbol] = now;
+            lastProposalTime = now;
 
             derivClient.buyContract(signal).then(contractId => {
               if (contractId) {
-                tradeInProgressSym[symbol] = true;
-                lockTimestamps[symbol] = Date.now();
-                store.addLog('info', `🤖 Bot trade: ${signal.contractType} ${symbol}`);
+                tradeInProgressSym['global'] = true;
+                store.addLog('info', `🤖 Bot trade: ${signal.contractType} ${signal.symbol}`);
               }
             });
           }
@@ -182,21 +164,17 @@ const server = app.listen(PORT, () => {
       }
     });
 
-    // -------------------- TRADE SETTLED (with P&L and multiplier) --------------------
+    // -------------------- TRADE SETTLED --------------------
     derivClient.on('trade_settled', async (trade) => {
-      if (trade.symbol) {
-        tradeInProgressSym[trade.symbol] = false;
-        delete lockTimestamps[trade.symbol];
-        lastTradeCloseTime[trade.symbol] = Date.now();
-      }
+      tradeInProgressSym['global'] = false;
+      lastTradeCloseTime = Date.now();
 
       const profit = parseFloat(trade.profit || 0);
       const result = profit > 0 ? 'WIN' : (profit < 0 ? 'LOSS' : 'BREAKEVEN');
-      const ct = trade.contract_type || trade.symbol ? (trade.symbol ? '?' : trade.contract_type) : '?';
       const sym = trade.symbol || '?';
-      store.addLog('info', `🏁 Trade settled: ${ct} ${sym} – ${result} $${profit.toFixed(2)}`);
+      store.addLog('info', `🏁 Trade settled: ${trade.contract_type || '?'} ${sym} – ${result} $${profit.toFixed(2)}`);
 
-      // --- Update live P&L ---
+      // Update P&L
       const prevSession = store.state.sessionPnl || 0;
       const prevDaily = store.state.dailyPnl || 0;
       store.updateState({
@@ -204,19 +182,17 @@ const server = app.listen(PORT, () => {
         dailyPnl: prevDaily + profit
       });
 
-      // --- Stake multiplier ---
-      if (trade.bot_name === 'sniper' || trade.bot_name === 'manual') {
-        if (profit > 0) {
-          const newStake = Math.min((store.state.currentStake || 0.35) * 2, 100);
-          store.updateState({ currentStake: newStake });
-          store.addLog('info', `📈 Stake doubled to $${newStake.toFixed(2)} after win`);
-        } else {
-          store.updateState({ currentStake: 0.35 });
-          store.addLog('info', `📉 Stake reset to $0.35 after loss`);
-        }
+      // Martingale stake update
+      if (profit > 0) {
+        store.updateState({ currentStake: 0.35 });
+        store.addLog('info', `📉 Stake reset to $0.35 after win`);
+      } else {
+        const newStake = Math.min((store.state.currentStake || 0.35) * 2, 100);
+        store.updateState({ currentStake: newStake });
+        store.addLog('info', `📈 Stake doubled to $${newStake.toFixed(2)} after loss`);
       }
 
-      // --- Supabase ---
+      // Supabase recording
       try {
         const account = derivClient.isDemo ? 'demo' : 'real';
         const record = {
