@@ -6,6 +6,10 @@ const TickBuffer = require('./engine/tickBuffer');
 class Store extends EventEmitter {
   constructor() {
     super();
+
+    // Create bandwidthHistory BEFORE calling _initMetrics
+    this.bandwidthHistory = {};
+
     this.state = {
       tradingMode: 'demo',
       balance: null,
@@ -19,11 +23,10 @@ class Store extends EventEmitter {
       loginid: '',
       currency: 'USD',
       marketMetrics: this._initMetrics(),
-      botResetTime: null           // ← added
+      botResetTime: null
     };
     this.config = {};
     this.tickBuffer = new TickBuffer(500);
-    this.bandwidthHistory = {};
   }
 
   _initMetrics() {
@@ -40,6 +43,7 @@ class Store extends EventEmitter {
         tickDirections: [], supportPct: null, resistancePct: null,
         risePct: 0, fallPct: 0, lastPrices: []
       };
+      // Now safe because this.bandwidthHistory is already an object
       this.bandwidthHistory[s] = [];
     });
     return metrics;
