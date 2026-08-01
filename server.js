@@ -20,9 +20,7 @@ app.use(express.json());
 app.use((req, res, next) => { console.log(`📡 ${req.method} ${req.url}`); next(); });
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ============================================================
-// SSE STREAM
-// ============================================================
+// SSE
 app.get('/stream', (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -42,22 +40,14 @@ app.get('/stream', (req, res) => {
   req.on('close', () => store.removeListener('stateChanged', onChange));
 });
 
-// ============================================================
-// REST API
-// ============================================================
-
-// ---------- Trade‑in‑progress tracker ----------
-const tradeInProgressSym = {};   // symbol → boolean
-
+// REST
+const tradeInProgressSym = {};
 function tradeInProgressCount() {
   let count = 0;
-  for (const sym in tradeInProgressSym) {
-    if (tradeInProgressSym[sym]) count++;
-  }
+  for (const sym in tradeInProgressSym) if (tradeInProgressSym[sym]) count++;
   return count;
 }
 
-// Control endpoint (start / stop / set_mode)
 app.post('/api/control', (req, res) => {
   const { action, mode } = req.body;
   console.log('🟡 POST /api/control body:', req.body);
@@ -71,32 +61,22 @@ app.post('/api/control', (req, res) => {
       store.addLog('info', '⏹️ Bot stopped');
       res.json({ message: 'Bot stopped' });
     } else if (action === 'set_mode') {
-      if (tradeInProgressCount() > 0) {
-        return res.json({ error: 'Cannot switch accounts while a trade is active. Wait for it to settle.' });
-      }
+      if (tradeInProgressCount() > 0) return res.json({ error: 'Cannot switch accounts while a trade is active.' });
       if (derivClient) derivClient.setMode(mode);
       res.json({ message: `Switched to ${mode}` });
-    }
-    else res.json({ error: 'Unknown action' });
+    } else res.json({ error: 'Unknown action' });
   } catch (err) { res.json({ error: err.message }); }
 });
 
-// Manual trade – locks AFTER Deriv confirms
 app.post('/api/trade/manual', async (req, res) => {
   try {
     if (!derivClient) return res.json({ error: 'Deriv client not connected' });
-
     const stake = parseFloat(req.body.stake) || store.state.currentStake || 0.35;
     const balance = store.state.balance ?? 0;
-
     if (stake < 0.35) return res.json({ error: 'Minimum stake is $0.35' });
     if (stake > balance) return res.json({ error: `Stake cannot exceed balance of $${balance.toFixed(2)}` });
-
     const contractId = await derivClient.buyContract({ ...req.body, stake });
-    if (!contractId) {
-      return res.json({ error: 'Trade execution failed on Deriv side' });
-    }
-
+    if (!contractId) return res.json({ error: 'Trade execution failed on Deriv side' });
     tradeInProgressSym[req.body.symbol] = true;
     store.addLog('info', `📈 Manual trade placed: ${req.body.contractType} ${req.body.symbol}`);
     res.json({ message: 'Trade request sent' });
@@ -106,7 +86,6 @@ app.post('/api/trade/manual', async (req, res) => {
   }
 });
 
-// Config
 app.get('/api/config', (req, res) => res.json(store.config || {}));
 app.post('/api/config', (req, res) => {
   try {
@@ -116,18 +95,14 @@ app.post('/api/config', (req, res) => {
   } catch (err) { res.json({ error: err.message }); }
 });
 
-// ============================================================
-// ANALYTICS – FULL ENDPOINT
-// ============================================================
+// Analytics
 app.get('/api/ledger/aggregated', async (req, res) => {
   try {
     const { mode = 'session', account = 'demo', start: customStart, end: customEnd } = req.query;
     const now = new Date();
     let start, end;
-
     const modeMap = { 'year': '1y', 'week': '1w', 'month': '1m', '24h': '24h', 'session': 'session' };
     const cleanMode = modeMap[mode] || mode;
-
     switch (cleanMode) {
       case '24h': start = new Date(now.getTime() - 24*60*60*1000); break;
       case '1w':  start = new Date(now.getTime() - 7*24*60*60*1000); break;
@@ -141,14 +116,11 @@ app.get('/api/ledger/aggregated', async (req, res) => {
       case 'session':
       default: start = new Date(now.getFullYear(), now.getMonth(), now.getDate()); break;
     }
-
     let query = supabase.from('trading_ledger').select('*')
       .eq('account', account).gte('created_at', start.toISOString());
     if (end) query = query.lte('created_at', end.toISOString());
     query = query.order('created_at', { ascending: true });
-
     const { data: trades, error } = await query;
-
     if (error || !trades || trades.length === 0) {
       return res.json({
         totalProfit: 0, tradeCount: 0, winCount: 0, lossCount: 0,
@@ -157,13 +129,11 @@ app.get('/api/ledger/aggregated', async (req, res) => {
         assetContributions: [], equityData: []
       });
     }
-
     let totalProfit=0, grossProfit=0, grossLoss=0, wins=0, losses=0, sumWin=0, sumLoss=0, sumDuration=0;
     const assetMap = {};
     const equityCurve = [];
     let runningEquity=0, peakEquity=0, maxDrawdown=0;
     let currentStreak=0, maxWinStreak=0, maxLossStreak=0;
-
     for (const t of trades) {
       const pnl = parseFloat(t.profit_loss);
       totalProfit += pnl;
@@ -181,7 +151,6 @@ app.get('/api/ledger/aggregated', async (req, res) => {
       if (currentStreak > maxWinStreak) maxWinStreak = currentStreak;
       if (currentStreak < maxLossStreak) maxLossStreak = currentStreak;
     }
-
     const total = trades.length;
     const strikeRate = total>0 ? (wins/total)*100 : 0;
     let profitFactor = 0;
@@ -191,7 +160,6 @@ app.get('/api/ledger/aggregated', async (req, res) => {
     const avgLoss = losses>0 ? Math.abs(sumLoss/losses) : 0;
     const avgDuration = total>0 ? sumDuration/total : 0;
     const assetContributions = Object.entries(assetMap).map(([name, pnl]) => ({ name, pnl }));
-
     res.json({
       totalProfit, tradeCount: total, winCount: wins, lossCount: losses,
       grossProfit, grossLoss, maxDrawdown, totalDuration: sumDuration,
@@ -209,9 +177,7 @@ app.get('/api/ledger/aggregated', async (req, res) => {
   }
 });
 
-// ============================================================
-// TEMPORARY DEBUG – inspect bot state and locks
-// ============================================================
+// Debug endpoint
 app.get('/debug/state', (req, res) => {
   res.json({
     botActive: store.state.active,
@@ -227,7 +193,7 @@ app.get('/debug/state', (req, res) => {
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// ==================== START SERVER & DERIV ====================
+// ==================== START ====================
 const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
   console.log(`🚀 Server on port ${PORT}`);
@@ -235,33 +201,22 @@ const server = app.listen(PORT, () => {
   if (derivClient) {
     const indicators = require('./engine/indicators');
     const bot = require('./engine/bot');
-
     const lastTradeCloseTime = {};
-    const lastProposalTime = {};     // per‑symbol proposal cooldown
+    const lastProposalTime = {};
 
-    store.on('configChanged', () => {
-      store.tickBuffer.setMaxSize(store.config.ANALYSIS_WINDOW || 500);
-    });
+    store.on('configChanged', () => store.tickBuffer.setMaxSize(store.config.ANALYSIS_WINDOW || 500));
 
     derivClient.on('balance', (data) => {
       if (!derivClient.activeAccountId) return;
-
       let balanceValue, currency, loginid;
       if (typeof data.balance === 'string' || typeof data.balance === 'number') {
         balanceValue = data.balance; currency = data.currency || 'USD'; loginid = data.loginid || derivClient.accountId;
       } else if (data.balance && typeof data.balance === 'object') {
         balanceValue = data.balance.balance; currency = data.balance.currency || 'USD'; loginid = data.balance.loginid;
       } else return;
-
       if (loginid && loginid !== derivClient.activeAccountId) return;
-
       const mode = data.isDemo !== undefined ? (data.isDemo ? 'demo' : 'real') : (derivClient.isDemo ? 'demo' : 'real');
-      store.updateState({
-        balance: parseFloat(balanceValue),
-        currency,
-        loginid: derivClient.activeAccountId,
-        tradingMode: mode
-      });
+      store.updateState({ balance: parseFloat(balanceValue), currency, loginid: derivClient.activeAccountId, tradingMode: mode });
       logger.info(`💰 Balance updated: ${currency} ${balanceValue} (${mode})`);
     });
 
@@ -269,6 +224,7 @@ const server = app.listen(PORT, () => {
       logger.info(`🔐 Authorized as ${data.loginid || derivClient.activeAccountId}`);
     });
 
+    // ---------- TICK HANDLER WITH DEBUG ----------
     derivClient.on('tick', (tick) => {
       const symbol = tick.symbol;
       const price = tick.quote;
@@ -286,24 +242,24 @@ const server = app.listen(PORT, () => {
         }
         store.updateMarketMetrics(symbol, computed);
 
-        // Sniper Bot (currently running test bot – replace engine/bot.js for real strategy)
+        // ---- DEBUG ----
+        console.log('🔁 tick handler active, symbol=' + symbol);
+
         if (store.state.active) {
-          // Proposal rate‑limiter: at most one proposal per symbol every 2 seconds
           const now = Date.now();
-          if (lastProposalTime[symbol] && (now - lastProposalTime[symbol] < 2000)) {
-            return;
-          }
+          if (lastProposalTime[symbol] && (now - lastProposalTime[symbol] < 2000)) return;
 
           const signal = bot.evaluate(symbol, computed, store.state, {
             tradeInProgress: tradeInProgressSym[symbol] || false,
             lastCloseTime: lastTradeCloseTime[symbol] || 0
           });
 
+          console.log('🤖 bot.evaluate returned:', signal);   // DEBUG
+
           if (signal) {
             const stake = signal.stake || store.state.currentStake || 0.35;
             const balance = store.state.balance ?? 0;
             if (stake < 0.35 || stake > balance) return;
-
             lastProposalTime[symbol] = now;
 
             derivClient.buyContract(signal).then(contractId => {
@@ -317,36 +273,28 @@ const server = app.listen(PORT, () => {
       }
     });
 
-    // -------------------- TRADE SETTLED --------------------
+    // Trade settlement
     derivClient.on('trade_settled', async (trade) => {
       if (trade.symbol) {
         tradeInProgressSym[trade.symbol] = false;
         lastTradeCloseTime[trade.symbol] = Date.now();
       }
-
       const profit = parseFloat(trade.profit || 0);
       const result = profit > 0 ? 'WIN' : (profit < 0 ? 'LOSS' : 'BREAKEVEN');
       store.addLog('info', `🏁 Trade settled: ${trade.contract_type || '?'} ${trade.symbol || '?'} – ${result} $${profit.toFixed(2)}`);
-
       try {
         const account = derivClient.isDemo ? 'demo' : 'real';
         const record = {
-          asset: trade.symbol,
-          contract_type: trade.contract_type,
-          stake: parseFloat(trade.stake),
-          payout: parseFloat(trade.payout || 0),
-          profit_loss: profit,
-          is_win: profit > 0,
+          asset: trade.symbol, contract_type: trade.contract_type, stake: parseFloat(trade.stake),
+          payout: parseFloat(trade.payout || 0), profit_loss: profit, is_win: profit > 0,
           barrier: trade.barrier ? parseFloat(trade.barrier) : null,
           exit_tick: trade.exit_price ? parseFloat(trade.exit_price) : null,
           contract_id: trade.contract_id,
           entry_price: trade.entry_price ? parseFloat(trade.entry_price) : null,
           exit_price: trade.exit_price ? parseFloat(trade.exit_price) : null,
           duration_ticks: parseInt(trade.duration_ticks) || 0,
-          bot_name: trade.bot_name || 'manual',
-          account: account
+          bot_name: trade.bot_name || 'manual', account: account
         };
-
         const { error } = await supabase.from('trading_ledger').insert(record);
         if (error) console.error('❌ Failed to insert trade:', error);
         else console.log('✅ Trade recorded:', record.asset, profit, 'account:', account);
