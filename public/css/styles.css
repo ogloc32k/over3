@@ -149,7 +149,7 @@ body.light {
 }
 .theme-toggle:hover { background: var(--bg-surface); color: var(--text-primary); }
 
-/* Mobile profile button */
+/* Mobile profile button – always at the far left */
 .mobile-profile-btn {
   display: none;
   background: var(--bg-card);
@@ -313,7 +313,7 @@ body.light {
 .analytics-container { flex: 1; min-height: 0; }
 
 /* ============================================================
-   SETTINGS – now scrollable, unused sections hidden
+   SETTINGS – sniper bot only, scrollable
    ============================================================ */
 .settings-grid {
   padding: 6px 0 80px;
@@ -418,12 +418,6 @@ body.light {
   font-size: 11px;
   flex: 1;
   text-align: right;
-}
-
-/* ---- Hide Timing & Cooldowns and Risk Management sections ---- */
-#tab-settings .settings-section:nth-child(2),
-#tab-settings .settings-section:nth-child(3) {
-  display: none !important;
 }
 
 /* ============================================================
@@ -757,7 +751,7 @@ body.light {
   font-size: 12px;
   font-family: 'Consolas', monospace;
   display: flex;
-  flex-direction: column-reverse !important;   /* NEWEST LOG ENTRY AT TOP */
+  flex-direction: column-reverse !important;
   min-height: 100px;
   transition: background 0.3s, border-color 0.3s;
 }
@@ -810,7 +804,7 @@ body.analytics-active .app-main {
 }
 
 /* ============================================================
-   BOTS TAB — base styles (4 columns for stats)
+   BOTS TAB — base styles
    ============================================================ */
 .bots-screen {
   display: flex;
@@ -861,7 +855,7 @@ body.analytics-active .app-main {
 .bot-status-badge.armed  { background: rgba(59,130,246,0.15); color: var(--neon-blue); }
 .bot-stats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);   /* 4 columns for desktop */
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
 }
 .bstat {
@@ -1102,7 +1096,6 @@ body.analytics-active .app-main {
   .header-tabs { display: none; }
   .mobile-profile-btn { display: flex; }
 
-  /* Bot stats: 2 columns on mobile for readability */
   .bot-stats {
     grid-template-columns: repeat(2, 1fr) !important;
   }
