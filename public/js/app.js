@@ -603,3 +603,21 @@ function loadBotDailyPnl() {
     })
     .catch(err => console.error('Failed to load bot daily P&L:', err));
 }
+
+// ============================================================
+// BOT RESET COUNTDOWN
+// ============================================================
+setInterval(() => {
+  const resetTime = window.QuantCore?.getGlobalState()?.botResetTime;
+  const el = document.getElementById('bot-reset-countdown');
+  if (!el) return;
+  if (resetTime) {
+    const remaining = Math.max(0, Math.ceil((resetTime - Date.now()) / 1000));
+    const hours = Math.floor(remaining / 3600);
+    const mins = Math.floor((remaining % 3600) / 60);
+    const secs = remaining % 60;
+    el.textContent = `${hours}:${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+  } else {
+    el.textContent = '--';
+  }
+}, 1000);
