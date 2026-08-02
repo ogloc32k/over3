@@ -40,20 +40,19 @@ function evaluate(symbol, metrics, state, options = {}) {
   const duration        = parseInt(config.BOT_DURATION) || 70;          // seconds
   const stake           = state.currentStake || (parseFloat(config.BOT_BASE_STAKE) || 0.35);
 
-  // ────────────────────────────────────────────────────────────
 // ────────────────────────────────────────────────────────────
-  //  CALL conditions (sniper bounce at support)
+  //  CALL conditions (Realistic Sniper Bounce)
   // ────────────────────────────────────────────────────────────
   if (
-    supportPct !== null && supportPct <= 10 &&         // in extreme bottom zone
-    rsi < rsiOversold &&                               // deeply oversold
-    hasConsecutiveTicks(tickDirections, 'down', 4) &&   // panic selling into support
-    fallPct >= 60 &&                                   // sellers dominating
-    squeeze !== null && squeeze > squeezeThreshold      // bands are tight → coiled spring
+    supportPct !== null && supportPct <= 20 &&         // Widened to extreme bottom 20% zone
+    rsi < rsiOversold &&                               // Deeply oversold
+    hasConsecutiveTicks(tickDirections, 'down', 2) &&  // Reduced to 2 panic ticks into support
+    fallPct >= 50                                      // Lowered to 50% seller dominance
+    // Squeeze condition removed to allow for high-volatility tick drops
   ) {
-    // Runaway trend circuit breaker: price broke below support by more than 0.5 %
+    // Runaway trend circuit breaker: price broke below support by more than 0.5%
     if (metrics.support !== null && price < metrics.support * 0.995) {
-      return null;   // breakout regime – cancel CALL
+      return null;   // Breakout regime – cancel CALL
     }
     return {
       symbol: symbol,
@@ -65,18 +64,18 @@ function evaluate(symbol, metrics, state, options = {}) {
   }
 
   // ────────────────────────────────────────────────────────────
-  //  PUT conditions (sniper rejection at resistance)
+  //  PUT conditions (Realistic Sniper Rejection)
   // ────────────────────────────────────────────────────────────
   if (
-    supportPct !== null && supportPct >= 90 &&         // in extreme top zone
-    rsi > rsiOverbought &&                             // deeply overbought
-    hasConsecutiveTicks(tickDirections, 'up', 4) &&     // hard drive into resistance
-    risePct >= 60 &&                                   // buyers dominating
-    squeeze !== null && squeeze > squeezeThreshold      // bands are tight → coiled spring
+    supportPct !== null && supportPct >= 80 &&         // Widened to extreme top 20% zone
+    rsi > rsiOverbought &&                             // Deeply overbought
+    hasConsecutiveTicks(tickDirections, 'up', 2) &&    // Reduced to 2 hard drive ticks into resistance
+    risePct >= 50                                      // Lowered to 50% buyer dominance
+    // Squeeze condition removed to allow for high-volatility tick surges
   ) {
-    // Runaway trend circuit breaker: price broke above resistance by more than 0.5 %
+    // Runaway trend circuit breaker: price broke above resistance by more than 0.5%
     if (metrics.resistance !== null && price > metrics.resistance * 1.005) {
-      return null;   // breakout regime – cancel PUT
+      return null;   // Breakout regime – cancel PUT
     }
     return {
       symbol: symbol,
@@ -87,7 +86,7 @@ function evaluate(symbol, metrics, state, options = {}) {
     };
   }
 
-  return null;   // no confluence
+  return null;   // No confluence
 }
 
 /**
