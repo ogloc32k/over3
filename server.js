@@ -1,20 +1,71 @@
-// server.js – Final Production Version (TP/SL based on daily P&L)
+// server.js
 require('dotenv').config();
 
-process.on('uncaughtException', err => { console.error('🔥 UNCAUGHT EXCEPTION', err); process.exit(1); });
+process.on('uncaughtException',  err    => { console.error('🔥 UNCAUGHT EXCEPTION', err);  process.exit(1); });
 process.on('unhandledRejection', reason => { console.error('🔥 UNHANDLED REJECTION', reason); process.exit(1); });
 
 const express = require('express');
-const path = require('path');
+const path    = require('path');
+const fs      = require('fs');
 const supabase = require('./services/supabase');
 
 let store, logger, derivClient;
-try { store = require('./store'); console.log('✅ Store loaded'); } catch(e) { console.error('❌ store.js:', e); process.exit(1); }
-try { logger = require('./logger'); console.log('✅ Logger loaded'); } catch(e) { console.error('❌ logger.js:', e); process.exit(1); }
+try { store       = require('./store');           console.log('✅ Store loaded');        } catch(e) { console.error('❌ store.js:', e); process.exit(1); }
+try { logger      = require('./logger');          console.log('✅ Logger loaded');       } catch(e) { console.error('❌ logger.js:', e); process.exit(1); }
 try { derivClient = require('./services/deriv'); console.log('✅ Deriv client loaded'); } catch(e) { console.error('❌ deriv.js:', e); derivClient = null; }
 
 if (derivClient) derivClient.setStore(store);
 
+// ============================================================
+// PERSISTENT CONFIG  (bot_config.json next to server.js)
+// ============================================================
+const CONFIG_PATH = path.join(__dirname, 'bot_config.json');
+
+const DEFAULT_CONFIG = {
+  BOT_DURATION:           70,
+  BOT_BASE_STAKE:         0.35,
+  BOT_TAKE_PROFIT:        null,
+  BOT_STOP_LOSS:          null,
+  BOT_MAX_RUNS:           null,
+  BOT_COOLDOWN:           5,
+  BOT_RSI_OVERSOLD:       30,
+  BOT_RSI_OVERBOUGHT:     70,
+  SNIPER_ZONE_PCT:        20,
+  SNIPER_TICKS:           2,
+  SNIPER_DOMINANCE:       50,
+  SNIPER_BREAKOUT_BUFFER: 0.5
+};
+
+function loadConfig() {
+  try {
+    if (fs.existsSync(CONFIG_PATH)) {
+      const raw  = fs.readFileSync(CONFIG_PATH, 'utf8');
+      const saved = JSON.parse(raw);
+      store.config = { ...DEFAULT_CONFIG, ...saved };
+      console.log('✅ Config loaded from bot_config.json');
+    } else {
+      store.config = { ...DEFAULT_CONFIG };
+      console.log('ℹ️  No saved config – using defaults');
+    }
+  } catch(e) {
+    console.error('❌ Failed to load config:', e.message);
+    store.config = { ...DEFAULT_CONFIG };
+  }
+}
+
+function saveConfig() {
+  try {
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(store.config, null, 2), 'utf8');
+  } catch(e) {
+    console.error('❌ Failed to save config:', e.message);
+  }
+}
+
+loadConfig();
+
+// ============================================================
+// EXPRESS
+// ============================================================
 const app = express();
 app.use(express.json());
 app.use((req, res, next) => { console.log(`📡 ${req.method} ${req.url}`); next(); });
@@ -25,9 +76,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ============================================================
 app.get('/stream', (req, res) => {
   res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
+    'Content-Type':  'text/event-stream',
     'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive'
+    'Connection':    'keep-alive'
   });
   res.write('\n');
 
@@ -43,49 +94,62 @@ app.get('/stream', (req, res) => {
 });
 
 // ============================================================
-// REST API
+// TRADE LOCK
 // ============================================================
-
-// ---------- Global trade lock ----------
 const tradeInProgressSym = {};
+const lockTimestamps     = {};
 
-function isTradeActive() {
-  return tradeInProgressSym['global'] === true;
-}
+function isTradeActive() { return tradeInProgressSym['global'] === true; }
 
-// Control endpoint
+// ============================================================
+// CONTROL
+// ============================================================
 app.post('/api/control', (req, res) => {
   const { action, mode } = req.body;
   console.log('🟡 POST /api/control body:', req.body);
   try {
     if (action === 'start') {
-      store.updateState({ active: true, locked: false });
+      // Validate required risk fields before allowing start
+      const tp      = parseFloat(store.config.BOT_TAKE_PROFIT);
+      const sl      = parseFloat(store.config.BOT_STOP_LOSS);
+      const maxRuns = parseInt(store.config.BOT_MAX_RUNS);
+      if (!tp  || tp  <= 0) return res.json({ error: 'Set Take Profit before starting the bot.' });
+      if (!sl  || sl  <= 0) return res.json({ error: 'Set Stop Loss before starting the bot.' });
+      if (!maxRuns || maxRuns <= 0) return res.json({ error: 'Set Max Runs before starting the bot.' });
+
+      // Reset session run counter on every fresh start
+      store.updateState({ active: true, locked: false, sessionTradeCount: 0 });
       store.addLog('info', '✅ Bot started');
       res.json({ message: 'Bot started' });
+
     } else if (action === 'stop') {
       store.updateState({ active: false });
       tradeInProgressSym['global'] = false;
       store.addLog('info', '⏹️ Bot stopped');
       res.json({ message: 'Bot stopped' });
+
     } else if (action === 'set_mode') {
-      if (isTradeActive()) {
-        return res.json({ error: 'Cannot switch accounts while a trade is active.' });
-      }
+      if (isTradeActive()) return res.json({ error: 'Cannot switch accounts while a trade is active.' });
       if (derivClient) derivClient.setMode(mode);
       res.json({ message: `Switched to ${mode}` });
-    } else res.json({ error: 'Unknown action' });
-  } catch (err) { res.json({ error: err.message }); }
+
+    } else {
+      res.json({ error: 'Unknown action' });
+    }
+  } catch(err) { res.json({ error: err.message }); }
 });
 
-// Manual trade
+// ============================================================
+// MANUAL TRADE
+// ============================================================
 app.post('/api/trade/manual', async (req, res) => {
   try {
     if (!derivClient) return res.json({ error: 'Deriv client not connected' });
 
-    const stake = parseFloat(req.body.stake) || store.state.currentStake || 0.35;
+    const stake   = parseFloat(req.body.stake) || store.state.currentStake || 0.35;
     const balance = store.state.balance ?? 0;
 
-    if (stake < 0.35) return res.json({ error: 'Minimum stake is $0.35' });
+    if (stake < 0.35)    return res.json({ error: 'Minimum stake is $0.35' });
     if (stake > balance) return res.json({ error: `Stake cannot exceed balance of $${balance.toFixed(2)}` });
 
     const contractId = await derivClient.buyContract({ ...req.body, stake });
@@ -94,24 +158,43 @@ app.post('/api/trade/manual', async (req, res) => {
     tradeInProgressSym['global'] = true;
     store.addLog('info', `📈 Manual trade placed: ${req.body.contractType} ${req.body.symbol}`);
     res.json({ message: 'Trade request sent' });
-  } catch (err) {
+  } catch(err) {
     tradeInProgressSym['global'] = false;
     res.json({ error: err.message });
   }
 });
 
-// Config – stores sniper bot settings
+// ============================================================
+// CONFIG – get / save / reset
+// ============================================================
 app.get('/api/config', (req, res) => res.json(store.config || {}));
+
 app.post('/api/config', (req, res) => {
   try {
     store.config = { ...store.config, ...req.body };
+    saveConfig();
     store.emit('configChanged');
     res.json({ success: true });
-  } catch (err) { res.json({ error: err.message }); }
+  } catch(err) { res.json({ error: err.message }); }
+});
+
+app.post('/api/config/reset', (req, res) => {
+  try {
+    // Reset ONLY strategy params — preserve user's TP, SL, Max Runs
+    const preserve = {
+      BOT_TAKE_PROFIT: store.config.BOT_TAKE_PROFIT,
+      BOT_STOP_LOSS:   store.config.BOT_STOP_LOSS,
+      BOT_MAX_RUNS:    store.config.BOT_MAX_RUNS
+    };
+    store.config = { ...DEFAULT_CONFIG, ...preserve };
+    saveConfig();
+    store.emit('configChanged');
+    res.json({ success: true, config: store.config });
+  } catch(err) { res.json({ error: err.message }); }
 });
 
 // ============================================================
-// ANALYTICS – FULL ENDPOINT
+// ANALYTICS
 // ============================================================
 app.get('/api/ledger/aggregated', async (req, res) => {
   try {
@@ -123,10 +206,10 @@ app.get('/api/ledger/aggregated', async (req, res) => {
     const cleanMode = modeMap[mode] || mode;
 
     switch (cleanMode) {
-      case '24h': start = new Date(now.getTime() - 24*60*60*1000); break;
-      case '1w':  start = new Date(now.getTime() - 7*24*60*60*1000); break;
-      case '1m':  start = new Date(now.getTime() - 30*24*60*60*1000); break;
-      case '1y':  start = new Date(now.getTime() - 365*24*60*60*1000); break;
+      case '24h':    start = new Date(now.getTime() - 24*60*60*1000); break;
+      case '1w':     start = new Date(now.getTime() - 7*24*60*60*1000); break;
+      case '1m':     start = new Date(now.getTime() - 30*24*60*60*1000); break;
+      case '1y':     start = new Date(now.getTime() - 365*24*60*60*1000); break;
       case 'custom':
         if (customStart) start = new Date(customStart);
         if (customEnd)   end   = new Date(customEnd);
@@ -148,90 +231,105 @@ app.get('/api/ledger/aggregated', async (req, res) => {
         totalProfit: 0, tradeCount: 0, winCount: 0, lossCount: 0,
         grossProfit: 0, grossLoss: 0, maxDrawdown: 0, totalDuration: 0,
         avgWin: 0, avgLoss: 0, strikeRate: 0, profitFactor: 0,
+        maxWinStreak: 0, maxLossStreak: 0,
         assetContributions: [], equityData: []
       });
     }
 
-    let totalProfit=0, grossProfit=0, grossLoss=0, wins=0, losses=0, sumWin=0, sumLoss=0, sumDuration=0;
+    let totalProfit = 0, grossProfit = 0, grossLoss = 0;
+    let wins = 0, losses = 0, sumWin = 0, sumLoss = 0, sumDuration = 0;
     const assetMap = {};
     const equityCurve = [];
-    let runningEquity=0, peakEquity=0, maxDrawdown=0;
-    let currentStreak=0, maxWinStreak=0, maxLossStreak=0;
+    let runningEquity = 0, peakEquity = 0, maxDrawdown = 0;
+    let currentStreak = 0, maxWinStreak = 0, maxLossStreak = 0;
 
     for (const t of trades) {
       const pnl = parseFloat(t.profit_loss);
       totalProfit += pnl;
-      if (pnl > 0) { wins++; grossProfit += pnl; sumWin += pnl; }
+      if (pnl > 0) { wins++;   grossProfit += pnl;             sumWin  += pnl; }
       else if (pnl < 0) { losses++; grossLoss += Math.abs(pnl); sumLoss += pnl; }
       sumDuration += parseInt(t.duration_ticks) || 0;
+
       const asset = t.asset || 'Unknown';
       assetMap[asset] = (assetMap[asset] || 0) + pnl;
+
       runningEquity += pnl;
       equityCurve.push({ timestamp: t.created_at, equity: runningEquity });
       if (runningEquity > peakEquity) peakEquity = runningEquity;
-      if (peakEquity > 0) { const dd = ((peakEquity - runningEquity) / peakEquity)*100; if (dd > maxDrawdown) maxDrawdown = dd; }
-      if (pnl > 0) currentStreak = currentStreak >= 0 ? currentStreak+1 : 1;
-      else currentStreak = currentStreak <= 0 ? currentStreak-1 : -1;
-      if (currentStreak > maxWinStreak) maxWinStreak = currentStreak;
+      if (peakEquity > 0) {
+        const dd = ((peakEquity - runningEquity) / peakEquity) * 100;
+        if (dd > maxDrawdown) maxDrawdown = dd;
+      }
+
+      // Streak tracking
+      if (pnl > 0) {
+        currentStreak = currentStreak >= 0 ? currentStreak + 1 : 1;
+      } else {
+        currentStreak = currentStreak <= 0 ? currentStreak - 1 : -1;
+      }
+      if (currentStreak > maxWinStreak)  maxWinStreak  = currentStreak;
       if (currentStreak < maxLossStreak) maxLossStreak = currentStreak;
     }
 
-    const total = trades.length;
-    const strikeRate = total>0 ? (wins/total)*100 : 0;
-    let profitFactor = 0;
-    if (grossLoss===0) profitFactor = grossProfit>0 ? parseFloat(grossProfit.toFixed(2)) : 0;
-    else profitFactor = grossProfit / grossLoss;
-    const avgWin = wins>0 ? sumWin/wins : 0;
-    const avgLoss = losses>0 ? Math.abs(sumLoss/losses) : 0;
-    const avgDuration = total>0 ? sumDuration/total : 0;
+    const total        = trades.length;
+    const strikeRate   = total > 0 ? (wins / total) * 100 : 0;
+    const profitFactor = grossLoss === 0 ? (grossProfit > 0 ? grossProfit : 0) : grossProfit / grossLoss;
+    const avgWin       = wins   > 0 ? sumWin   / wins   : 0;
+    const avgLoss      = losses > 0 ? Math.abs(sumLoss / losses) : 0;
     const assetContributions = Object.entries(assetMap).map(([name, pnl]) => ({ name, pnl }));
 
     res.json({
       totalProfit, tradeCount: total, winCount: wins, lossCount: losses,
       grossProfit, grossLoss, maxDrawdown, totalDuration: sumDuration,
       avgWin, avgLoss, strikeRate, profitFactor,
+      maxWinStreak, maxLossStreak: Math.abs(maxLossStreak),
       assetContributions, equityData: equityCurve
     });
-  } catch (err) {
+  } catch(err) {
     console.error('❌ Analytics error:', err);
     res.json({
       totalProfit: 0, tradeCount: 0, winCount: 0, lossCount: 0,
       grossProfit: 0, grossLoss: 0, maxDrawdown: 0, totalDuration: 0,
       avgWin: 0, avgLoss: 0, strikeRate: 0, profitFactor: 0,
+      maxWinStreak: 0, maxLossStreak: 0,
       assetContributions: [], equityData: []
     });
   }
 });
 
-// Debug
+// ============================================================
+// DEBUG / HEALTH
+// ============================================================
 app.get('/debug/state', (req, res) => {
   res.json({
-    botActive: store.state.active,
-    balance: store.state.balance,
-    account: derivClient?.isDemo ? 'demo' : 'real',
+    botActive:       store.state.active,
+    balance:         store.state.balance,
+    account:         derivClient?.isDemo ? 'demo' : 'real',
     activeAccountId: derivClient?.activeAccountId,
-    tradeActive: isTradeActive(),
-    botResetTime: store.state.botResetTime
+    tradeActive:     isTradeActive(),
+    botResetTime:    store.state.botResetTime,
+    sessionTradeCount: store.state.sessionTradeCount
   });
 });
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// ==================== START SERVER & DERIV ====================
-const PORT = process.env.PORT || 3000;
+// ============================================================
+// START SERVER & DERIV
+// ============================================================
+const PORT   = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
   console.log(`🚀 Server on port ${PORT}`);
 
   if (derivClient) {
     const indicators = require('./engine/indicators');
-    const bot = require('./engine/bot');
+    const bot        = require('./engine/bot');
 
     let lastTradeCloseTime = 0;
-    let lastProposalTime = 0;
-    const lockTimestamps = {};
+    let lastProposalTime   = 0;
 
-    // Auto‑cleanup stuck locks (2 min)
+    // Auto-cleanup stuck locks (2 min)
     setInterval(() => {
       const now = Date.now();
       if (tradeInProgressSym['global'] && lockTimestamps['global'] && (now - lockTimestamps['global'] > 120000)) {
@@ -240,18 +338,18 @@ const server = app.listen(PORT, () => {
       }
     }, 30000);
 
-    // Midnight reset check (runs every second)
+    // Midnight reset check (every second)
     setInterval(() => {
       const now = Date.now();
       if (store.state.botResetTime && now >= store.state.botResetTime) {
-        // Reset daily state
         store.updateState({
-          active: true,
+          active:       true,
           botResetTime: null,
-          sessionPnl: 0,
-          dailyPnl: 0
+          sessionPnl:   0,
+          dailyPnl:     0,
+          sessionTradeCount: 0
         });
-        store.addLog('info', '🕛 Midnight reset – bot re‑enabled');
+        store.addLog('info', '🕛 Midnight reset – bot re-enabled');
       }
     }, 1000);
 
@@ -262,7 +360,6 @@ const server = app.listen(PORT, () => {
     // Balance streaming
     derivClient.on('balance', (data) => {
       if (!derivClient.activeAccountId) return;
-
       let balanceValue, currency, loginid;
       if (typeof data.balance === 'string' || typeof data.balance === 'number') {
         balanceValue = data.balance; currency = data.currency || 'USD'; loginid = data.loginid || derivClient.accountId;
@@ -271,14 +368,8 @@ const server = app.listen(PORT, () => {
       } else return;
 
       if (loginid && loginid !== derivClient.activeAccountId) return;
-
       const mode = data.isDemo !== undefined ? (data.isDemo ? 'demo' : 'real') : (derivClient.isDemo ? 'demo' : 'real');
-      store.updateState({
-        balance: parseFloat(balanceValue),
-        currency,
-        loginid: derivClient.activeAccountId,
-        tradingMode: mode
-      });
+      store.updateState({ balance: parseFloat(balanceValue), currency, loginid: derivClient.activeAccountId, tradingMode: mode });
       logger.info(`💰 Balance updated: ${currency} ${balanceValue} (${mode})`);
     });
 
@@ -286,16 +377,16 @@ const server = app.listen(PORT, () => {
       logger.info(`🔐 Authorized as ${data.loginid || derivClient.activeAccountId}`);
     });
 
-    // ---------- TICK HANDLER ----------
+    // ---- TICK HANDLER ----
     derivClient.on('tick', (tick) => {
       const symbol = tick.symbol;
-      const price = tick.quote;
+      const price  = tick.quote;
 
       store.tickBuffer.push(symbol, price);
       const prices = store.tickBuffer.get(symbol);
       if (prices.length < 2) return;
 
-      const history = store.getBandwidthHistory(symbol);
+      const history  = store.getBandwidthHistory(symbol);
       const computed = indicators.computeMetrics(symbol, prices, store.config || {}, history);
 
       if (computed) {
@@ -308,15 +399,14 @@ const server = app.listen(PORT, () => {
           const now = Date.now();
           if (lastProposalTime && (now - lastProposalTime < 2000)) return;
 
-          // Pass config to bot
           const signal = bot.evaluate(symbol, computed, store.state, {
             tradeInProgress: isTradeActive(),
-            lastCloseTime: lastTradeCloseTime,
-            config: store.config
+            lastCloseTime:   lastTradeCloseTime,
+            config:          store.config   // ← correct: pass store.config
           });
 
           if (signal) {
-            const stake = signal.stake || store.state.currentStake || 0.35;
+            const stake   = signal.stake || store.state.currentStake || 0.35;
             const balance = store.state.balance ?? 0;
             if (stake < 0.35 || stake > balance) return;
 
@@ -325,7 +415,7 @@ const server = app.listen(PORT, () => {
             derivClient.buyContract(signal).then(contractId => {
               if (contractId) {
                 tradeInProgressSym['global'] = true;
-                lockTimestamps['global'] = Date.now();
+                lockTimestamps['global']     = Date.now();
                 store.addLog('info', `🤖 Bot trade: ${signal.contractType} ${signal.symbol}`);
               }
             });
@@ -334,7 +424,7 @@ const server = app.listen(PORT, () => {
       }
     });
 
-    // -------------------- TRADE SETTLED (daily P&L TP/SL) --------------------
+    // ---- TRADE SETTLED ----
     derivClient.on('trade_settled', async (trade) => {
       tradeInProgressSym['global'] = false;
       delete lockTimestamps['global'];
@@ -342,69 +432,74 @@ const server = app.listen(PORT, () => {
 
       const profit = parseFloat(trade.profit || 0);
       const result = profit > 0 ? 'WIN' : (profit < 0 ? 'LOSS' : 'BREAKEVEN');
-      const sym = trade.symbol || '?';
+      const sym    = trade.symbol || '?';
       store.addLog('info', `🏁 Trade settled: ${trade.contract_type || '?'} ${sym} – ${result} $${profit.toFixed(2)}`);
 
-      // Update P&L (both session and daily)
       const prevSession = store.state.sessionPnl || 0;
       const prevDaily   = store.state.dailyPnl   || 0;
       const newSessionPnl = prevSession + profit;
       const newDailyPnl   = prevDaily   + profit;
-      store.updateState({
-        sessionPnl: newSessionPnl,
-        dailyPnl:   newDailyPnl
-      });
+      const newTradeCount = (store.state.sessionTradeCount || 0) + 1;
+
+      store.updateState({ sessionPnl: newSessionPnl, dailyPnl: newDailyPnl, sessionTradeCount: newTradeCount });
 
       // Martingale stake
       if (profit > 0) {
-        store.updateState({ currentStake: store.config?.BOT_BASE_STAKE || 0.35 });
-        store.addLog('info', `📉 Stake reset to $${store.state.currentStake.toFixed(2)} after win`);
+        const baseStake = store.config?.BOT_BASE_STAKE || 0.35;
+        store.updateState({ currentStake: baseStake });
+        store.addLog('info', `📉 Stake reset to $${baseStake.toFixed(2)} after win`);
       } else {
         const newStake = Math.min((store.state.currentStake || 0.35) * 2, 100);
         store.updateState({ currentStake: newStake });
         store.addLog('info', `📈 Stake doubled to $${newStake.toFixed(2)} after loss`);
       }
 
-      // Take Profit / Stop Loss – based on DAILY P&L
-      const tp = parseFloat(store.config?.BOT_TAKE_PROFIT) || 5;
-      const sl = parseFloat(store.config?.BOT_STOP_LOSS) || 10;
+      // Take Profit / Stop Loss based on daily P&L
+      const tp = parseFloat(store.config?.BOT_TAKE_PROFIT) || 0;
+      const sl = parseFloat(store.config?.BOT_STOP_LOSS)   || 0;
 
-      if (newDailyPnl >= tp) {
+      if (tp > 0 && newDailyPnl >= tp) {
         store.updateState({ active: false });
         const resetTime = getNextMidnightEAT();
         store.updateState({ botResetTime: resetTime });
         store.addLog('info', `🛑 Take Profit reached ($${newDailyPnl.toFixed(2)}). Bot paused until ${new Date(resetTime).toLocaleTimeString()}`);
-      } else if (newDailyPnl <= -sl) {
+      } else if (sl > 0 && newDailyPnl <= -sl) {
         store.updateState({ active: false });
         const resetTime = getNextMidnightEAT();
         store.updateState({ botResetTime: resetTime });
         store.addLog('info', `🛑 Stop Loss hit (-$${Math.abs(newDailyPnl).toFixed(2)}). Bot paused until ${new Date(resetTime).toLocaleTimeString()}`);
       }
 
-      // Supabase
+      // Max runs check: stop bot if session limit reached
+      const maxRuns = parseInt(store.config?.BOT_MAX_RUNS);
+      if (maxRuns && maxRuns > 0 && newTradeCount >= maxRuns) {
+        store.updateState({ active: false });
+        store.addLog('info', `🛑 Max runs reached (${newTradeCount}/${maxRuns}). Bot stopped.`);
+      }
+
+      // Supabase insert
       try {
         const account = derivClient.isDemo ? 'demo' : 'real';
-        const record = {
-          asset: trade.symbol,
-          contract_type: trade.contract_type,
-          stake: parseFloat(trade.stake),
-          payout: parseFloat(trade.payout || 0),
-          profit_loss: profit,
-          is_win: profit > 0,
-          barrier: trade.barrier ? parseFloat(trade.barrier) : null,
-          exit_tick: trade.exit_price ? parseFloat(trade.exit_price) : null,
-          contract_id: trade.contract_id,
-          entry_price: trade.entry_price ? parseFloat(trade.entry_price) : null,
-          exit_price: trade.exit_price ? parseFloat(trade.exit_price) : null,
+        const record  = {
+          asset:          trade.symbol,
+          contract_type:  trade.contract_type,
+          stake:          parseFloat(trade.stake),
+          payout:         parseFloat(trade.payout || 0),
+          profit_loss:    profit,
+          is_win:         profit > 0,
+          barrier:        trade.barrier   ? parseFloat(trade.barrier)    : null,
+          exit_tick:      trade.exit_price ? parseFloat(trade.exit_price) : null,
+          contract_id:    trade.contract_id,
+          entry_price:    trade.entry_price ? parseFloat(trade.entry_price) : null,
+          exit_price:     trade.exit_price  ? parseFloat(trade.exit_price)  : null,
           duration_ticks: parseInt(trade.duration_ticks) || 0,
-          bot_name: trade.bot_name || 'manual',
+          bot_name:       trade.bot_name || 'manual',
           account
         };
-
         const { error } = await supabase.from('trading_ledger').insert(record);
         if (error) console.error('❌ Failed to insert trade:', error);
         else console.log('✅ Trade recorded:', record.asset, profit, 'account:', account);
-      } catch (e) { console.error('❌ trade_settled handler error:', e); }
+      } catch(e) { console.error('❌ trade_settled handler error:', e); }
     });
 
     derivClient.connect();
@@ -413,15 +508,13 @@ const server = app.listen(PORT, () => {
 
 // Helper: next midnight East Africa Time (UTC+3)
 function getNextMidnightEAT() {
-  const now = new Date();
-  const eatOffset = 3 * 60 * 60 * 1000;
-  const eatNow = new Date(now.getTime() + eatOffset);
-  const nextMidnightEAT = new Date(eatNow);
-  nextMidnightEAT.setUTCHours(21, 0, 0, 0); // 21:00 UTC = 00:00 EAT
-  if (nextMidnightEAT <= now) {
-    nextMidnightEAT.setUTCDate(nextMidnightEAT.getUTCDate() + 1);
-  }
-  return nextMidnightEAT.getTime();
+  const now          = new Date();
+  const eatOffset    = 3 * 60 * 60 * 1000;
+  const eatNow       = new Date(now.getTime() + eatOffset);
+  const nextMidnight = new Date(eatNow);
+  nextMidnight.setUTCHours(21, 0, 0, 0); // 21:00 UTC = 00:00 EAT
+  if (nextMidnight <= now) nextMidnight.setUTCDate(nextMidnight.getUTCDate() + 1);
+  return nextMidnight.getTime();
 }
 
 process.on('SIGTERM', () => server.close(() => process.exit(0)));
