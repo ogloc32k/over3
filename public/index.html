@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>QUANTCORE // TERMINAL v6.0</title>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <link rel="stylesheet" href="css/styles.css?v=17">
-  <link rel="stylesheet" href="css/styles-mobile.css?v=17" media="(max-width: 768px)">
+  <link rel="stylesheet" href="css/styles.css?v=18">
+  <link rel="stylesheet" href="css/styles-mobile.css?v=18" media="(max-width: 768px)">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
@@ -55,12 +55,10 @@
   <!-- ====== HEADER ====== -->
   <header class="app-header">
     <div class="left">
-      <!-- Mobile profile button FIRST (hidden on desktop) -->
       <button class="mobile-profile-btn" id="mobileProfileBtn" onclick="openNavDrawer()">
         <span class="profile-avatar">👤</span>
         <span class="profile-mode" id="header-profile-mode">DEMO</span>
       </button>
-      <!-- Brand -->
       <div class="app-brand">QUANTCORE<span>//</span>TERMINAL <small>v6.0</small></div>
       <div class="header-tabs">
         <button class="nav-tab active" data-tab="tab-home">Home</button>
@@ -222,12 +220,18 @@
         </div>
       </div>
 
-      <!-- BOTS -->
+      <!-- ===== BOTS ===== -->
       <div id="tab-bots" class="tab-page">
         <div class="bots-screen">
-          <div class="bots-header"><span class="bots-title">My Bots</span></div>
+
+          <div class="bots-header">
+            <span class="bots-title">My Bots</span>
+          </div>
+
           <div class="bots-list">
             <div class="bot-card" id="botCard-quantcore">
+
+              <!-- Header row -->
               <div class="bot-card-header">
                 <div class="bot-info">
                   <div class="bot-name">Sniper Bot</div>
@@ -235,18 +239,162 @@
                 </div>
                 <div class="bot-status-badge idle" id="bot-status-badge">IDLE</div>
               </div>
+
+              <!-- Stats bar -->
               <div class="bot-stats">
-                <div class="bstat"><div class="bstat-lbl">Session P&L</div><div class="bstat-val" id="bot-session-pnl">$0.00</div></div>
-                <div class="bstat"><div class="bstat-lbl">Daily P&L</div><div class="bstat-val" id="bot-daily-pnl">$0.00</div></div>
-                <div class="bstat"><div class="bstat-lbl">Risk/Trade</div><div class="bstat-val orange" id="bot-risk">$0.35</div></div>
-                <div class="bstat"><div class="bstat-lbl">Resets in</div><div class="bstat-val" id="bot-reset-countdown">--</div></div>
+                <div class="bstat">
+                  <div class="bstat-lbl">Session P&L</div>
+                  <div class="bstat-val" id="bot-session-pnl">$0.00</div>
+                </div>
+                <div class="bstat">
+                  <div class="bstat-lbl">Daily P&L</div>
+                  <div class="bstat-val" id="bot-daily-pnl">$0.00</div>
+                </div>
+                <div class="bstat">
+                  <div class="bstat-lbl">Runs</div>
+                  <div class="bstat-val" id="bot-runs">0 / —</div>
+                </div>
+                <div class="bstat">
+                  <div class="bstat-lbl">Resets in</div>
+                  <div class="bstat-val" id="bot-reset-countdown">--</div>
+                </div>
               </div>
+
+              <!-- Error / warning banner -->
+              <div class="bot-error-msg" id="bot-error-msg" style="display:none;"></div>
+
+              <!-- Controls -->
               <div class="bot-controls">
-                <button class="bot-btn start" onclick="sendControl('start')">▶ Start Bot</button>
-                <button class="bot-btn stop" onclick="sendControl('stop')">⏹ Stop</button>
+                <button class="bot-btn start" id="bot-start-btn" onclick="sendControl('start')">▶ Start Bot</button>
+                <button class="bot-btn stop"  id="bot-stop-btn"  onclick="sendControl('stop')">⏹ Stop</button>
               </div>
+
+              <!-- ─── SETTINGS PANEL ─── -->
+              <div class="bot-settings-panel">
+
+                <!-- Required risk controls -->
+                <div class="bsp-section bsp-required">
+                  <div class="bsp-section-header">
+                    <span class="bsp-section-title">Risk Controls</span>
+                    <span class="bsp-required-tag">Required to start</span>
+                  </div>
+                  <div class="bot-required-warn" id="bot-required-warn" style="display:none;">
+                    ⚠ Set Take Profit, Stop Loss &amp; Max Runs before starting.
+                  </div>
+                  <div class="bsp-grid bsp-grid-3">
+                    <div class="bsp-field">
+                      <label class="bsp-label">Take Profit <span class="bsp-unit">$</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-tp" min="0.01" step="0.01" placeholder="e.g. 5.00" oninput="saveBotConfig()">
+                    </div>
+                    <div class="bsp-field">
+                      <label class="bsp-label">Stop Loss <span class="bsp-unit">$</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-sl" min="0.01" step="0.01" placeholder="e.g. 10.00" oninput="saveBotConfig()">
+                    </div>
+                    <div class="bsp-field">
+                      <label class="bsp-label">Max Runs <span class="bsp-unit">#</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-max-runs" min="1" step="1" placeholder="e.g. 20" oninput="saveBotConfig()">
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Strategy parameters -->
+                <div class="bsp-section">
+                  <div class="bsp-section-header">
+                    <span class="bsp-section-title">Strategy Parameters</span>
+                    <button class="bsp-reset-btn" onclick="resetBotDefaults()" title="Reset algorithm parameters to code defaults">↩ Reset Defaults</button>
+                  </div>
+
+                  <div class="bsp-grid bsp-grid-2">
+
+                    <!-- Trade Duration -->
+                    <div class="bsp-field">
+                      <label class="bsp-label">Trade Duration <span class="bsp-unit">ticks</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-duration" min="1" step="1" value="70" oninput="saveBotConfig()">
+                    </div>
+
+                    <!-- Base Stake -->
+                    <div class="bsp-field">
+                      <label class="bsp-label">Base Stake <span class="bsp-unit">$</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-stake" min="0.35" step="0.01" value="0.35" oninput="saveBotConfig()">
+                    </div>
+
+                    <!-- Cooldown -->
+                    <div class="bsp-field">
+                      <label class="bsp-label">Cooldown <span class="bsp-unit">seconds</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-cooldown" min="1" step="1" value="5" oninput="saveBotConfig()">
+                    </div>
+
+                    <!-- Consecutive Ticks -->
+                    <div class="bsp-field">
+                      <label class="bsp-label">Consecutive Ticks <span class="bsp-unit bsp-hint">momentum confirm</span></label>
+                      <select class="bsp-input" id="cfg-bot-ticks" onchange="saveBotConfig()">
+                        <option value="1">1 tick</option>
+                        <option value="2" selected>2 ticks</option>
+                        <option value="3">3 ticks</option>
+                        <option value="4">4 ticks</option>
+                      </select>
+                    </div>
+
+                  </div>
+
+                  <!-- Zone Threshold – slider -->
+                  <div class="bsp-field bsp-field-full">
+                    <label class="bsp-label">
+                      Zone Threshold
+                      <span class="bsp-unit bsp-hint">price proximity to S/R edge (%)</span>
+                      <span class="bsp-slider-val" id="cfg-bot-zone-val">20</span>
+                    </label>
+                    <input class="bsp-slider" type="range" id="cfg-bot-zone" min="5" max="40" step="1" value="20"
+                           oninput="syncSlider('cfg-bot-zone'); saveBotConfig()">
+                    <div class="bsp-slider-labels"><span>Tight 5%</span><span>Wide 40%</span></div>
+                  </div>
+
+                  <!-- Momentum Dominance – slider -->
+                  <div class="bsp-field bsp-field-full">
+                    <label class="bsp-label">
+                      Momentum Dominance
+                      <span class="bsp-unit bsp-hint">seller/buyer ratio required (%)</span>
+                      <span class="bsp-slider-val" id="cfg-bot-dominance-val">50</span>
+                    </label>
+                    <input class="bsp-slider" type="range" id="cfg-bot-dominance" min="10" max="100" step="5" value="50"
+                           oninput="syncSlider('cfg-bot-dominance'); saveBotConfig()">
+                    <div class="bsp-slider-labels"><span>Lax 10%</span><span>Strict 100%</span></div>
+                  </div>
+
+                  <div class="bsp-grid bsp-grid-2">
+
+                    <!-- RSI Oversold -->
+                    <div class="bsp-field">
+                      <label class="bsp-label">RSI Oversold <span class="bsp-unit bsp-hint">CALL trigger</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-rsi-low" min="1" max="49" step="1" value="30" oninput="saveBotConfig()">
+                    </div>
+
+                    <!-- RSI Overbought -->
+                    <div class="bsp-field">
+                      <label class="bsp-label">RSI Overbought <span class="bsp-unit bsp-hint">PUT trigger</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-rsi-high" min="51" max="99" step="1" value="70" oninput="saveBotConfig()">
+                    </div>
+
+                    <!-- Circuit Breaker -->
+                    <div class="bsp-field bsp-grid-span2">
+                      <label class="bsp-label">Circuit Breaker Buffer <span class="bsp-unit bsp-hint">max breakout % before cancel</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-breakout" min="0.1" max="5" step="0.1" value="0.5" oninput="saveBotConfig()">
+                    </div>
+
+                  </div>
+                </div>
+
+                <!-- Save status -->
+                <div class="bsp-footer">
+                  <span class="bot-save-status" id="bot-save-status"></span>
+                </div>
+
+              </div>
+              <!-- end settings panel -->
+
             </div>
           </div>
+
           <div class="bots-hint">More bots coming soon</div>
         </div>
       </div>
@@ -265,12 +413,12 @@
             </div>
             <div class="filter-right">
               <div class="preset-strip">
-                <button class="btn-preset" id="p-24h" onclick="timeframePreset(this,'24h')">24H</button>
+                <button class="btn-preset" id="p-24h"     onclick="timeframePreset(this,'24h')">24H</button>
                 <button class="btn-preset active" id="p-session" onclick="timeframePreset(this,'session')">Session</button>
-                <button class="btn-preset" id="p-week" onclick="timeframePreset(this,'week')">1W</button>
-                <button class="btn-preset" id="p-month" onclick="timeframePreset(this,'month')">1M</button>
-                <button class="btn-preset" id="p-year" onclick="timeframePreset(this,'year')">1Y</button>
-                <button class="btn-preset" id="p-clear" onclick="timeframePreset(this,'clear')">✕</button>
+                <button class="btn-preset" id="p-week"    onclick="timeframePreset(this,'week')">1W</button>
+                <button class="btn-preset" id="p-month"   onclick="timeframePreset(this,'month')">1M</button>
+                <button class="btn-preset" id="p-year"    onclick="timeframePreset(this,'year')">1Y</button>
+                <button class="btn-preset" id="p-clear"   onclick="timeframePreset(this,'clear')">✕</button>
               </div>
             </div>
           </div>
@@ -302,26 +450,15 @@
         <div class="log-stream" id="log-stream"></div>
       </div>
 
-      <!-- SETTINGS (only sniper bot parameters) -->
+      <!-- SETTINGS (legacy tab — redirects to bot card) -->
       <div id="tab-settings" class="tab-page">
-        <div class="settings-grid">
-          <div class="settings-section">
-            <h4>🤖 Sniper Bot Configuration</h4>
-            <div class="settings-subgrid">
-              <div class="setting-item"><label>Trade Duration (seconds)</label><input type="number" id="config-BOT_DURATION" step="1" value="70" /></div>
-              <div class="setting-item"><label>Base Stake ($)</label><input type="number" id="config-BOT_BASE_STAKE" step="0.01" value="0.35" /></div>
-              <div class="setting-item"><label>Take Profit ($)</label><input type="number" id="config-BOT_TAKE_PROFIT" step="0.01" value="5" /></div>
-              <div class="setting-item"><label>Stop Loss ($)</label><input type="number" id="config-BOT_STOP_LOSS" step="0.01" value="10" /></div>
-              <div class="setting-item"><label>Cooldown (seconds)</label><input type="number" id="config-BOT_COOLDOWN" step="1" value="5" /></div>
-              <div class="setting-item"><label>BB Squeeze Threshold (%)</label><input type="number" id="config-BOT_SQUEEZE" step="1" value="60" /></div>
-              <div class="setting-item"><label>RSI Oversold</label><input type="number" id="config-BOT_RSI_OVERSOLD" step="1" value="30" /></div>
-              <div class="setting-item"><label>RSI Overbought</label><input type="number" id="config-BOT_RSI_OVERBOUGHT" step="1" value="70" /></div>
-            </div>
+        <div class="settings-redirect">
+          <div class="settings-redirect-inner">
+            <div class="settings-redirect-icon">⚙️</div>
+            <div class="settings-redirect-title">Bot settings have moved</div>
+            <div class="settings-redirect-body">All parameters are now configured directly on the Sniper Bot card.</div>
+            <button class="settings-redirect-btn" onclick="switchTab('tab-bots')">Go to Bots →</button>
           </div>
-        </div>
-        <div class="settings-actions">
-          <button class="btn-save" onclick="saveSettings()">Apply Settings</button>
-          <span class="settings-status" id="settings-status"></span>
         </div>
       </div>
 
