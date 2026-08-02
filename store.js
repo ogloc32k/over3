@@ -7,7 +7,6 @@ class Store extends EventEmitter {
   constructor() {
     super();
 
-    // Create bandwidthHistory BEFORE calling _initMetrics
     this.bandwidthHistory = {};
 
     this.state = {
@@ -23,7 +22,8 @@ class Store extends EventEmitter {
       loginid: '',
       currency: 'USD',
       marketMetrics: this._initMetrics(),
-      botResetTime: null
+      botResetTime: null,
+      sessionTradeCount: 0   // tracks runs this session
     };
     this.config = {};
     this.tickBuffer = new TickBuffer(500);
@@ -43,7 +43,6 @@ class Store extends EventEmitter {
         tickDirections: [], supportPct: null, resistancePct: null,
         risePct: 0, fallPct: 0, lastPrices: []
       };
-      // Now safe because this.bandwidthHistory is already an object
       this.bandwidthHistory[s] = [];
     });
     return metrics;
