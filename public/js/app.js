@@ -53,8 +53,9 @@ function switchTab(tabId) {
   if (tabId === 'tab-logs') {
     if (typeof window.scrollLogsToBottom === 'function') window.scrollLogsToBottom();
   }
-  if (tabId === 'tab-bots' && typeof loadBotDailyPnl === 'function') {
-    loadBotDailyPnl();
+  if (tabId === 'tab-bots') {
+    if (typeof loadBotDailyPnl === 'function') loadBotDailyPnl();
+    if (typeof loadBotConfig   === 'function') loadBotConfig();
   }
 
   // Lazy-render tabs
@@ -397,7 +398,7 @@ function _syncBotCard(state) {
 
   if (state.tradeInProgress) {
     badge.textContent = 'TRADING';
-    badge.className   = 'bot-status-badge armed';
+    badge.className   = 'bot-status-badge running';
   } else if (state.active) {
     badge.textContent = 'ARMED';
     badge.className   = 'bot-status-badge armed';
@@ -406,12 +407,34 @@ function _syncBotCard(state) {
     badge.className   = 'bot-status-badge idle';
   }
 
-  const sp  = document.getElementById('bot-session-pnl');
-  const rk  = document.getElementById('bot-risk');
+  // Sync start/stop button visual state via dashboard.js helper
+  if (typeof window._setBotButtonState === 'function') {
+    if (state.active) window._setBotButtonState('armed');
+    else              window._setBotButtonState('idle');
+  }
+
   const pnl = v => '$' + Number(v || 0).toFixed(2);
 
-  if (sp) { sp.textContent = pnl(state.sessionPnl); sp.style.color = (state.sessionPnl || 0) >= 0 ? 'var(--green-profit)' : 'var(--red-loss)'; }
-  if (rk) rk.textContent = pnl(state.currentStake);
+  const sp = document.getElementById('bot-session-pnl');
+  if (sp) {
+    sp.textContent = pnl(state.sessionPnl);
+    sp.style.color = (state.sessionPnl || 0) >= 0 ? 'var(--green-profit)' : 'var(--red-loss)';
+  }
+
+  const dp = document.getElementById('bot-daily-pnl');
+  if (dp) {
+    dp.textContent = pnl(state.dailyPnl);
+    dp.style.color = (state.dailyPnl || 0) >= 0 ? 'var(--green-profit)' : 'var(--red-loss)';
+  }
+
+  // Runs counter (e.g. "3 / 20") — use cached max_runs
+  const runsEl = document.getElementById('bot-runs');
+  if (runsEl) {
+    const count = state.sessionTradeCount || 0;
+    const mr    = window._cachedMaxRuns   || 0;
+    runsEl.textContent = count + ' / ' + (mr > 0 ? mr : '—');
+    runsEl.style.color = (mr > 0 && count >= mr) ? 'var(--orange-warn)' : '';
+  }
 }
 
 // ============================================================
