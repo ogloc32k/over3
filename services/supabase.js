@@ -1,4 +1,4 @@
-// services/supabase.js
+services/supabase.js
 const { createClient } = require('@supabase/supabase-js');
 const WebSocket = require('ws');
 
