@@ -1,104 +1,187 @@
-// engine/bot.js – Sniper Confluence Strategy (Production)
-// Config is read from options.config (passed from server.js)
+ // engine/bot.js – Configurable Multi-Condition Strategy (v2)
+//
+// All entry conditions are toggled and ranged by the user via the settings
+// panel. ALL enabled conditions must pass together (AND logic) before a trade
+// fires. If no conditions are enabled the bot stays silent.
 
 /**
  * Evaluate a single symbol for a trading signal.
  *
- * @param {string}  symbol   - Deriv symbol (e.g. "R_75")
- * @param {object}  metrics  - computed marketMetrics for that symbol
- * @param {object}  state    - global store.state (balance, active, etc.)
+ * @param {string}  symbol   - Deriv symbol e.g. "R_75"
+ * @param {object}  metrics  - computeMetrics() result for that symbol
+ * @param {object}  state    - global store.state
  * @param {object}  options  - { tradeInProgress, lastCloseTime, config }
- * @returns {object|null}    - { symbol, contractType, duration, durationUnit, stake } or null
+ * @returns {object|null}    - trade params or null (no signal)
  */
 function evaluate(symbol, metrics, state, options = {}) {
-  // ---- Guards ----
-  if (!state.active) return null;
+
+  // ── Basic guards ─────────────────────────────────────────────────────────
+  if (!state.active)           return null;
   if (options.tradeInProgress) return null;
 
-  // Config comes from options (not state — state has no config property)
   const config = options.config || {};
 
+  // ── Cooldown guard ────────────────────────────────────────────────────────
   const cooldownSec = parseInt(config.BOT_COOLDOWN) || 5;
-  const now = Date.now();
-  if (options.lastCloseTime && (now - options.lastCloseTime < cooldownSec * 1000)) {
-    return null; // post-trade cooldown
+  if (options.lastCloseTime &&
+      (Date.now() - options.lastCloseTime < cooldownSec * 1000)) {
+    return null;
   }
 
-  if (!metrics || metrics.lastPrices.length < 20) return null; // not enough ticks yet
+  // Require at least 20 ticks before evaluating
+  if (!metrics || metrics.lastPrices.length < 20) return null;
 
-  // ---- Max runs guard ----
+  // ── Max runs guard ────────────────────────────────────────────────────────
   const maxRuns = parseInt(config.BOT_MAX_RUNS);
-  if (maxRuns && maxRuns > 0 && (state.sessionTradeCount || 0) >= maxRuns) {
-    return null; // session run limit reached
+  if (maxRuns > 0 && (state.sessionTradeCount || 0) >= maxRuns) return null;
+
+  // ── At least one condition must be enabled ────────────────────────────────
+  const condKeys = [
+    'COND_PRICE_UNDER_SUPPORT_ENABLED',
+    'COND_PRICE_OVER_RESISTANCE_ENABLED',
+    'COND_SUPPORT_PCT_ENABLED',
+    'COND_RESISTANCE_PCT_ENABLED',
+    'COND_RISE_PCT_ENABLED',
+    'COND_FALL_PCT_ENABLED',
+    'COND_RSI_ENABLED',
+    'COND_BB_SQUEEZE_ENABLED',
+    'COND_TICK_SEQ_ENABLED',
+  ];
+  const anyEnabled = condKeys.some(k => config[k] === true || config[k] === 'true');
+  if (!anyEnabled) return null;
+
+  // ── Destructure market metrics ────────────────────────────────────────────
+  const {
+    price,
+    support,
+    resistance,
+    supportPct,       // 100 = price at support,    0 = price at resistance
+    resistancePct,    // 100 = price at resistance,  0 = price at support
+    risePct,          // % of ticks that were up in the analysis window
+    fallPct,          // % of ticks that were down
+    rsi,
+    squeezePercentile, // BB squeeze percentile (lower = tighter squeeze)
+    tickDirections,   // last 20 tick directions (+1 rise, -1 fall, 0 flat)
+  } = metrics;
+
+  // Helper: parse a numeric config value, return fallback if invalid
+  const num = (key, fallback) => {
+    const v = parseFloat(config[key]);
+    return isNaN(v) ? fallback : v;
+  };
+  const on = (key) => config[key] === true || config[key] === 'true';
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  CONDITION 1 – Price breaks below Support
+  // ══════════════════════════════════════════════════════════════════════════
+  if (on('COND_PRICE_UNDER_SUPPORT_ENABLED')) {
+    if (support == null || price >= support) return null;
   }
 
-  // ---- Extract indicators ----
-  const price          = metrics.price;
-  const supportPct     = metrics.supportPct;
-  const rsi            = metrics.rsi;
-  const risePct        = metrics.risePct;
-  const fallPct        = metrics.fallPct;
-  const tickDirections = metrics.tickDirections || [];
+  // ══════════════════════════════════════════════════════════════════════════
+  //  CONDITION 2 – Price breaks above Resistance
+  // ══════════════════════════════════════════════════════════════════════════
+  if (on('COND_PRICE_OVER_RESISTANCE_ENABLED')) {
+    if (resistance == null || price <= resistance) return null;
+  }
 
-  // ---- RSI thresholds ----
-  const rsiOversold   = parseInt(config.BOT_RSI_OVERSOLD)   || 30;
-  const rsiOverbought = parseInt(config.BOT_RSI_OVERBOUGHT) || 70;
+  // ══════════════════════════════════════════════════════════════════════════
+  //  CONDITION 3 – Support % in range
+  //  supportPct: 100 = at support, 0 = at resistance
+  // ══════════════════════════════════════════════════════════════════════════
+  if (on('COND_SUPPORT_PCT_ENABLED')) {
+    if (supportPct == null) return null;
+    const min = num('COND_SUPPORT_PCT_MIN', 0);
+    const max = num('COND_SUPPORT_PCT_MAX', 100);
+    if (supportPct < min || supportPct > max) return null;
+  }
 
-  // ---- Duration & stake ----
-  const duration = parseInt(config.BOT_DURATION) || 70;
-  const stake    = state.currentStake || (parseFloat(config.BOT_BASE_STAKE) || 0.35);
+  // ══════════════════════════════════════════════════════════════════════════
+  //  CONDITION 4 – Resistance % in range
+  //  resistancePct: 100 = at resistance, 0 = at support
+  // ══════════════════════════════════════════════════════════════════════════
+  if (on('COND_RESISTANCE_PCT_ENABLED')) {
+    if (resistancePct == null) return null;
+    const min = num('COND_RESISTANCE_PCT_MIN', 0);
+    const max = num('COND_RESISTANCE_PCT_MAX', 100);
+    if (resistancePct < min || resistancePct > max) return null;
+  }
 
-  // ---- Dynamic sniper variables ----
-  const zoneThreshold   = parseFloat(config.SNIPER_ZONE_PCT)          || 20;   // zone % from edge
-  const tickCount       = parseInt(config.SNIPER_TICKS)               || 2;    // consecutive ticks required
-  const dominanceLimit  = parseFloat(config.SNIPER_DOMINANCE)         || 50;   // momentum dominance %
-  const breakoutPct     = (parseFloat(config.SNIPER_BREAKOUT_BUFFER)  || 0.5) / 100;
-  const bottomBreaker   = 1 - breakoutPct;  // e.g. 0.995
-  const topBreaker      = 1 + breakoutPct;  // e.g. 1.005
+  // ══════════════════════════════════════════════════════════════════════════
+  //  CONDITION 5 – Rise % in range
+  // ══════════════════════════════════════════════════════════════════════════
+  if (on('COND_RISE_PCT_ENABLED')) {
+    const min = num('COND_RISE_PCT_MIN', 0);
+    const max = num('COND_RISE_PCT_MAX', 100);
+    if (risePct < min || risePct > max) return null;
+  }
 
-  // ────────────────────────────────────────────────────────────
-  //  CALL conditions (Sniper Bounce at support)
-  // ────────────────────────────────────────────────────────────
-  if (
-    supportPct !== null && supportPct <= zoneThreshold &&
-    rsi < rsiOversold &&
-    hasConsecutiveTicks(tickDirections, 'down', tickCount) &&
-    fallPct >= dominanceLimit
-  ) {
-    // Circuit breaker: price has broken below support too far
-    if (metrics.support !== null && price < metrics.support * bottomBreaker) {
-      return null;
+  // ══════════════════════════════════════════════════════════════════════════
+  //  CONDITION 6 – Fall % in range
+  // ══════════════════════════════════════════════════════════════════════════
+  if (on('COND_FALL_PCT_ENABLED')) {
+    const min = num('COND_FALL_PCT_MIN', 0);
+    const max = num('COND_FALL_PCT_MAX', 100);
+    if (fallPct < min || fallPct > max) return null;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  CONDITION 7 – RSI in range
+  // ══════════════════════════════════════════════════════════════════════════
+  if (on('COND_RSI_ENABLED')) {
+    if (rsi == null) return null;
+    const min = num('COND_RSI_MIN', 0);
+    const max = num('COND_RSI_MAX', 100);
+    if (rsi < min || rsi > max) return null;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  CONDITION 8 – BB Squeeze percentile in range
+  //  Lower squeeze percentile = bands are tighter = potential breakout coming
+  // ══════════════════════════════════════════════════════════════════════════
+  if (on('COND_BB_SQUEEZE_ENABLED')) {
+    if (squeezePercentile == null) return null;
+    const min = num('COND_BB_SQUEEZE_MIN', 0);
+    const max = num('COND_BB_SQUEEZE_MAX', 100);
+    if (squeezePercentile < min || squeezePercentile > max) return null;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  CONDITION 9 – Last-N ticks sequence (R = rise, F = fall)
+  //  Pattern examples: "RR" = last 2 both rising, "RF" = rise then fall
+  //  Flat ticks (0) never satisfy either R or F.
+  // ══════════════════════════════════════════════════════════════════════════
+  if (on('COND_TICK_SEQ_ENABLED')) {
+    const raw     = String(config.COND_TICK_SEQ_PATTERN || '').toUpperCase();
+    const pattern = raw.replace(/[^RF]/g, '');      // strip anything that isn't R or F
+    if (pattern.length > 0) {
+      if (!_matchesTickPattern(tickDirections || [], pattern)) return null;
     }
-    return { symbol, contractType: 'CALL', duration, durationUnit: 't', stake };
   }
 
-  // ────────────────────────────────────────────────────────────
-  //  PUT conditions (Sniper Rejection at resistance)
-  // ────────────────────────────────────────────────────────────
-  if (
-    supportPct !== null && supportPct >= (100 - zoneThreshold) &&
-    rsi > rsiOverbought &&
-    hasConsecutiveTicks(tickDirections, 'up', tickCount) &&
-    risePct >= dominanceLimit
-  ) {
-    // Circuit breaker: price has broken above resistance too far
-    if (metrics.resistance !== null && price > metrics.resistance * topBreaker) {
-      return null;
-    }
-    return { symbol, contractType: 'PUT', duration, durationUnit: 't', stake };
-  }
+  // ── All enabled conditions passed – build trade signal ───────────────────
+  const direction = (config.TRADE_DIRECTION === 'PUT') ? 'PUT' : 'CALL';
+  const duration  = parseInt(config.BOT_DURATION) || 70;
+  const stake     = state.currentStake || (parseFloat(config.BOT_BASE_STAKE) || 0.35);
 
-  return null; // No confluence
+  return { symbol, contractType: direction, duration, durationUnit: 't', stake };
 }
 
 /**
- * Check if the last `count` tick directions are all the given direction.
+ * Returns true if the LAST pattern.length tick-directions match the pattern.
+ * 'R' expects direction === 1, 'F' expects direction === -1.
+ * A flat tick (0) never matches either letter.
  */
-function hasConsecutiveTicks(directions, dir, count) {
-  if (directions.length < count) return false;
-  const slice  = directions.slice(-count);
-  const target = dir === 'up' ? 1 : -1;
-  return slice.every(d => d === target);
+function _matchesTickPattern(directions, pattern) {
+  if (!directions || directions.length < pattern.length) return false;
+  const slice = directions.slice(-pattern.length);
+  for (let i = 0; i < pattern.length; i++) {
+    const ch  = pattern[i];
+    const dir = slice[i];
+    if (ch === 'R' && dir !== 1)  return false;
+    if (ch === 'F' && dir !== -1) return false;
+  }
+  return true;
 }
 
 module.exports = { evaluate };
