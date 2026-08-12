@@ -296,17 +296,19 @@
 .bots-screen {
   display: flex; flex-direction: column;
   flex: 1; padding: 10px; gap: 10px; overflow-y: auto;
+  width: 100%; box-sizing: border-box;
 }
 .bots-title {
   font-size: 14px; font-weight: 700;
   color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.5px;
 }
-.bots-list { display: flex; flex-direction: column; gap: 10px; }
+.bots-list { display: flex; flex-direction: column; gap: 10px; width: 100%; }
 .bot-card {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   border-radius: 12px; padding: 14px 16px;
   display: flex; flex-direction: column; gap: 12px;
+  width: 100%; box-sizing: border-box;
 }
 .bot-card-header { display: flex; align-items: flex-start; justify-content: space-between; }
 .bot-name { font-size: 15px; font-weight: 700; color: var(--text-primary); }
@@ -319,7 +321,8 @@
 .bot-status-badge.idle { background: var(--bg-surface); color: var(--text-secondary); }
 .bot-status-badge.running { background: rgba(16,185,129,0.15); color: var(--green-profit); }
 .bot-status-badge.armed { background: rgba(59,130,246,0.15); color: var(--neon-blue); }
-.bot-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; }
+/* 2×2 grid on mobile — all 4 stats visible without wasted space */
+.bot-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .bstat {
   background: var(--bg-surface); border-radius: 8px;
   padding: 8px 6px; text-align: center;
@@ -370,6 +373,39 @@
   position: sticky; bottom: 0;
   margin: 0 !important; padding: 12px 10px !important;
 }
+
+/* New settings-page layout (replaces old settings-grid on Settings tab) */
+/* On mobile the tab page itself is the scroll container */
+#tab-settings.active {
+  align-items: stretch !important; /* mobile: full-width */
+  overflow-y: auto !important;
+  flex: 1 !important;
+  min-height: 0 !important;
+}
+.settings-page {
+  flex-shrink: 0 !important;
+  min-height: max-content !important;
+  max-width: 100% !important;
+  padding: 10px 10px 60px !important;
+  /* single column on mobile – override the desktop 2-col grid */
+  display: flex !important;
+  flex-direction: column !important;
+  grid-template-columns: unset !important;
+}
+/* Condition grid: single column on mobile */
+.settings-cond-grid {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px;
+}
+.cond-row { margin-bottom: 0; }
+/* Ensure condition range inputs don't overflow narrow screens */
+.cond-row-range {
+  grid-template-columns: 1fr auto 1fr;
+  gap: 4px;
+}
+.bsp-grid-3 { grid-template-columns: 1fr 1fr !important; }
+.bsp-grid-3 .bsp-field:last-child { grid-column: 1 / -1; }
 
 /* ---- Drawer button reset ---- */
 .drawer-nav-item,
@@ -454,4 +490,164 @@
 
 .drawer-header {
   position: relative;
+}
+
+/* ---- Responsive header + theme control ----
+   Keep account, status, clock, and the dark/light toggle inside the
+   viewport instead of allowing the desktop one-line header to clip. */
+.app-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: start;
+  height: auto;
+  min-height: calc(72px + env(safe-area-inset-top));
+  padding: calc(4px + env(safe-area-inset-top))
+           max(8px, env(safe-area-inset-right))
+           6px
+           max(8px, env(safe-area-inset-left));
+}
+
+.app-header .left {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  min-width: 0;
+  align-self: start;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.app-brand {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.mobile-profile-btn {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.header-right {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto;
+  align-self: start;
+  gap: 4px 6px;
+  min-width: 0;
+}
+
+.header-status {
+  grid-column: 1;
+  grid-row: 1;
+  max-width: 78px;
+  overflow: hidden;
+  padding: 4px 8px;
+  font-size: 10px;
+  text-overflow: ellipsis;
+}
+
+.header-clock {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  justify-self: end;
+  min-width: 0;
+  padding: 3px 6px;
+  font-size: 10px;
+}
+
+.theme-toggle {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 4px 8px;
+}
+
+.app-body {
+  height: calc(100svh - 72px - env(safe-area-inset-top));
+}
+
+.mobile-home-screen {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 10px calc(80px + env(safe-area-inset-bottom));
+  overflow-x: hidden;
+}
+
+.perf-section,
+.asset-perf-section {
+  width: 100%;
+  min-width: 0;
+}
+
+.perf-header {
+  min-width: 0;
+  gap: 8px;
+}
+
+.perf-title,
+.section-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.perf-title { flex: 1 1 auto; }
+.perf-timeframe { flex: 0 0 auto; }
+
+.home-status-strip {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* These rules previously used fixed dark colors, which made the drawer
+   unreadable after switching to the light theme. */
+.drawer-nav-item,
+.drawer-nav-item:visited,
+.drawer-nav-item:link,
+.btn-swap-drawer {
+  border-bottom-color: var(--border-subtle) !important;
+  color: var(--text-primary) !important;
+}
+
+.drawer-nav-item:hover,
+.drawer-nav-item:active,
+.btn-swap-drawer:hover,
+.btn-swap-drawer:active {
+  background-color: var(--bg-surface) !important;
+  color: var(--text-primary) !important;
+}
+
+.drawer-divider {
+  background: var(--border-subtle);
+}
+
+.drawer-close {
+  color: var(--text-secondary);
+}
+
+.drawer-close:hover {
+  color: var(--text-primary);
+}
+
+@media (max-width: 370px) {
+  .app-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .app-header .left { gap: 5px; }
+  .mobile-profile-btn { padding-inline: 8px; }
+  .app-brand { font-size: 11px; }
+  .header-status { max-width: 70px; padding-inline: 6px; }
+  .header-clock { font-size: 9px; }
+  .mobile-home-screen { padding-inline: 8px; }
 }
