@@ -109,17 +109,10 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   // ---- Theme toggle ----
-  const themeToggle = document.getElementById('themeToggle');
-  if (themeToggle) {
-    const currentTheme = localStorage.getItem('theme') || 'dark';
-    document.body.classList.toggle('light', currentTheme === 'light');
-    themeToggle.textContent = currentTheme === 'light' ? '☀️' : '🌙';
-    themeToggle.addEventListener('click', function () {
-      const isLight = document.body.classList.toggle('light');
-      localStorage.setItem('theme', isLight ? 'light' : 'dark');
-      themeToggle.textContent = isLight ? '☀️' : '🌙';
-    });
-  }
+  // SVG icons are managed by the inline <script> at the bottom of index.html.
+  // app.js only restores the saved class on body (icons update automatically).
+  const savedTheme = localStorage.getItem('theme') || 'dark';
+  document.body.classList.toggle('light', savedTheme === 'light');
 
   // ---- Sidebar toggle ----
   const sidebar = document.getElementById('appSidebar');
@@ -472,23 +465,27 @@ function loadMobileHomeData() {
         mobileEquityChart = new Chart(ctx, {
           type: 'line',
           data: {
+            labels: data.equityData.map(p => new Date(p.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })),
             datasets: [{
               label: 'Equity',
-              data: data.equityData.map(p => ({
-                x: new Date(p.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-                y: p.equity
-              })),
+              data: data.equityData.map(p => parseFloat(p.equity) || 0),
               borderColor: lineColor,
               backgroundColor: fillColor,
               fill: true,
               tension: 0.3,
-              pointRadius: 0
+              pointRadius: 0,
+              pointHoverRadius: 3,
+              borderWidth: 2
             }]
           },
           options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { display: false } }
+            plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+            scales: {
+              x: { ticks: { maxTicksLimit: 6, maxRotation: 0, autoSkip: true, font: { size: 9 } }, grid: { display: false } },
+              y: { ticks: { callback: v => (v >= 0 ? '+' : '') + '$' + v.toFixed(2), font: { size: 9 } } }
+            }
           }
         });
       }
@@ -563,20 +560,28 @@ function setHomeTf(btn, mode) {
           mobileEquityChart = new Chart(ctx, {
             type: 'line',
             data: {
+              labels: data.equityData.map(p => new Date(p.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })),
               datasets: [{
                 label: 'Equity',
-                data: data.equityData.map(p => ({
-                  x: new Date(p.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-                  y: p.equity
-                })),
+                data: data.equityData.map(p => parseFloat(p.equity) || 0),
                 borderColor: lineColor,
                 backgroundColor: fillColor,
                 fill: true,
                 tension: 0.3,
-                pointRadius: 0
+                pointRadius: 0,
+                pointHoverRadius: 3,
+                borderWidth: 2
               }]
             },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+              scales: {
+                x: { ticks: { maxTicksLimit: 6, maxRotation: 0, autoSkip: true, font: { size: 9 } }, grid: { display: false } },
+                y: { ticks: { callback: v => (v >= 0 ? '+' : '') + '$' + v.toFixed(2), font: { size: 9 } } }
+              }
+            }
           });
         }
         const emptyEl = document.getElementById('perf-empty');
