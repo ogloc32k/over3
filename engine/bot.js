@@ -1,187 +1,286 @@
- // engine/bot.js – Configurable Multi-Condition Strategy (v2)
-//
-// All entry conditions are toggled and ranged by the user via the settings
-// panel. ALL enabled conditions must pass together (AND logic) before a trade
-// fires. If no conditions are enabled the bot stays silent.
+// engine/indicators.js
+// ============================================================
+// All indicator computations for the Sniper strategy
+// Fixes applied:
+//   P1 – Swing-pivot S/R with cluster validation (not rolling min/max)
+//   P2 – Autocorrelation regime filter (mean-reversion confirmation)
+//   P3 – BB band position exposed for independent signal check in bot.js
+//   P4 – Wilder's smoothed RSI (not simple-sum approximation)
+// ============================================================
 
-/**
- * Evaluate a single symbol for a trading signal.
- *
- * @param {string}  symbol   - Deriv symbol e.g. "R_75"
- * @param {object}  metrics  - computeMetrics() result for that symbol
- * @param {object}  state    - global store.state
- * @param {object}  options  - { tradeInProgress, lastCloseTime, config }
- * @returns {object|null}    - trade params or null (no signal)
- */
-function evaluate(symbol, metrics, state, options = {}) {
+function computeMetrics(symbol, prices, config = {}, bandwidthHistory = []) {
+  if (!prices || prices.length < 2) return null;
 
-  // ── Basic guards ─────────────────────────────────────────────────────────
-  if (!state.active)           return null;
-  if (options.tradeInProgress) return null;
+  const lastPrice = prices[prices.length - 1];
 
-  const config = options.config || {};
+  // ── Support / Resistance via swing pivots (Problem 1 fix) ──────────────
+  const { support, resistance, supportTouches, resistanceTouches } =
+    findSwingLevels(prices, config);
 
-  // ── Cooldown guard ────────────────────────────────────────────────────────
-  const cooldownSec = parseInt(config.BOT_COOLDOWN) || 5;
-  if (options.lastCloseTime &&
-      (Date.now() - options.lastCloseTime < cooldownSec * 1000)) {
-    return null;
+  // Channel position: supportPct is 0 at support; resistancePct is 0 at
+  // resistance. The two values always sum to 100%.
+  let supportPct = null, resistancePct = null;
+  const range = resistance - support;
+  if (range > 0) {
+    supportPct    = ((lastPrice  - support)    / range) * 100;
+    resistancePct = ((resistance - lastPrice) / range) * 100;
+  } else {
+    supportPct = resistancePct = 50;
   }
 
-  // Require at least 20 ticks before evaluating
-  if (!metrics || metrics.lastPrices.length < 20) return null;
-
-  // ── Max runs guard ────────────────────────────────────────────────────────
-  const maxRuns = parseInt(config.BOT_MAX_RUNS);
-  if (maxRuns > 0 && (state.sessionTradeCount || 0) >= maxRuns) return null;
-
-  // ── At least one condition must be enabled ────────────────────────────────
-  const condKeys = [
-    'COND_PRICE_UNDER_SUPPORT_ENABLED',
-    'COND_PRICE_OVER_RESISTANCE_ENABLED',
-    'COND_SUPPORT_PCT_ENABLED',
-    'COND_RESISTANCE_PCT_ENABLED',
-    'COND_RISE_PCT_ENABLED',
-    'COND_FALL_PCT_ENABLED',
-    'COND_RSI_ENABLED',
-    'COND_BB_SQUEEZE_ENABLED',
-    'COND_TICK_SEQ_ENABLED',
-  ];
-  const anyEnabled = condKeys.some(k => config[k] === true || config[k] === 'true');
-  if (!anyEnabled) return null;
-
-  // ── Destructure market metrics ────────────────────────────────────────────
+  // ── Bollinger Bands ────────────────────────────────────────────────────
   const {
-    price,
+    upper: bbUpper,
+    middle: bbMiddle,
+    lower: bbLower,
+    bandwidth
+  } = computeBollinger(prices, config.BOLLINGER_PERIOD || 20, config.BOLLINGER_STD || 2);
+
+  // BB Squeeze percentile (historical compression rank)
+  let squeezePercentile = null;
+  if (bandwidth !== null && bandwidthHistory.length >= 20) {
+    const higherCount = bandwidthHistory.filter(bw => bw >= bandwidth).length;
+    squeezePercentile = (higherCount / bandwidthHistory.length) * 100;
+  }
+
+  // ── RSI (Wilder's smoothed — Problem 4 fix) ────────────────────────────
+  const rsi = computeRSI(prices, config.RSI_PERIOD || 14);
+
+  // ── Autocorrelation regime filter (Problem 2 fix) ─────────────────────
+  const autocorrelation = computeAutocorrelation(prices, 1, config.AC_WINDOW || 60);
+
+  // ── Volatility ─────────────────────────────────────────────────────────
+  const volatility = computeVolatility(prices);
+
+  // ── Tick direction ratios (still useful for display, not for signal) ───
+  const tickDirections = prices.slice(1).map((p, i) => p > prices[i] ? 1 : (p < prices[i] ? -1 : 0));
+  const upCount    = tickDirections.filter(d => d === 1).length;
+  const downCount  = tickDirections.filter(d => d === -1).length;
+  const total      = tickDirections.length;
+  const risePct    = total > 0 ? (upCount   / total) * 100 : 0;
+  const fallPct    = total > 0 ? (downCount / total) * 100 : 0;
+
+  const isBreakout  = lastPrice > resistance;
+  const isBreakdown = lastPrice < support;
+
+  const score = computeScore(rsi, isBreakout, isBreakdown, volatility, risePct, fallPct);
+
+  return {
+    price:             lastPrice,
+    step:              isBreakout || isBreakdown ? 3 : (resistancePct < 5 ? 2 : 1),
     support,
     resistance,
-    supportPct,       // 100 = price at support,    0 = price at resistance
-    resistancePct,    // 100 = price at resistance,  0 = price at support
-    risePct,          // % of ticks that were up in the analysis window
-    fallPct,          // % of ticks that were down
+    supportTouches,
+    resistanceTouches,
+    isBreakout,
+    isBreakdown,
     rsi,
-    squeezePercentile, // BB squeeze percentile (lower = tighter squeeze)
-    tickDirections,   // last 20 tick directions (+1 rise, -1 fall, 0 flat)
-  } = metrics;
-
-  // Helper: parse a numeric config value, return fallback if invalid
-  const num = (key, fallback) => {
-    const v = parseFloat(config[key]);
-    return isNaN(v) ? fallback : v;
+    autocorrelation,
+    volatility,
+    score,
+    bandwidth,
+    squeezePercentile,
+    bbUpper,
+    bbMiddle,
+    bbLower,
+    tickDirections:    tickDirections.slice(-20),
+    supportPct,
+    resistancePct,
+    risePct,
+    fallPct,
+    lastPrices:        prices.slice(-20),
   };
-  const on = (key) => config[key] === true || config[key] === 'true';
+}
 
-  // ══════════════════════════════════════════════════════════════════════════
-  //  CONDITION 1 – Price breaks below Support
-  // ══════════════════════════════════════════════════════════════════════════
-  if (on('COND_PRICE_UNDER_SUPPORT_ENABLED')) {
-    if (support == null || price >= support) return null;
-  }
+// ============================================================
+// SWING-PIVOT SUPPORT / RESISTANCE  (Problem 1 fix)
+// ============================================================
+// A swing low/high is a price that is the lowest/highest point
+// in a ±radius tick window. Nearby swings are clustered so that
+// micro-noise doesn't create hundreds of spurious levels.
+// Falls back to rolling min/max when not enough data exists.
+// ============================================================
+function findSwingLevels(prices, config = {}) {
+  const radius       = parseInt(config.SWING_RADIUS)   || 8;     // ticks each side
+  const lookback     = parseInt(config.SWING_LOOKBACK)  || 400;   // history window
+  const clusterRange = parseFloat(config.SWING_CLUSTER) || 0.002; // 0.2 % tolerance
 
-  // ══════════════════════════════════════════════════════════════════════════
-  //  CONDITION 2 – Price breaks above Resistance
-  // ══════════════════════════════════════════════════════════════════════════
-  if (on('COND_PRICE_OVER_RESISTANCE_ENABLED')) {
-    if (resistance == null || price <= resistance) return null;
-  }
+  const slice = prices.slice(-Math.min(lookback, prices.length));
+  const currentPrice = slice[slice.length - 1];
+  const swingLows = [], swingHighs = [];
 
-  // ══════════════════════════════════════════════════════════════════════════
-  //  CONDITION 3 – Support % in range
-  //  supportPct: 100 = at support, 0 = at resistance
-  // ══════════════════════════════════════════════════════════════════════════
-  if (on('COND_SUPPORT_PCT_ENABLED')) {
-    if (supportPct == null) return null;
-    const min = num('COND_SUPPORT_PCT_MIN', 0);
-    const max = num('COND_SUPPORT_PCT_MAX', 100);
-    if (supportPct < min || supportPct > max) return null;
-  }
+  // Find swing pivots
+  for (let i = radius; i < slice.length - radius; i++) {
+    const center = slice[i];
+    let isLow = true, isHigh = true;
 
-  // ══════════════════════════════════════════════════════════════════════════
-  //  CONDITION 4 – Resistance % in range
-  //  resistancePct: 100 = at resistance, 0 = at support
-  // ══════════════════════════════════════════════════════════════════════════
-  if (on('COND_RESISTANCE_PCT_ENABLED')) {
-    if (resistancePct == null) return null;
-    const min = num('COND_RESISTANCE_PCT_MIN', 0);
-    const max = num('COND_RESISTANCE_PCT_MAX', 100);
-    if (resistancePct < min || resistancePct > max) return null;
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  //  CONDITION 5 – Rise % in range
-  // ══════════════════════════════════════════════════════════════════════════
-  if (on('COND_RISE_PCT_ENABLED')) {
-    const min = num('COND_RISE_PCT_MIN', 0);
-    const max = num('COND_RISE_PCT_MAX', 100);
-    if (risePct < min || risePct > max) return null;
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  //  CONDITION 6 – Fall % in range
-  // ══════════════════════════════════════════════════════════════════════════
-  if (on('COND_FALL_PCT_ENABLED')) {
-    const min = num('COND_FALL_PCT_MIN', 0);
-    const max = num('COND_FALL_PCT_MAX', 100);
-    if (fallPct < min || fallPct > max) return null;
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  //  CONDITION 7 – RSI in range
-  // ══════════════════════════════════════════════════════════════════════════
-  if (on('COND_RSI_ENABLED')) {
-    if (rsi == null) return null;
-    const min = num('COND_RSI_MIN', 0);
-    const max = num('COND_RSI_MAX', 100);
-    if (rsi < min || rsi > max) return null;
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  //  CONDITION 8 – BB Squeeze percentile in range
-  //  Lower squeeze percentile = bands are tighter = potential breakout coming
-  // ══════════════════════════════════════════════════════════════════════════
-  if (on('COND_BB_SQUEEZE_ENABLED')) {
-    if (squeezePercentile == null) return null;
-    const min = num('COND_BB_SQUEEZE_MIN', 0);
-    const max = num('COND_BB_SQUEEZE_MAX', 100);
-    if (squeezePercentile < min || squeezePercentile > max) return null;
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  //  CONDITION 9 – Last-N ticks sequence (R = rise, F = fall)
-  //  Pattern examples: "RR" = last 2 both rising, "RF" = rise then fall
-  //  Flat ticks (0) never satisfy either R or F.
-  // ══════════════════════════════════════════════════════════════════════════
-  if (on('COND_TICK_SEQ_ENABLED')) {
-    const raw     = String(config.COND_TICK_SEQ_PATTERN || '').toUpperCase();
-    const pattern = raw.replace(/[^RF]/g, '');      // strip anything that isn't R or F
-    if (pattern.length > 0) {
-      if (!_matchesTickPattern(tickDirections || [], pattern)) return null;
+    for (let j = i - radius; j <= i + radius; j++) {
+      if (j === i) continue;
+      if (slice[j] < center) isLow  = false;
+      if (slice[j] > center) isHigh = false;
+      if (!isLow && !isHigh) break;
     }
+
+    if (isLow)  swingLows.push(center);
+    if (isHigh) swingHighs.push(center);
   }
 
-  // ── All enabled conditions passed – build trade signal ───────────────────
-  const direction = (config.TRADE_DIRECTION === 'PUT') ? 'PUT' : 'CALL';
-  const duration  = parseInt(config.BOT_DURATION) || 70;
-  const stake     = state.currentStake || (parseFloat(config.BOT_BASE_STAKE) || 0.35);
+  // Cluster nearby swing levels and count touches
+  function cluster(levels) {
+    if (!levels.length) return [];
+    const sorted = [...levels].sort((a, b) => a - b);
+    const clusters = [];
+    let group = [sorted[0]];
 
-  return { symbol, contractType: direction, duration, durationUnit: 't', stake };
-}
-
-/**
- * Returns true if the LAST pattern.length tick-directions match the pattern.
- * 'R' expects direction === 1, 'F' expects direction === -1.
- * A flat tick (0) never matches either letter.
- */
-function _matchesTickPattern(directions, pattern) {
-  if (!directions || directions.length < pattern.length) return false;
-  const slice = directions.slice(-pattern.length);
-  for (let i = 0; i < pattern.length; i++) {
-    const ch  = pattern[i];
-    const dir = slice[i];
-    if (ch === 'R' && dir !== 1)  return false;
-    if (ch === 'F' && dir !== -1) return false;
+    for (let i = 1; i < sorted.length; i++) {
+      const refPrice = group[0];
+      if (Math.abs(sorted[i] - refPrice) / refPrice <= clusterRange) {
+        group.push(sorted[i]);
+      } else {
+        const avg = group.reduce((a, b) => a + b, 0) / group.length;
+        clusters.push({ level: avg, touches: group.length });
+        group = [sorted[i]];
+      }
+    }
+    const avg = group.reduce((a, b) => a + b, 0) / group.length;
+    clusters.push({ level: avg, touches: group.length });
+    return clusters;
   }
-  return true;
+
+  const supportClusters    = cluster(swingLows).filter(c  => c.level < currentPrice);
+  const resistanceClusters = cluster(swingHighs).filter(c => c.level > currentPrice);
+
+  // Nearest validated support below price, nearest resistance above
+  supportClusters.sort((a, b)    => b.level - a.level);
+  resistanceClusters.sort((a, b) => a.level - b.level);
+
+  const fallbackMin = Math.min(...slice);
+  const fallbackMax = Math.max(...slice);
+
+  return {
+    support:           supportClusters.length    > 0 ? supportClusters[0].level    : fallbackMin,
+    resistance:        resistanceClusters.length > 0 ? resistanceClusters[0].level : fallbackMax,
+    supportTouches:    supportClusters.length    > 0 ? supportClusters[0].touches  : 1,
+    resistanceTouches: resistanceClusters.length > 0 ? resistanceClusters[0].touches : 1,
+  };
 }
 
-module.exports = { evaluate };
+// ============================================================
+// AUTOCORRELATION REGIME FILTER  (Problem 2 fix)
+// ============================================================
+// Lag-1 autocorrelation of price returns over a rolling window.
+// Negative value → returns alternate direction → mean-reverting.
+// Near zero → random walk, no structure.
+// Positive → returns persist direction → trending.
+// Only enter on bounces when AC is meaningfully negative.
+// ============================================================
+function computeAutocorrelation(prices, lag, window) {
+  lag    = lag    || 1;
+  window = window || 60;
+
+  const slice = prices.slice(-Math.min(window + 1, prices.length));
+  if (slice.length < lag + 3) return 0;
+
+  // First-difference returns
+  const returns = [];
+  for (let i = 1; i < slice.length; i++) {
+    returns.push(slice[i] - slice[i - 1]);
+  }
+
+  const n    = returns.length;
+  const mean = returns.reduce((a, b) => a + b, 0) / n;
+  const dm   = returns.map(r => r - mean);
+
+  let cov = 0, variance = 0;
+  for (let i = lag; i < n; i++) cov      += dm[i] * dm[i - lag];
+  for (let i = 0; i < n; i++)  variance  += dm[i] * dm[i];
+
+  return variance === 0 ? 0 : cov / variance;
+}
+
+// ============================================================
+// RSI — WILDER'S SMOOTHED  (Problem 4 fix)
+// ============================================================
+// Standard Wilder's method: seed with SMA of first `period`
+// changes, then apply recursive smoothing for all remaining.
+// This is the correct algorithm used in every trading platform.
+// ============================================================
+function computeRSI(prices, period) {
+  period = period || 14;
+  if (prices.length < period + 1) return 50;
+
+  let avgGain = 0, avgLoss = 0;
+
+  // Seed: simple average of first `period` up/down moves
+  for (let i = 1; i <= period; i++) {
+    const diff = prices[i] - prices[i - 1];
+    if (diff > 0) avgGain += diff;
+    else          avgLoss -= diff;
+  }
+  avgGain /= period;
+  avgLoss /= period;
+
+  // Wilder smoothing over remaining candles
+  for (let i = period + 1; i < prices.length; i++) {
+    const diff = prices[i] - prices[i - 1];
+    const gain = diff > 0 ? diff : 0;
+    const loss = diff < 0 ? -diff : 0;
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+  }
+
+  if (avgLoss === 0) return avgGain === 0 ? 50 : 100;
+  const rs = avgGain / avgLoss;
+  return 100 - (100 / (1 + rs));
+}
+
+// ============================================================
+// BOLLINGER BANDS
+// ============================================================
+function computeBollinger(prices, period, stdMult) {
+  period  = period  || 20;
+  stdMult = stdMult || 2;
+
+  if (prices.length < period) {
+    return { upper: null, middle: null, lower: null, bandwidth: null };
+  }
+
+  const slice    = prices.slice(-period);
+  const mean     = slice.reduce((a, b) => a + b, 0) / period;
+  const variance = slice.reduce((a, b) => a + (b - mean) ** 2, 0) / period;
+  const std      = Math.sqrt(variance);
+  const upper    = mean + stdMult * std;
+  const lower    = mean - stdMult * std;
+  const bandwidth = mean > 0 ? ((upper - lower) / mean) * 100 : 0;
+
+  return { upper, middle: mean, lower, bandwidth };
+}
+
+// ============================================================
+// VOLATILITY
+// ============================================================
+function computeVolatility(prices) {
+  if (prices.length < 2) return 0;
+  const returns = [];
+  for (let i = 1; i < prices.length; i++) {
+    returns.push((prices[i] - prices[i - 1]) / prices[i - 1]);
+  }
+  const mean     = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const variance = returns.reduce((a, b) => a + (b - mean) ** 2, 0) / returns.length;
+  return Math.sqrt(variance) * 100;
+}
+
+// ============================================================
+// SCORE (display only — not used for trade decisions)
+// ============================================================
+function computeScore(rsi, isBreakout, isBreakdown, volatility, risePct, fallPct) {
+  let score = 50;
+  if (rsi > 70) score += 20;
+  else if (rsi < 30) score -= 20;
+  if (risePct > 60) score += 10;
+  else if (fallPct > 60) score -= 10;
+  score += volatility * 2;
+  return Math.min(100, Math.max(0, score));
+}
+
+module.exports = { computeMetrics };
