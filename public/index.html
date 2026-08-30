@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>QUANTCORE // TERMINAL v6.0</title>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <link rel="stylesheet" href="css/styles.css?v=18">
+  <link rel="stylesheet" href="css/styles-mobile.css?v=18" media="(max-width: 768px)">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+  <!-- ====== NAV DRAWER (Mobile) ====== -->
+  <div class="nav-drawer-overlay" id="navDrawerOverlay" onclick="closeNavDrawer()"></div>
+  <nav class="nav-drawer" id="navDrawer">
+    <div class="drawer-header">
+      <div class="drawer-profile">
+        <div class="drawer-avatar">👤</div>
+        <div class="drawer-profile-info">
+          <div class="drawer-mode" id="drawer-mode">DEMO</div>
+          <div class="drawer-balance" id="drawer-balance">$0.00</div>
+        </div>
+      </div>
+      <button class="drawer-close" onclick="closeNavDrawer()">✕</button>
+    </div>
+    <div class="drawer-nav">
+      <button class="drawer-nav-item active" data-tab="tab-home" onclick="switchTab('tab-home'); closeNavDrawer()">
+        <span class="dnav-icon">📊</span><span class="dnav-label">Home</span>
+      </button>
+      <button class="drawer-nav-item" data-tab="tab-markets" onclick="switchTab('tab-markets'); closeNavDrawer()">
+        <span class="dnav-icon">📈</span><span class="dnav-label">Markets</span>
+      </button>
+      <button class="drawer-nav-item" data-tab="tab-manual" onclick="switchTab('tab-manual'); closeNavDrawer()">
+        <span class="dnav-icon">🎯</span><span class="dnav-label">Manual Trade</span>
+      </button>
+      <button class="drawer-nav-item" data-tab="tab-bots" onclick="switchTab('tab-bots'); closeNavDrawer()">
+        <span class="dnav-icon">🤖</span><span class="dnav-label">Bots</span>
+      </button>
+      <button class="drawer-nav-item" data-tab="tab-analytics" onclick="switchTab('tab-analytics'); closeNavDrawer()">
+        <span class="dnav-icon">📉</span><span class="dnav-label">Analytics</span>
+      </button>
+      <button class="drawer-nav-item" data-tab="tab-logs" onclick="switchTab('tab-logs'); closeNavDrawer()">
+        <span class="dnav-icon">📋</span><span class="dnav-label">Logs</span>
+      </button>
+      <button class="drawer-nav-item" data-tab="tab-settings" onclick="switchTab('tab-settings'); closeNavDrawer()">
+        <span class="dnav-icon">⚙️</span><span class="dnav-label">Settings</span>
+      </button>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn-swap-drawer" onclick="swapEnvironment(); closeNavDrawer()">🔄 Switch Account</button>
+    </div>
+  </nav>
+
+  <!-- ====== HEADER ====== -->
+  <header class="app-header">
+    <div class="left">
+      <button class="mobile-profile-btn" id="mobileProfileBtn" onclick="openNavDrawer()">
+        <span class="profile-avatar">👤</span>
+        <span class="profile-mode" id="header-profile-mode">DEMO</span>
+      </button>
+      <div class="app-brand">QUANTCORE<span>//</span>TERMINAL <small>v6.0</small></div>
+      <div class="header-tabs">
+        <button class="nav-tab active" data-tab="tab-home">Home</button>
+        <button class="nav-tab" data-tab="tab-manual">Manual</button>
+        <button class="nav-tab" data-tab="tab-bots">Bots</button>
+        <button class="nav-tab" data-tab="tab-analytics">Analytics</button>
+        <button class="nav-tab" data-tab="tab-logs">Logs</button>
+        <button class="nav-tab" data-tab="tab-settings">Settings</button>
+      </div>
+    </div>
+    <div class="header-right">
+      <span class="header-status" id="header-status">● IDLE</span>
+      <div class="header-clock"><span id="clock-display">00:00:00</span> EAT</div>
+      <button class="theme-toggle" id="themeToggle" title="Toggle theme">🌙</button>
+    </div>
+  </header>
+
+  <!-- ====== BODY ====== -->
+  <div class="app-body">
+
+    <!-- SIDEBAR (Desktop only) -->
+    <aside class="app-sidebar" id="appSidebar">
+      <div class="sidebar-content">
+        <div class="sidebar-profile">
+          <div class="sp-avatar">👤</div>
+          <div class="sp-name" id="m-profile">—</div>
+          <div class="sp-balance" id="m-balance">---</div>
+          <button class="sp-switch" onclick="swapEnvironment()" title="Switch between DEMO and REAL account">🔄 Switch</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="app-main">
+
+      <!-- FOCUS BAR (Desktop only) -->
+      <div class="focus-bar" id="focusBar">
+        <div class="left">
+          <span class="name" id="f-name">Volatility 75 Index</span>
+          <span class="price" id="f-price">—</span>
+          <span class="sr" id="f-sr"><span class="s">S: —</span> <span class="r">R: —</span></span>
+        </div>
+        <div class="right">
+          <span id="f-rsi">RSI: —</span>
+          <span id="f-vol">Vol: —</span>
+        </div>
+      </div>
+
+      <!-- ======= TAB PAGES ======= -->
+
+      <!-- HOME -->
+      <div id="tab-home" class="tab-page active">
+        <div class="table-container desktop-table">
+          <table class="data-table" id="dataTable">
+            <thead>
+              <tr>
+                <th class="col-asset">Asset</th>
+                <th class="col-price">Price</th>
+                <th class="col-sr">S/R</th>
+                <th class="col-sr-pct">S/R %</th>
+                <th class="col-rf-pct">Rise/Fall %</th>
+                <th class="col-rsi">RSI</th>
+                <th class="col-bb-squeeze">BB Squeeze</th>
+                <th class="col-trend">Micro Trend</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+        <div class="mobile-home-screen">
+          <div class="perf-section">
+            <div class="perf-header">
+              <span class="perf-title">Equity Performance</span>
+              <div class="perf-timeframe">
+                <button class="tf-btn active" onclick="setHomeTf(this,'1W')">1W</button>
+                <button class="tf-btn" onclick="setHomeTf(this,'1M')">1M</button>
+              </div>
+            </div>
+            <div class="perf-chart-wrap">
+              <canvas id="mobile-equity-chart"></canvas>
+              <div class="perf-empty" id="perf-empty">No trade history yet</div>
+            </div>
+            <div class="perf-stats">
+              <div class="pstat"><div class="pstat-lbl">Net P&L</div><div class="pstat-val" id="home-pnl">$0.00</div></div>
+              <div class="pstat"><div class="pstat-lbl">Win Rate</div><div class="pstat-val" id="home-wr">0%</div></div>
+              <div class="pstat"><div class="pstat-lbl">Trades</div><div class="pstat-val" id="home-trades">0</div></div>
+            </div>
+          </div>
+          <div class="asset-perf-section">
+            <div class="section-title">Asset Performance</div>
+            <div class="asset-perf-chart-wrap">
+              <canvas id="mobile-asset-perf-chart"></canvas>
+              <div class="perf-empty" id="asset-perf-empty">No data yet</div>
+            </div>
+          </div>
+          <div class="home-status-strip">
+            <div class="hstat"><span class="hstat-lbl">Mode</span><span class="hstat-val blue" id="home-mode">DEMO</span></div>
+            <div class="hstat"><span class="hstat-lbl">Balance</span><span class="hstat-val blue" id="home-balance">$0.00</span></div>
+            <div class="hstat"><span class="hstat-lbl">Status</span><span class="hstat-val" id="home-status">IDLE</span></div>
+            <div class="hstat"><span class="hstat-lbl">Session</span><span class="hstat-val green" id="home-session">$0.00</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MARKETS -->
+      <div id="tab-markets" class="tab-page">
+        <div class="mobile-markets-list" id="mobileMarketsList"></div>
+      </div>
+
+      <!-- MANUAL TRADE -->
+      <div id="tab-manual" class="tab-page">
+        <div class="manual-trade-screen">
+          <div class="manual-market-selector">
+            <div class="manual-chips" id="manualChips"></div>
+          </div>
+          <div class="manual-market-info">
+            <div class="manual-price-row">
+              <span class="manual-asset-name" id="manual-asset-name">Volatility 75 Index</span>
+              <span class="manual-price" id="manual-price">—</span>
+            </div>
+            <div class="manual-chart-wrap">
+              <canvas id="manual-tick-chart"></canvas>
+            </div>
+            <div class="manual-metrics">
+              <div class="mm-item"><div class="mm-lbl">Support</div><div class="mm-val green" id="mm-support">—</div></div>
+              <div class="mm-item"><div class="mm-lbl">Resistance</div><div class="mm-val red" id="mm-resistance">—</div></div>
+              <div class="mm-item"><div class="mm-lbl">Rise %</div><div class="mm-val green" id="mm-rise">—</div></div>
+              <div class="mm-item"><div class="mm-lbl">Fall %</div><div class="mm-val red" id="mm-fall">—</div></div>
+              <div class="mm-item"><div class="mm-lbl">RSI</div><div class="mm-val" id="mm-rsi">50.0</div></div>
+              <div class="mm-item"><div class="mm-lbl">Volatility</div><div class="mm-val" id="mm-vol">—</div></div>
+            </div>
+          </div>
+          <div class="manual-controls">
+            <div class="manual-stake-row">
+              <div class="manual-field">
+                <label>Stake ($)</label>
+                <input type="number" id="m-stake-input" value="0.35" min="0.35" step="0.01">
+              </div>
+              <div class="manual-field">
+                <label>Duration</label>
+                <div class="dur-row">
+                  <input type="number" id="m-dur-input" value="7" min="1" max="10">
+                  <select id="m-unit-input">
+                    <option value="t" selected>Ticks</option>
+                    <option value="s">Sec</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="manual-trade-btns">
+              <button class="btn-trade call" onclick="fireMobileManual('CALL')">
+                <span class="trade-btn-icon">▲</span><span class="trade-btn-label">CALL</span><span class="trade-btn-sub">Rise</span>
+              </button>
+              <button class="btn-trade put" onclick="fireMobileManual('PUT')">
+                <span class="trade-btn-icon">▼</span><span class="trade-btn-label">PUT</span><span class="trade-btn-sub">Fall</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== BOTS ===== -->
+      <div id="tab-bots" class="tab-page">
+        <div class="bots-screen">
+
+          <div class="bots-header">
+            <span class="bots-title">My Bots</span>
+          </div>
+
+          <div class="bots-list">
+            <div class="bot-card" id="botCard-quantcore">
+
+              <!-- Header row -->
+              <div class="bot-card-header">
+                <div class="bot-info">
+                  <div class="bot-name">Sniper Bot</div>
+                  <div class="bot-desc">Confluence Strategy · All Volatility Indices</div>
+                </div>
+                <div class="bot-status-badge idle" id="bot-status-badge">IDLE</div>
+              </div>
+
+              <!-- Stats bar -->
+              <div class="bot-stats">
+                <div class="bstat">
+                  <div class="bstat-lbl">Session P&L</div>
+                  <div class="bstat-val" id="bot-session-pnl">$0.00</div>
+                </div>
+                <div class="bstat">
+                  <div class="bstat-lbl">Daily P&L</div>
+                  <div class="bstat-val" id="bot-daily-pnl">$0.00</div>
+                </div>
+                <div class="bstat">
+                  <div class="bstat-lbl">Runs</div>
+                  <div class="bstat-val" id="bot-runs">0 / —</div>
+                </div>
+                <div class="bstat">
+                  <div class="bstat-lbl">Resets in</div>
+                  <div class="bstat-val" id="bot-reset-countdown">--</div>
+                </div>
+              </div>
+
+              <div class="bot-filter-status" aria-live="polite">
+                <div><span class="bfs-label">Execution</span><strong id="bot-execution-mode">VIRTUAL</strong></div>
+                <div><span class="bfs-label">Virtual losses</span><strong id="bot-virtual-streak">0 / 4</strong></div>
+                <div><span class="bfs-label">Paper trades</span><strong id="bot-virtual-count">0</strong></div>
+              </div>
+
+              <!-- Error / warning banner -->
+              <div class="bot-error-msg" id="bot-error-msg" style="display:none;"></div>
+
+              <!-- Controls -->
+              <div class="bot-controls">
+                <button class="bot-btn start" id="bot-start-btn" onclick="sendControl('start')">▶ Start Bot</button>
+                <button class="bot-btn stop"  id="bot-stop-btn"  onclick="sendControl('stop')">⏹ Stop</button>
+              </div>
+
+              <!-- ─── SETTINGS PANEL ─── -->
+              <div class="bot-settings-panel">
+
+                <!-- Virtual loss filter -->
+                <div class="bsp-section bsp-virtual-section">
+                  <div class="bsp-section-header">
+                    <span class="bsp-section-title">Virtual Loss Filter</span>
+                    <span class="bsp-virtual-tag">Capital protection</span>
+                  </div>
+                  <div class="bsp-virtual-copy">
+                    Signals are paper-traded first. The bot enters real mode only after the configured consecutive virtual losses.
+                  </div>
+                  <div class="bsp-grid bsp-grid-3">
+                    <div class="bsp-field bsp-toggle-field">
+                      <label class="bsp-label">Filter enabled</label>
+                      <label class="bsp-toggle">
+                        <input type="checkbox" id="cfg-bot-virtual-enabled" checked onchange="saveBotConfig()">
+                        <span class="bsp-toggle-track"></span>
+                        <span class="bsp-toggle-text">ON</span>
+                      </label>
+                    </div>
+                    <div class="bsp-field">
+                      <label class="bsp-label">Virtual losses before real <span class="bsp-unit">consecutive</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-virtual-loss-threshold" min="1" max="20" step="1" value="4" oninput="saveBotConfig()">
+                    </div>
+                    <div class="bsp-field">
+                      <label class="bsp-label">Return to virtual after</label>
+                      <select class="bsp-input" id="cfg-bot-virtual-return-mode" onchange="saveBotConfig()">
+                        <option value="any" selected>Any real trade (safest)</option>
+                        <option value="win">Real win only</option>
+                        <option value="loss">Real loss only</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="bsp-virtual-note">
+                    Recommended: <strong>4 losses</strong> and <strong>any real trade</strong>. “Win only” can keep risking money after a real loss.
+                  </div>
+                </div>
+
+                <!-- Required risk controls -->
+                <div class="bsp-section bsp-required">
+                  <div class="bsp-section-header">
+                    <span class="bsp-section-title">Risk Controls</span>
+                    <span class="bsp-required-tag">Required to start</span>
+                  </div>
+                  <div class="bot-required-warn" id="bot-required-warn" style="display:none;">
+                    ⚠ Set Take Profit, Stop Loss &amp; Max Runs before starting.
+                  </div>
+                  <div class="bsp-grid bsp-grid-3">
+                    <div class="bsp-field">
+                      <label class="bsp-label">Take Profit <span class="bsp-unit">$</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-tp" min="0.01" step="0.01" placeholder="e.g. 5.00" oninput="saveBotConfig()">
+                    </div>
+                    <div class="bsp-field">
+                      <label class="bsp-label">Stop Loss <span class="bsp-unit">$</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-sl" min="0.01" step="0.01" placeholder="e.g. 10.00" oninput="saveBotConfig()">
+                    </div>
+                    <div class="bsp-field">
+                      <label class="bsp-label">Max Runs <span class="bsp-unit">#</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-max-runs" min="1" step="1" placeholder="e.g. 20" oninput="saveBotConfig()">
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Strategy parameters -->
+                <div class="bsp-section">
+                  <div class="bsp-section-header">
+                    <span class="bsp-section-title">Strategy Parameters</span>
+                    <button class="bsp-reset-btn" onclick="resetBotDefaults()" title="Reset algorithm parameters to code defaults">↩ Reset Defaults</button>
+                  </div>
+
+                  <div class="bsp-grid bsp-grid-2">
+
+                    <!-- Trade Duration -->
+                    <div class="bsp-field">
+                      <label class="bsp-label">Trade Duration <span class="bsp-unit">ticks</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-duration" min="1" step="1" value="70" oninput="saveBotConfig()">
+                    </div>
+
+                    <!-- Base Stake -->
+                    <div class="bsp-field">
+                      <label class="bsp-label">Base Stake <span class="bsp-unit">$</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-stake" min="0.35" step="0.01" value="0.35" oninput="saveBotConfig()">
+                    </div>
+
+                    <!-- Cooldown -->
+                    <div class="bsp-field">
+                      <label class="bsp-label">Cooldown <span class="bsp-unit">seconds</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-cooldown" min="1" step="1" value="5" oninput="saveBotConfig()">
+                    </div>
+
+                    <!-- Consecutive Ticks -->
+                    <div class="bsp-field">
+                      <label class="bsp-label">Consecutive Ticks <span class="bsp-unit bsp-hint">momentum confirm</span></label>
+                      <select class="bsp-input" id="cfg-bot-ticks" onchange="saveBotConfig()">
+                        <option value="1">1 tick</option>
+                        <option value="2" selected>2 ticks</option>
+                        <option value="3">3 ticks</option>
+                        <option value="4">4 ticks</option>
+                      </select>
+                    </div>
+
+                  </div>
+
+                  <!-- Zone Threshold – slider -->
+                  <div class="bsp-field bsp-field-full">
+                    <label class="bsp-label">
+                      Zone Threshold
+                      <span class="bsp-unit bsp-hint">price proximity to S/R edge (%)</span>
+                      <span class="bsp-slider-val" id="cfg-bot-zone-val">20</span>
+                    </label>
+                    <input class="bsp-slider" type="range" id="cfg-bot-zone" min="5" max="40" step="1" value="20"
+                           oninput="syncSlider('cfg-bot-zone'); saveBotConfig()">
+                    <div class="bsp-slider-labels"><span>Tight 5%</span><span>Wide 40%</span></div>
+                  </div>
+
+                  <!-- Momentum Dominance – slider -->
+                  <div class="bsp-field bsp-field-full">
+                    <label class="bsp-label">
+                      Momentum Dominance
+                      <span class="bsp-unit bsp-hint">seller/buyer ratio required (%)</span>
+                      <span class="bsp-slider-val" id="cfg-bot-dominance-val">50</span>
+                    </label>
+                    <input class="bsp-slider" type="range" id="cfg-bot-dominance" min="10" max="100" step="5" value="50"
+                           oninput="syncSlider('cfg-bot-dominance'); saveBotConfig()">
+                    <div class="bsp-slider-labels"><span>Lax 10%</span><span>Strict 100%</span></div>
+                  </div>
+
+                  <div class="bsp-grid bsp-grid-2">
+
+                    <!-- RSI Oversold -->
+                    <div class="bsp-field">
+                      <label class="bsp-label">RSI Oversold <span class="bsp-unit bsp-hint">CALL trigger</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-rsi-low" min="1" max="49" step="1" value="30" oninput="saveBotConfig()">
+                    </div>
+
+                    <!-- RSI Overbought -->
+                    <div class="bsp-field">
+                      <label class="bsp-label">RSI Overbought <span class="bsp-unit bsp-hint">PUT trigger</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-rsi-high" min="51" max="99" step="1" value="70" oninput="saveBotConfig()">
+                    </div>
+
+                    <!-- Circuit Breaker -->
+                    <div class="bsp-field bsp-grid-span2">
+                      <label class="bsp-label">Circuit Breaker Buffer <span class="bsp-unit bsp-hint">max breakout % before cancel</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-breakout" min="0.1" max="5" step="0.1" value="0.5" oninput="saveBotConfig()">
+                    </div>
+                    <div class="bsp-field bsp-grid-span2">
+                      <label class="bsp-label">Max Return Autocorrelation <span class="bsp-unit bsp-hint">must be negative for mean-reversion entry</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-autocorrelation" min="-0.99" max="0" step="0.01" value="-0.05" oninput="saveBotConfig()">
+                    </div>
+
+                  </div>
+                </div>
+
+                <!-- Save status -->
+                <div class="bsp-footer">
+                  <span class="bot-save-status" id="bot-save-status"></span>
+                </div>
+
+              </div>
+              <!-- end settings panel -->
+
+            </div>
+          </div>
+
+          <div class="bots-hint">More bots coming soon</div>
+        </div>
+      </div>
+
+      <!-- ANALYTICS -->
+      <div id="tab-analytics" class="tab-page">
+        <div class="analytics-container">
+          <div class="analytics-filter-bar">
+            <span class="page-title">Session Analytics</span>
+            <div class="filter-left">
+              <button class="btn-date-toggle" id="dateToggle" onclick="toggleDatePicker()">📅</button>
+              <div class="date-picker-group" id="datePickerGroup" style="display:none;">
+                <label>From</label><input type="date" id="date-start" onchange="applyDateFilter()">
+                <label>To</label><input type="date" id="date-end" onchange="applyDateFilter()">
+              </div>
+            </div>
+            <div class="filter-right">
+              <div class="preset-strip">
+                <button class="btn-preset" id="p-24h"     onclick="timeframePreset(this,'24h')">24H</button>
+                <button class="btn-preset active" id="p-session" onclick="timeframePreset(this,'session')">Session</button>
+                <button class="btn-preset" id="p-week"    onclick="timeframePreset(this,'week')">1W</button>
+                <button class="btn-preset" id="p-month"   onclick="timeframePreset(this,'month')">1M</button>
+                <button class="btn-preset" id="p-year"    onclick="timeframePreset(this,'year')">1Y</button>
+                <button class="btn-preset" id="p-clear"   onclick="timeframePreset(this,'clear')">✕</button>
+              </div>
+            </div>
+          </div>
+          <div class="metrics-grid-4">
+            <div class="metric-card"><div class="lbl">Net Profit</div><div class="val" id="meta-profit">$0.00</div></div>
+            <div class="metric-card"><div class="lbl">Strike Rate</div><div class="val" id="meta-strike">0.0%</div></div>
+            <div class="metric-card"><div class="lbl">Profit Factor</div><div class="val" id="meta-pf">0.00</div></div>
+            <div class="metric-card"><div class="lbl">Max Drawdown</div><div class="val" id="meta-dd">0.0%</div></div>
+          </div>
+          <div class="metrics-secondary">
+            <div class="metric-item"><span class="lbl">Avg Win / Avg Loss</span><span class="val" id="meta-avg-win-loss">$0.00 / $0.00</span></div>
+            <div class="metric-item"><span class="lbl">Max Consecutive</span><span class="val" id="meta-max-consec">W:0 / L:0</span></div>
+            <div class="metric-item"><span class="lbl">Avg Trade Duration</span><span class="val" id="meta-avg-duration">0s</span></div>
+            <div class="metric-item"><span class="lbl">Won / Lost</span><span class="val" id="meta-won-lost">0 / 0</span></div>
+          </div>
+          <div class="charts-grid-2">
+            <div class="chart-box"><div class="ch-label">Asset Performance</div><div class="ch-wrap"><canvas id="chart-donut"></canvas></div></div>
+            <div class="chart-box"><div class="ch-label">Equity Curve</div><div class="ch-wrap"><canvas id="chart-line"></canvas></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- LOGS -->
+      <div id="tab-logs" class="tab-page">
+        <div class="log-header">
+          <span class="title">📋 Live System Audit Log</span>
+          <button class="clear-btn" onclick="clearLogs()">🗑️ Clear</button>
+        </div>
+        <div class="log-stream" id="log-stream"></div>
+      </div>
+
+      <!-- SETTINGS (legacy tab — redirects to bot card) -->
+      <div id="tab-settings" class="tab-page">
+        <div class="settings-redirect">
+          <div class="settings-redirect-inner">
+            <div class="settings-redirect-icon">⚙️</div>
+            <div class="settings-redirect-title">Bot settings have moved</div>
+            <div class="settings-redirect-body">All parameters are now configured directly on the Sniper Bot card.</div>
+            <button class="settings-redirect-btn" onclick="switchTab('tab-bots')">Go to Bots →</button>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <script src="js/core.js"></script>
+  <script src="js/dashboard.js"></script>
+  <script src="js/analytics.js"></script>
+  <script src="js/logs.js"></script>
+  <script src="js/settings.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
