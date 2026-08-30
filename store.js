@@ -23,7 +23,13 @@ class Store extends EventEmitter {
       currency: 'USD',
       marketMetrics: this._initMetrics(),
       botResetTime: null,
-      sessionTradeCount: 0   // tracks runs this session
+      sessionTradeCount: 0,   // actual Deriv runs this session
+      executionMode: 'virtual',
+      virtualTrade: null,
+      virtualLossStreak: 0,
+      virtualWinCount: 0,
+      virtualLossCount: 0,
+      virtualTradeCount: 0
     };
     this.config = {};
     this.tickBuffer = new TickBuffer(500);
@@ -73,6 +79,8 @@ class Store extends EventEmitter {
 
   addLog(level, message) {
     logger[level](message);
+    // Push important events immediately instead of waiting for the next tick.
+    this.emit('stateChanged');
   }
 
   getStatePayload() {
