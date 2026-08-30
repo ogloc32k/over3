@@ -8,6 +8,7 @@ const express = require('express');
 const path    = require('path');
 const fs      = require('fs');
 const supabase = require('./services/supabase');
+const virtualFilter = require('./engine/virtualFilter');
 
 let store, logger, derivClient;
 try { store       = require('./store');           console.log('✅ Store loaded');        } catch(e) { console.error('❌ store.js:', e); process.exit(1); }
@@ -22,80 +23,28 @@ if (derivClient) derivClient.setStore(store);
 const CONFIG_PATH = path.join(__dirname, 'bot_config.json');
 
 const DEFAULT_CONFIG = {
-  // ── Risk controls (required to start) ──────────────────────
-  BOT_TAKE_PROFIT:              null,
-  BOT_STOP_LOSS:                null,
-  BOT_MAX_RUNS:                 null,
-  BOT_COOLDOWN:                 5,
-
-  // ── Trade execution ─────────────────────────────────────────
-  BOT_DURATION:                 70,
-  BOT_BASE_STAKE:               0.35,
-  TRADE_DIRECTION:              'CALL',   // 'CALL' or 'PUT'
-
-  // ── Martingale staking ──────────────────────────────────────
-  // Set MARTINGALE_MULTIPLIER to 1 to disable doubling (flat staking)
-  MARTINGALE_MULTIPLIER:        2,
-  MARTINGALE_MAX_STAKE:         100,
-
-  // ── Market scanner ──────────────────────────────────────────
-  // Bot only evaluates these symbols. Dashboard still shows all markets.
-  SELECTED_MARKETS: [
-    'R_10','R_25','R_50','R_75','R_100',
-    '1HZ10V','1HZ25V','1HZ50V','1HZ75V','1HZ100V'
-  ],
-
-  // ── Entry conditions ────────────────────────────────────────
-  // All enabled conditions must pass together (AND logic).
-  // If none are enabled the bot stays silent.
-
-  // Condition 1 – Price breaks below Support
-  COND_PRICE_UNDER_SUPPORT_ENABLED:   false,
-
-  // Condition 2 – Price breaks above Resistance
-  COND_PRICE_OVER_RESISTANCE_ENABLED: false,
-
-  // Condition 3 – Support % in range
-  // (supportPct: 100 = at support, 0 = at resistance)
-  COND_SUPPORT_PCT_ENABLED: false,
-  COND_SUPPORT_PCT_MIN:     0,
-  COND_SUPPORT_PCT_MAX:     20,
-
-  // Condition 4 – Resistance % in range
-  // (resistancePct: 100 = at resistance, 0 = at support)
-  COND_RESISTANCE_PCT_ENABLED: false,
-  COND_RESISTANCE_PCT_MIN:     80,
-  COND_RESISTANCE_PCT_MAX:     100,
-
-  // Condition 5 – Rise % in range
-  COND_RISE_PCT_ENABLED: false,
-  COND_RISE_PCT_MIN:     50,
-  COND_RISE_PCT_MAX:     100,
-
-  // Condition 6 – Fall % in range
-  COND_FALL_PCT_ENABLED: false,
-  COND_FALL_PCT_MIN:     50,
-  COND_FALL_PCT_MAX:     100,
-
-  // Condition 7 – RSI in range
-  COND_RSI_ENABLED: false,
-  COND_RSI_MIN:     0,
-  COND_RSI_MAX:     30,
-
-  // Condition 8 – BB Squeeze percentile in range
-  COND_BB_SQUEEZE_ENABLED: false,
-  COND_BB_SQUEEZE_MIN:     0,
-  COND_BB_SQUEEZE_MAX:     20,
-
-  // Condition 9 – Last-N ticks sequence (R = rise, F = fall)
-  COND_TICK_SEQ_ENABLED: false,
-  COND_TICK_SEQ_PATTERN: 'RR',
+  BOT_DURATION:           70,
+  BOT_BASE_STAKE:         0.35,
+  BOT_TAKE_PROFIT:        null,
+  BOT_STOP_LOSS:          null,
+  BOT_MAX_RUNS:           null,
+  BOT_COOLDOWN:           5,
+  BOT_RSI_OVERSOLD:       30,
+  BOT_RSI_OVERBOUGHT:     70,
+  SNIPER_ZONE_PCT:        20,
+  SNIPER_TICKS:           2,
+  SNIPER_DOMINANCE:       50,
+  SNIPER_BREAKOUT_BUFFER: 0.5,
+  SNIPER_MAX_AUTOCORRELATION: -0.05,
+  BOT_VIRTUAL_FILTER_ENABLED: true,
+  BOT_VIRTUAL_LOSS_THRESHOLD: 4,
+  BOT_VIRTUAL_RETURN_MODE: 'any'
 };
 
 function loadConfig() {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
-      const raw   = fs.readFileSync(CONFIG_PATH, 'utf8');
+      const raw  = fs.readFileSync(CONFIG_PATH, 'utf8');
       const saved = JSON.parse(raw);
       store.config = { ...DEFAULT_CONFIG, ...saved };
       console.log('✅ Config loaded from bot_config.json');
@@ -118,6 +67,7 @@ function saveConfig() {
 }
 
 loadConfig();
+logger.info(`⚙️ Bot configuration loaded. Virtual filter: ${virtualFilter.isEnabled(store.config) ? 'ON' : 'OFF'}; threshold: ${virtualFilter.lossThreshold(store.config)} losses; return policy: ${virtualFilter.returnMode(store.config)}.`);
 
 // ============================================================
 // EXPRESS
@@ -169,25 +119,35 @@ app.post('/api/control', (req, res) => {
       const tp      = parseFloat(store.config.BOT_TAKE_PROFIT);
       const sl      = parseFloat(store.config.BOT_STOP_LOSS);
       const maxRuns = parseInt(store.config.BOT_MAX_RUNS);
-      if (!tp  || tp  <= 0) return res.json({ error: 'Set Take Profit before starting the bot.' });
-      if (!sl  || sl  <= 0) return res.json({ error: 'Set Stop Loss before starting the bot.' });
-      if (!maxRuns || maxRuns <= 0) return res.json({ error: 'Set Max Runs before starting the bot.' });
-
-      // Warn if no markets selected
-      const selMkts = store.config.SELECTED_MARKETS;
-      if (Array.isArray(selMkts) && selMkts.length === 0) {
-        return res.json({ error: 'Select at least one market in the Market Scanner before starting.' });
+      if (!tp  || tp  <= 0) {
+        store.addLog('warn', '⛔ Start blocked: Take Profit is missing or invalid.');
+        return res.json({ error: 'Set Take Profit before starting the bot.' });
+      }
+      if (!sl  || sl  <= 0) {
+        store.addLog('warn', '⛔ Start blocked: Stop Loss is missing or invalid.');
+        return res.json({ error: 'Set Stop Loss before starting the bot.' });
+      }
+      if (!maxRuns || maxRuns <= 0) {
+        store.addLog('warn', '⛔ Start blocked: Max Runs is missing or invalid.');
+        return res.json({ error: 'Set Max Runs before starting the bot.' });
       }
 
-      // Reset session run counter on every fresh start
-      store.updateState({ active: true, locked: false, sessionTradeCount: 0 });
-      store.addLog('info', '✅ Bot started');
+      // Reset the session and begin with paper trades when the filter is on.
+      store.updateState({
+        active: true,
+        locked: false,
+        tradeInProgress: false,
+        sessionTradeCount: 0,
+        ...virtualFilter.createState(store.config),
+        currentStake: parseFloat(store.config.BOT_BASE_STAKE) || 0.35
+      });
+      store.addLog('info', `✅ Bot started in ${store.state.executionMode.toUpperCase()} mode. TP=$${tp.toFixed(2)}, SL=$${sl.toFixed(2)}, max runs=${maxRuns}.`);
       res.json({ message: 'Bot started' });
 
     } else if (action === 'stop') {
-      store.updateState({ active: false });
+      store.updateState({ active: false, locked: false, tradeInProgress: false, virtualTrade: null });
       tradeInProgressSym['global'] = false;
-      store.addLog('info', '⏹️ Bot stopped');
+      store.addLog('info', '⏹️ Bot stopped by user. Any pending virtual observation was cancelled.');
       res.json({ message: 'Bot stopped' });
 
     } else if (action === 'set_mode') {
@@ -218,8 +178,7 @@ app.post('/api/trade/manual', async (req, res) => {
     if (!contractId) return res.json({ error: 'Trade execution failed on Deriv side' });
 
     tradeInProgressSym['global'] = true;
-    // [MANUAL] prefix lets the log stream visually separate manual from bot trades
-    store.addLog('info', `[MANUAL] 📈 ${req.body.contractType} on ${req.body.symbol} — stake $${stake.toFixed(2)}`);
+    store.addLog('info', `📈 Manual trade placed: ${req.body.contractType} ${req.body.symbol}`);
     res.json({ message: 'Trade request sent' });
   } catch(err) {
     tradeInProgressSym['global'] = false;
@@ -234,32 +193,26 @@ app.get('/api/config', (req, res) => res.json(store.config || {}));
 
 app.post('/api/config', (req, res) => {
   try {
-    // SELECTED_MARKETS must remain an array; guard against bad client data
-    const incoming = { ...req.body };
-    if (incoming.SELECTED_MARKETS !== undefined && !Array.isArray(incoming.SELECTED_MARKETS)) {
-      try { incoming.SELECTED_MARKETS = JSON.parse(incoming.SELECTED_MARKETS); } catch(_) {
-        incoming.SELECTED_MARKETS = DEFAULT_CONFIG.SELECTED_MARKETS;
-      }
-    }
-    store.config = { ...store.config, ...incoming };
+    store.config = { ...store.config, ...req.body };
     saveConfig();
     store.emit('configChanged');
+    store.addLog('info', `⚙️ Bot configuration updated. Virtual filter: ${virtualFilter.isEnabled(store.config) ? 'ON' : 'OFF'}; threshold: ${virtualFilter.lossThreshold(store.config)}; return policy: ${virtualFilter.returnMode(store.config)}.`);
     res.json({ success: true });
   } catch(err) { res.json({ error: err.message }); }
 });
 
 app.post('/api/config/reset', (req, res) => {
   try {
-    // Preserve user's critical settings so a reset doesn't wipe trade safety values
+    // Reset ONLY strategy params — preserve user's TP, SL, Max Runs
     const preserve = {
-      BOT_TAKE_PROFIT:  store.config.BOT_TAKE_PROFIT,
-      BOT_STOP_LOSS:    store.config.BOT_STOP_LOSS,
-      BOT_MAX_RUNS:     store.config.BOT_MAX_RUNS,
-      SELECTED_MARKETS: store.config.SELECTED_MARKETS,  // also preserve market selection
+      BOT_TAKE_PROFIT: store.config.BOT_TAKE_PROFIT,
+      BOT_STOP_LOSS:   store.config.BOT_STOP_LOSS,
+      BOT_MAX_RUNS:    store.config.BOT_MAX_RUNS
     };
     store.config = { ...DEFAULT_CONFIG, ...preserve };
     saveConfig();
     store.emit('configChanged');
+    store.addLog('info', `↩ Strategy defaults restored. Risk controls preserved (TP=$${parseFloat(preserve.BOT_TAKE_PROFIT) || 0}, SL=$${parseFloat(preserve.BOT_STOP_LOSS) || 0}, max runs=${parseInt(preserve.BOT_MAX_RUNS) || 0}).`);
     res.json({ success: true, config: store.config });
   } catch(err) { res.json({ error: err.message }); }
 });
@@ -332,6 +285,7 @@ app.get('/api/ledger/aggregated', async (req, res) => {
         if (dd > maxDrawdown) maxDrawdown = dd;
       }
 
+      // Streak tracking
       if (pnl > 0) {
         currentStreak = currentStreak >= 0 ? currentStreak + 1 : 1;
       } else {
@@ -372,14 +326,16 @@ app.get('/api/ledger/aggregated', async (req, res) => {
 // ============================================================
 app.get('/debug/state', (req, res) => {
   res.json({
-    botActive:         store.state.active,
-    balance:           store.state.balance,
-    account:           derivClient?.isDemo ? 'demo' : 'real',
-    activeAccountId:   derivClient?.activeAccountId,
-    tradeActive:       isTradeActive(),
-    botResetTime:      store.state.botResetTime,
+    botActive:       store.state.active,
+    balance:         store.state.balance,
+    account:         derivClient?.isDemo ? 'demo' : 'real',
+    activeAccountId: derivClient?.activeAccountId,
+    tradeActive:     isTradeActive(),
+    botResetTime:    store.state.botResetTime,
     sessionTradeCount: store.state.sessionTradeCount,
-    selectedMarkets:   store.config.SELECTED_MARKETS,
+    executionMode: store.state.executionMode,
+    virtualLossStreak: store.state.virtualLossStreak,
+    virtualTradeCount: store.state.virtualTradeCount
   });
 });
 
@@ -403,11 +359,9 @@ const server = app.listen(PORT, () => {
     // Auto-cleanup stuck locks (2 min)
     setInterval(() => {
       const now = Date.now();
-      if (tradeInProgressSym['global'] && lockTimestamps['global'] &&
-          (now - lockTimestamps['global'] > 120000)) {
+      if (tradeInProgressSym['global'] && lockTimestamps['global'] && (now - lockTimestamps['global'] > 120000)) {
         tradeInProgressSym['global'] = false;
         delete lockTimestamps['global'];
-        store.addLog('warn', '⚠️ Trade lock auto-released after 2 minutes');
       }
     }, 30000);
 
@@ -416,11 +370,13 @@ const server = app.listen(PORT, () => {
       const now = Date.now();
       if (store.state.botResetTime && now >= store.state.botResetTime) {
         store.updateState({
-          active:            true,
-          botResetTime:      null,
-          sessionPnl:        0,
-          dailyPnl:          0,
-          sessionTradeCount: 0
+          active:       true,
+          botResetTime: null,
+          sessionPnl:   0,
+          dailyPnl:     0,
+          sessionTradeCount: 0,
+          tradeInProgress: false,
+          ...virtualFilter.createState(store.config)
         });
         store.addLog('info', '🕛 Midnight reset – bot re-enabled');
       }
@@ -428,6 +384,15 @@ const server = app.listen(PORT, () => {
 
     store.on('configChanged', () => {
       store.tickBuffer.setMaxSize(store.config.ANALYSIS_WINDOW || 500);
+      // Make a live toggle safe and deterministic. Enabling the filter while
+      // armed always returns to paper mode; disabling it explicitly allows
+      // real entries after any current paper trade is finished.
+      if (store.state.active && !store.state.virtualTrade && !isTradeActive()) {
+        store.updateState({
+          executionMode: virtualFilter.isEnabled(store.config) ? 'virtual' : 'real',
+          virtualLossStreak: 0
+        });
+      }
     });
 
     // Balance streaming
@@ -450,8 +415,7 @@ const server = app.listen(PORT, () => {
       logger.info(`🔐 Authorized as ${data.loginid || derivClient.activeAccountId}`);
     });
 
-   
-    // ── TICK HANDLER ─────────────────────────────────────────
+    // ---- TICK HANDLER ----
     derivClient.on('tick', (tick) => {
       const symbol = tick.symbol;
       const price  = tick.quote;
@@ -467,39 +431,92 @@ const server = app.listen(PORT, () => {
         if (computed.bandwidth !== null && computed.bandwidth !== undefined) {
           store.pushBandwidth(symbol, computed.bandwidth);
         }
-        // Always update dashboard metrics regardless of selected markets
         store.updateMarketMetrics(symbol, computed);
 
-        // Only evaluate bot signals for selected markets
-        const selectedMarkets = store.config.SELECTED_MARKETS;
-        const isSelected = Array.isArray(selectedMarkets) && selectedMarkets.length > 0
-          ? selectedMarkets.includes(symbol)
-          : false; // empty selection = bot does not trade
+        // Paper-trade settlement uses the live tick stream. No Deriv
+        // contract is opened while the bot is in virtual mode.
+        const paperTrade = store.state.virtualTrade;
+        if (paperTrade && paperTrade.symbol === symbol) {
+          const paperResult = virtualFilter.advanceTrade(paperTrade, computed.price);
+          if (!paperResult.complete) {
+              store.updateState({ virtualTrade: paperResult.trade, tradeInProgress: true });
+            return;
+          }
 
-        if (isSelected && store.state.active && !isTradeActive()) {
+          const isWin = paperResult.result === 'WIN';
+          const nextLossStreak = isWin
+            ? 0
+            : (store.state.virtualLossStreak || 0) + 1;
+          const nextVirtualState = {
+            virtualTrade: null,
+            virtualTradeCount: (store.state.virtualTradeCount || 0) + 1,
+            virtualLossStreak: nextLossStreak,
+            virtualWinCount: (store.state.virtualWinCount || 0) + (isWin ? 1 : 0),
+            virtualLossCount: (store.state.virtualLossCount || 0) + (isWin ? 0 : 1)
+          };
+
+          const threshold = virtualFilter.lossThreshold(store.config);
+          if (!isWin && nextLossStreak >= threshold) {
+            nextVirtualState.executionMode = 'real';
+            store.addLog('warn', `🧪 Virtual LOSS: ${paperTrade.contractType} ${symbol} (${paperResult.entryPrice} → ${paperResult.exitPrice}); loss streak ${nextLossStreak}/${threshold}. Next qualifying signal may be REAL.`);
+          } else {
+            store.addLog('info', `🧪 Virtual ${paperResult.result}: ${paperTrade.contractType} ${symbol} (${paperResult.entryPrice} → ${paperResult.exitPrice}); loss streak ${nextLossStreak}/${threshold}.`);
+          }
+
+          store.updateState({ ...nextVirtualState, tradeInProgress: false });
+          tradeInProgressSym['global'] = false;
+          delete lockTimestamps['global'];
+          lastTradeCloseTime = Date.now();
+          return;
+        }
+
+        if (store.state.active && !isTradeActive()) {
           const now = Date.now();
-          // Throttle proposals to max once every 2 seconds
           if (lastProposalTime && (now - lastProposalTime < 2000)) return;
 
           const signal = bot.evaluate(symbol, computed, store.state, {
             tradeInProgress: isTradeActive(),
             lastCloseTime:   lastTradeCloseTime,
-            config:          store.config
+            config:          store.config   // ← correct: pass store.config
           });
 
           if (signal) {
+            if (store.state.executionMode === 'virtual') {
+              const paperTrade = virtualFilter.createTrade(signal, computed.price);
+              tradeInProgressSym['global'] = true;
+              lockTimestamps['global'] = Date.now();
+              store.updateState({ virtualTrade: paperTrade, tradeInProgress: true });
+              store.addLog('info', `🧪 Virtual signal: ${signal.contractType} ${signal.symbol}; observing ${signal.duration} ticks.`);
+              return;
+            }
+
             const stake   = signal.stake || store.state.currentStake || 0.35;
             const balance = store.state.balance ?? 0;
-            if (stake < 0.35 || stake > balance) return;
+            if (stake < 0.35) {
+              store.addLog('warn', `⛔ Real signal skipped: stake $${stake.toFixed(2)} is below Deriv minimum.`);
+              return;
+            }
+            if (stake > balance) {
+              store.addLog('warn', `⛔ Real signal skipped: stake $${stake.toFixed(2)} exceeds available balance $${Number(balance).toFixed(2)}.`);
+              return;
+            }
 
             lastProposalTime = now;
+            // Lock before the async proposal begins. Otherwise each tick
+            // can open another real contract while proposal is pending.
+            tradeInProgressSym['global'] = true;
+            lockTimestamps['global']     = Date.now();
+            store.updateState({ tradeInProgress: true });
+            store.addLog('info', `📤 Real signal accepted: ${signal.contractType} ${signal.symbol}, stake $${stake.toFixed(2)}, duration ${signal.duration} ticks.`);
 
             derivClient.buyContract(signal).then(contractId => {
               if (contractId) {
-                tradeInProgressSym['global'] = true;
-                lockTimestamps['global']     = Date.now();
-                // [BOT] prefix lets the log stream distinguish bot from manual trades
-                store.addLog('info', `[BOT] 🤖 ${signal.contractType} on ${signal.symbol} — stake $${stake.toFixed(2)}`);
+                store.addLog('info', `🤖 Bot trade: ${signal.contractType} ${signal.symbol}`);
+              } else {
+                tradeInProgressSym['global'] = false;
+                delete lockTimestamps['global'];
+                store.updateState({ tradeInProgress: false });
+                store.addLog('error', '❌ Real bot trade was not accepted; bot remains armed.');
               }
             });
           }
@@ -507,17 +524,17 @@ const server = app.listen(PORT, () => {
       }
     });
 
-    // ── TRADE SETTLED ────────────────────────────────────────
+    // ---- TRADE SETTLED ----
     derivClient.on('trade_settled', async (trade) => {
       tradeInProgressSym['global'] = false;
       delete lockTimestamps['global'];
       lastTradeCloseTime = Date.now();
+      store.updateState({ tradeInProgress: false });
 
       const profit = parseFloat(trade.profit || 0);
       const result = profit > 0 ? 'WIN' : (profit < 0 ? 'LOSS' : 'BREAKEVEN');
       const sym    = trade.symbol || '?';
-      const src    = trade.bot_name === 'manual' ? '[MANUAL]' : '[BOT]';
-      store.addLog('info', `${src} 🏁 ${trade.contract_type || '?'} ${sym} – ${result} $${profit.toFixed(2)}`);
+      store.addLog('info', `🏁 Trade settled: ${trade.contract_type || '?'} ${sym} – ${result} $${profit.toFixed(2)}`);
 
       const prevSession = store.state.sessionPnl || 0;
       const prevDaily   = store.state.dailyPnl   || 0;
@@ -527,25 +544,27 @@ const server = app.listen(PORT, () => {
 
       store.updateState({ sessionPnl: newSessionPnl, dailyPnl: newDailyPnl, sessionTradeCount: newTradeCount });
 
-      // ── Martingale staking (configurable multiplier + cap) ──
-      if (profit > 0) {
-        // Win → reset to base stake
-        const baseStake = parseFloat(store.config?.BOT_BASE_STAKE) || 0.35;
-        store.updateState({ currentStake: baseStake });
-        store.addLog('info', `[BOT] 📉 Stake reset to $${baseStake.toFixed(2)} after WIN`);
-      } else {
-        // Loss → multiply stake, capped at MARTINGALE_MAX_STAKE
-        const multiplier = parseFloat(store.config?.MARTINGALE_MULTIPLIER) || 2;
-        const maxStake   = parseFloat(store.config?.MARTINGALE_MAX_STAKE)  || 100;
-        const current    = parseFloat(store.state.currentStake)           || 0.35;
-        const newStake   = parseFloat(Math.min(current * multiplier, maxStake).toFixed(2));
-        store.updateState({ currentStake: newStake });
-        if (multiplier > 1) {
-          store.addLog('info', `[BOT] 📈 Stake ×${multiplier} → $${newStake.toFixed(2)} after LOSS (cap $${maxStake})`);
-        }
+      // Fixed stake only. Never double after a loss: martingale converts an
+      // ordinary losing streak into an account-threatening exposure spike.
+      const baseStake = parseFloat(store.config?.BOT_BASE_STAKE) || 0.35;
+      store.updateState({ currentStake: baseStake });
+      store.addLog('info', `💵 Fixed stake reset to $${baseStake.toFixed(2)} after settlement.`);
+
+      // A real Sniper trade is followed by paper mode according to the
+      // selected policy. The default "any" policy prevents loss chasing.
+      if (trade.bot_name === 'sniper-bot' &&
+          store.state.executionMode === 'real' &&
+          virtualFilter.isEnabled(store.config) &&
+          virtualFilter.shouldReturnToVirtual(result, store.config)) {
+        store.updateState({
+          executionMode: 'virtual',
+          virtualTrade: null,
+          virtualLossStreak: 0
+        });
+        store.addLog('info', `🔁 Real ${result}; returning to virtual mode (${virtualFilter.returnMode(store.config)} policy).`);
       }
 
-      // ── Take Profit / Stop Loss (checked against daily P&L) ──
+      // Take Profit / Stop Loss based on daily P&L
       const tp = parseFloat(store.config?.BOT_TAKE_PROFIT) || 0;
       const sl = parseFloat(store.config?.BOT_STOP_LOSS)   || 0;
 
@@ -553,22 +572,22 @@ const server = app.listen(PORT, () => {
         store.updateState({ active: false });
         const resetTime = getNextMidnightEAT();
         store.updateState({ botResetTime: resetTime });
-        store.addLog('info', `🛑 Take Profit reached (+$${newDailyPnl.toFixed(2)}). Bot paused until midnight EAT.`);
+        store.addLog('info', `🛑 Take Profit reached ($${newDailyPnl.toFixed(2)}). Bot paused until ${new Date(resetTime).toLocaleTimeString()}`);
       } else if (sl > 0 && newDailyPnl <= -sl) {
         store.updateState({ active: false });
         const resetTime = getNextMidnightEAT();
         store.updateState({ botResetTime: resetTime });
-        store.addLog('info', `🛑 Stop Loss hit (-$${Math.abs(newDailyPnl).toFixed(2)}). Bot paused until midnight EAT.`);
+        store.addLog('info', `🛑 Stop Loss hit (-$${Math.abs(newDailyPnl).toFixed(2)}). Bot paused until ${new Date(resetTime).toLocaleTimeString()}`);
       }
 
-      // ── Max runs: stop bot when session limit reached ──────
+      // Max runs check: stop bot if session limit reached
       const maxRuns = parseInt(store.config?.BOT_MAX_RUNS);
-      if (maxRuns > 0 && newTradeCount >= maxRuns) {
+      if (maxRuns && maxRuns > 0 && newTradeCount >= maxRuns) {
         store.updateState({ active: false });
         store.addLog('info', `🛑 Max runs reached (${newTradeCount}/${maxRuns}). Bot stopped.`);
       }
 
-      // ── Supabase ledger insert ─────────────────────────────
+      // Supabase insert
       try {
         const account = derivClient.isDemo ? 'demo' : 'real';
         const record  = {
@@ -578,18 +597,18 @@ const server = app.listen(PORT, () => {
           payout:         parseFloat(trade.payout || 0),
           profit_loss:    profit,
           is_win:         profit > 0,
-          barrier:        trade.barrier    ? parseFloat(trade.barrier)     : null,
-          exit_tick:      trade.exit_price ? parseFloat(trade.exit_price)  : null,
+          barrier:        trade.barrier   ? parseFloat(trade.barrier)    : null,
+          exit_tick:      trade.exit_price ? parseFloat(trade.exit_price) : null,
           contract_id:    trade.contract_id,
           entry_price:    trade.entry_price ? parseFloat(trade.entry_price) : null,
           exit_price:     trade.exit_price  ? parseFloat(trade.exit_price)  : null,
           duration_ticks: parseInt(trade.duration_ticks) || 0,
-          bot_name:       trade.bot_name || 'manual',   // 'manual' or 'sniper'
+          bot_name:       trade.bot_name || 'manual',
           account
         };
         const { error } = await supabase.from('trading_ledger').insert(record);
         if (error) console.error('❌ Failed to insert trade:', error);
-        else       console.log('✅ Trade recorded:', record.asset, profit, '→', account);
+        else console.log('✅ Trade recorded:', record.asset, profit, 'account:', account);
       } catch(e) { console.error('❌ trade_settled handler error:', e); }
     });
 
