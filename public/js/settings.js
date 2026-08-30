@@ -1,107 +1,62 @@
 // ============================================================
-// settings.js – Bot config load / save / reset  (v2)
-//
-// Handles the full settings panel:
-//   • Numeric inputs (risk, execution, martingale, condition ranges)
-//   • Boolean checkboxes (condition enable/disable)
-//   • Direction radio buttons (CALL / PUT)
-//   • Tick-pattern text input
-//   • Market-selector toggle buttons (SELECTED_MARKETS array)
+// settings.js – Bot config load / save / reset
 // ============================================================
 (function () {
 
-  // ── Numeric fields ────────────────────────────────────────────────────────
-  // id → config key mapping. All values are stored as numbers (or null).
-  const NUMERIC = {
-    // Risk controls
-    'cfg-tp':              'BOT_TAKE_PROFIT',
-    'cfg-sl':              'BOT_STOP_LOSS',
-    'cfg-max-runs':        'BOT_MAX_RUNS',
-    // Trade execution
-    'cfg-duration':        'BOT_DURATION',
-    'cfg-stake':           'BOT_BASE_STAKE',
-    'cfg-cooldown':        'BOT_COOLDOWN',
-    // Martingale
-    'cfg-martingale-mult': 'MARTINGALE_MULTIPLIER',
-    'cfg-martingale-max':  'MARTINGALE_MAX_STAKE',
-    // Condition ranges
-    'cfg-support-min':     'COND_SUPPORT_PCT_MIN',
-    'cfg-support-max':     'COND_SUPPORT_PCT_MAX',
-    'cfg-resistance-min':  'COND_RESISTANCE_PCT_MIN',
-    'cfg-resistance-max':  'COND_RESISTANCE_PCT_MAX',
-    'cfg-rise-min':        'COND_RISE_PCT_MIN',
-    'cfg-rise-max':        'COND_RISE_PCT_MAX',
-    'cfg-fall-min':        'COND_FALL_PCT_MIN',
-    'cfg-fall-max':        'COND_FALL_PCT_MAX',
-    'cfg-rsi-min':         'COND_RSI_MIN',
-    'cfg-rsi-max':         'COND_RSI_MAX',
-    'cfg-bb-min':          'COND_BB_SQUEEZE_MIN',
-    'cfg-bb-max':          'COND_BB_SQUEEZE_MAX',
+  // Map of HTML input ID → config key
+  const BOT_FIELDS = {
+    'cfg-bot-duration':     'BOT_DURATION',
+    'cfg-bot-stake':        'BOT_BASE_STAKE',
+    'cfg-bot-tp':           'BOT_TAKE_PROFIT',
+    'cfg-bot-sl':           'BOT_STOP_LOSS',
+    'cfg-bot-max-runs':     'BOT_MAX_RUNS',
+    'cfg-bot-cooldown':     'BOT_COOLDOWN',
+    'cfg-bot-rsi-low':      'BOT_RSI_OVERSOLD',
+    'cfg-bot-rsi-high':     'BOT_RSI_OVERBOUGHT',
+    'cfg-bot-zone':         'SNIPER_ZONE_PCT',
+    'cfg-bot-ticks':        'SNIPER_TICKS',
+    'cfg-bot-dominance':    'SNIPER_DOMINANCE',
+    'cfg-bot-breakout':     'SNIPER_BREAKOUT_BUFFER',
+    'cfg-bot-autocorrelation': 'SNIPER_MAX_AUTOCORRELATION',
+    'cfg-bot-virtual-loss-threshold': 'BOT_VIRTUAL_LOSS_THRESHOLD'
+  };
+  const CHECKBOX_FIELDS = {
+    'cfg-bot-virtual-enabled': 'BOT_VIRTUAL_FILTER_ENABLED'
+  };
+  const STRING_FIELDS = {
+    'cfg-bot-virtual-return-mode': 'BOT_VIRTUAL_RETURN_MODE'
   };
 
-  // ── Boolean fields (checkboxes) ───────────────────────────────────────────
-  const BOOLEAN = {
-    'cfg-cond-price-under-support':     'COND_PRICE_UNDER_SUPPORT_ENABLED',
-    'cfg-cond-price-over-resistance':   'COND_PRICE_OVER_RESISTANCE_ENABLED',
-    'cfg-cond-support':                 'COND_SUPPORT_PCT_ENABLED',
-    'cfg-cond-resistance':              'COND_RESISTANCE_PCT_ENABLED',
-    'cfg-cond-rise':                    'COND_RISE_PCT_ENABLED',
-    'cfg-cond-fall':                    'COND_FALL_PCT_ENABLED',
-    'cfg-cond-rsi':                     'COND_RSI_ENABLED',
-    'cfg-cond-bb':                      'COND_BB_SQUEEZE_ENABLED',
-    'cfg-cond-tick-seq':                'COND_TICK_SEQ_ENABLED',
-  };
-  // Special: TRADE_DIRECTION → radio buttons (cfg-dir-call / cfg-dir-put)
-  //          COND_TICK_SEQ_PATTERN → text input (cfg-tick-pattern)
-  //          SELECTED_MARKETS → .market-btn[data-sym] toggle buttons
-
-  // ── LOAD ──────────────────────────────────────────────────────────────────
   window.loadBotConfig = async function () {
     try {
       const resp   = await fetch('/api/config');
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const config = await resp.json();
 
-      // Numeric fields
-      for (const [id, key] of Object.entries(NUMERIC)) {
+      for (const [id, key] of Object.entries(BOT_FIELDS)) {
         const el = document.getElementById(id);
         if (!el) continue;
-        const v = config[key];
-        el.value = (v !== null && v !== undefined) ? v : '';
+        const val = config[key];
+        if (val !== null && val !== undefined) {
+          el.value = val;
+          // Sync range display if sibling exists
+          const display = document.getElementById(id + '-val');
+          if (display) display.textContent = val;
+        } else {
+          el.value = '';
+        }
       }
-
-      // Boolean checkboxes
-      for (const [id, key] of Object.entries(BOOLEAN)) {
+      for (const [id, key] of Object.entries(CHECKBOX_FIELDS)) {
         const el = document.getElementById(id);
-        if (!el) continue;
-        el.checked = (config[key] === true || config[key] === 'true');
-        // Reflect enabled state on the row
-        const row = el.closest('.cond-row');
-        if (row) row.classList.toggle('disabled', !el.checked);
+        if (el) el.checked = config[key] !== false && String(config[key]).toLowerCase() !== 'false' && String(config[key]) !== '0';
+      }
+      for (const [id, key] of Object.entries(STRING_FIELDS)) {
+        const el = document.getElementById(id);
+        if (el && config[key] !== undefined && config[key] !== null) el.value = config[key];
       }
 
-      // Direction radio buttons
-      const dir       = config.TRADE_DIRECTION || 'CALL';
-      const callRadio = document.getElementById('cfg-dir-call');
-      const putRadio  = document.getElementById('cfg-dir-put');
-      if (callRadio) callRadio.checked = (dir === 'CALL');
-      if (putRadio)  putRadio.checked  = (dir === 'PUT');
-
-      // Tick sequence pattern
-      const tickPatEl = document.getElementById('cfg-tick-pattern');
-      if (tickPatEl) tickPatEl.value = config.COND_TICK_SEQ_PATTERN || 'RR';
-
-      // Market selector buttons
-      const selectedMarkets = Array.isArray(config.SELECTED_MARKETS)
-        ? config.SELECTED_MARKETS
-        : [];
-      document.querySelectorAll('.market-btn').forEach(btn => {
-        const sym = btn.dataset.sym;
-        btn.classList.toggle('active', selectedMarkets.includes(sym));
-      });
-
-      // Cache max_runs so the runs counter works even without a re-fetch
+      // Cache max_runs for the runs counter in _syncBotCard
       window._cachedMaxRuns = parseInt(config.BOT_MAX_RUNS) || 0;
+      window._cachedVirtualLossThreshold = parseInt(config.BOT_VIRTUAL_LOSS_THRESHOLD) || 4;
 
       _validateRequired(config);
     } catch(err) {
@@ -109,7 +64,6 @@
     }
   };
 
-  // ── SAVE (debounced 600 ms) ───────────────────────────────────────────────
   let _saveTimer = null;
 
   window.saveBotConfig = function () {
@@ -119,45 +73,25 @@
 
   async function _doSave() {
     const config = {};
-
-    // Numeric fields
-    for (const [id, key] of Object.entries(NUMERIC)) {
+    for (const [id, key] of Object.entries(BOT_FIELDS)) {
       const el  = document.getElementById(id);
       if (!el) continue;
       const raw = el.value.trim();
-      if (raw === '') {
+      if (raw === '' || raw === null) {
         config[key] = null;
       } else {
-        const v = parseFloat(raw);
-        config[key] = isNaN(v) ? null : v;
+        const val = parseFloat(raw);
+        config[key] = isNaN(val) ? null : val;
       }
     }
-
-    // Boolean checkboxes
-    for (const [id, key] of Object.entries(BOOLEAN)) {
+    for (const [id, key] of Object.entries(CHECKBOX_FIELDS)) {
       const el = document.getElementById(id);
-      if (!el) continue;
-      config[key] = el.checked;
+      if (el) config[key] = !!el.checked;
     }
-
-    // Trade direction (radio)
-    const putRadio = document.getElementById('cfg-dir-put');
-    config.TRADE_DIRECTION = (putRadio && putRadio.checked) ? 'PUT' : 'CALL';
-
-    // Tick sequence pattern (strip non R/F chars, uppercase)
-    const tickPatEl = document.getElementById('cfg-tick-pattern');
-    if (tickPatEl) {
-      config.COND_TICK_SEQ_PATTERN = tickPatEl.value
-        .toUpperCase()
-        .replace(/[^RF]/g, '');
+    for (const [id, key] of Object.entries(STRING_FIELDS)) {
+      const el = document.getElementById(id);
+      if (el) config[key] = el.value;
     }
-
-    // Selected markets (array of active button data-sym values)
-    const activeMarkets = [];
-    document.querySelectorAll('.market-btn.active').forEach(btn => {
-      if (btn.dataset.sym) activeMarkets.push(btn.dataset.sym);
-    });
-    config.SELECTED_MARKETS = activeMarkets;
 
     try {
       const resp   = await fetch('/api/config', {
@@ -168,29 +102,19 @@
       const result = await resp.json();
       const statusEl = document.getElementById('bot-save-status');
       if (result.success) {
-        if (statusEl) {
-          statusEl.textContent = '✓ Saved';
-          statusEl.style.color = 'var(--green-profit)';
-          setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 2500);
-        }
+        if (statusEl) { statusEl.textContent = '✅ Saved'; setTimeout(() => { statusEl.textContent = ''; }, 3000); }
         window._cachedMaxRuns = parseInt(config.BOT_MAX_RUNS) || 0;
+        window._cachedVirtualLossThreshold = parseInt(config.BOT_VIRTUAL_LOSS_THRESHOLD) || 4;
         _validateRequired(config);
       } else {
-        if (statusEl) {
-          statusEl.textContent = '✗ ' + (result.error || 'Save failed');
-          statusEl.style.color = 'var(--red-loss)';
-        }
+        if (statusEl) statusEl.textContent = '❌ ' + (result.error || 'Error');
       }
     } catch(err) {
       const statusEl = document.getElementById('bot-save-status');
-      if (statusEl) {
-        statusEl.textContent = '✗ Network error';
-        statusEl.style.color = 'var(--red-loss)';
-      }
+      if (statusEl) statusEl.textContent = '❌ Network error';
     }
-  }
+  };
 
-  // ── RESET (preserves TP / SL / Max Runs / Selected Markets) ──────────────
   window.resetBotDefaults = async function () {
     try {
       const resp   = await fetch('/api/config/reset', { method: 'POST' });
@@ -198,84 +122,60 @@
       if (result.success) {
         await window.loadBotConfig();
         const statusEl = document.getElementById('bot-save-status');
-        if (statusEl) {
-          statusEl.textContent = '↩ Defaults restored';
-          statusEl.style.color = 'var(--text-secondary)';
-          setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3000);
-        }
+        if (statusEl) { statusEl.textContent = '↩ Defaults restored'; setTimeout(() => { statusEl.textContent = ''; }, 3000); }
       }
     } catch(err) { console.error('resetBotDefaults error:', err); }
   };
 
-  // ── MARKET SELECTOR HELPERS ───────────────────────────────────────────────
-  window.toggleMarket = function (btn) {
-    btn.classList.toggle('active');
-    window.saveBotConfig();
-  };
-
-  window.selectAllMarkets = function () {
-    document.querySelectorAll('.market-btn').forEach(b => b.classList.add('active'));
-    window.saveBotConfig();
-  };
-
-  window.selectNoMarkets = function () {
-    document.querySelectorAll('.market-btn').forEach(b => b.classList.remove('active'));
-    window.saveBotConfig();
-  };
-
-  // ── CONDITION ROW ENABLE / DISABLE ────────────────────────────────────────
-  // Called by each condition checkbox onchange. Greys out range inputs when off.
-  window.onCondToggle = function (rowId) {
-    const row = document.getElementById(rowId);
-    if (!row) return;
-    const cb = row.querySelector('input[type="checkbox"]');
-    if (cb) row.classList.toggle('disabled', !cb.checked);
-  };
-
-  // ── VALIDATION ────────────────────────────────────────────────────────────
   function _validateRequired(config) {
     const tp      = parseFloat(config.BOT_TAKE_PROFIT);
     const sl      = parseFloat(config.BOT_STOP_LOSS);
     const maxRuns = parseInt(config.BOT_MAX_RUNS);
 
-    const missingTp   = !tp      || tp      <= 0;
-    const missingSl   = !sl      || sl      <= 0;
+    const missingTp  = !tp  || tp  <= 0;
+    const missingSl  = !sl  || sl  <= 0;
     const missingRuns = !maxRuns || maxRuns <= 0;
-    const anyMissing  = missingTp || missingSl || missingRuns;
+    const anyMissing = missingTp || missingSl || missingRuns;
+    window._botRiskReady = !anyMissing;
 
     const warn = document.getElementById('bot-required-warn');
     if (warn) warn.style.display = anyMissing ? 'flex' : 'none';
 
-    _highlightField('cfg-tp',       missingTp);
-    _highlightField('cfg-sl',       missingSl);
-    _highlightField('cfg-max-runs', missingRuns);
+    // Highlight missing fields
+    _highlight('cfg-bot-tp',       missingTp);
+    _highlight('cfg-bot-sl',       missingSl);
+    _highlight('cfg-bot-max-runs', missingRuns);
 
+    // Enable/disable start button
     const startBtn = document.getElementById('bot-start-btn');
     if (startBtn && !startBtn.classList.contains('armed')) {
       startBtn.disabled = anyMissing;
-      startBtn.title    = anyMissing
-        ? 'Set Take Profit, Stop Loss and Max Runs before starting'
-        : '';
+      startBtn.title    = anyMissing ? 'Set Take Profit, Stop Loss and Max Runs first' : '';
     }
   }
 
-  function _highlightField(id, isError) {
+  function _highlight(id, isError) {
     const el = document.getElementById(id);
     if (!el) return;
-    el.classList.toggle('field-required', isError);
+    if (isError) el.classList.add('field-required');
+    else         el.classList.remove('field-required');
   }
 
-  // ── BOOT ──────────────────────────────────────────────────────────────────
+  // Sync slider display values
+  window.syncSlider = function (id) {
+    const el      = document.getElementById(id);
+    const display = document.getElementById(id + '-val');
+    if (el && display) display.textContent = el.value;
+  };
+
+  // Load config when settings panel mounts
   window.addEventListener('DOMContentLoaded', () => {
     window.loadBotConfig();
   });
 
-  // Legacy stubs (some parts of the app still call these names)
-  window.loadConfig   = window.loadBotConfig;
+  // Legacy stub – keep settings tab working if it still calls loadConfig
+  window.loadConfig  = window.loadBotConfig;
   window.saveSettings = window.saveBotConfig;
-  // syncSlider kept for any lingering old references (no-op now)
-  window.syncSlider   = function () {};
 
-  console.log('⚙️ settings.js v2 loaded');
-
+  console.log('⚙️ settings.js loaded');
 })();
