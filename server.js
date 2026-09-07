@@ -472,6 +472,7 @@ const server = app.listen(PORT, () => {
     setInterval(() => {
       const now = Date.now();
       if (store.state.botResetTime && now >= store.state.botResetTime) {
+        const virtualState = virtualFilter.createState(store.config);
         store.transitionLifecycle(STATUS.ARMED, 'New session window started; bot is armed.', {
           active:       true,
           botResetTime: null,
@@ -479,7 +480,12 @@ const server = app.listen(PORT, () => {
           dailyPnl:     0,
           sessionTradeCount: 0,
           tradeInProgress: false,
-          ...virtualFilter.createState(store.config)
+          ...virtualState,
+          // Keep the paper-trade history visible across an automatic session
+          // reset. A deliberate new Start still creates a fresh run.
+          virtualWinCount: store.state.virtualWinCount || 0,
+          virtualLossCount: store.state.virtualLossCount || 0,
+          virtualTradeCount: store.state.virtualTradeCount || 0
         });
         store.addLog('info', '🕛 Midnight reset – bot re-enabled');
       }
