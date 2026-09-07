@@ -2,11 +2,17 @@
 // dashboard.js – Control buttons and manual trade
 // ============================================================
 (function () {
+  let controlRequestId = 0;
 
   // ---- Bot start with validation and button state feedback ----
   window.sendControl = function (action) {
+    const requestId = ++controlRequestId;
     if (action === 'start') {
+      window._botControlOverride = 'starting';
       _setBotButtonState('starting');
+    } else if (action === 'stop') {
+      window._botControlOverride = 'stopping';
+      _setBotButtonState('stopping');
     }
 
     fetch('/api/control', {
@@ -17,15 +23,27 @@
       .then(res => res.json())
       .then(data => {
         if (data.error) {
+          window._botControlOverride = null;
           _setBotButtonState('idle');
           _showBotError(data.error);
         } else if (data.message) {
           console.log(data.message);
-          // SSE will update actual state; button will sync via _syncBotCard
+          // Reconcile immediately from the accepted server response. SSE remains
+          // authoritative for subsequent lifecycle changes, but may be reconnecting.
+          if (requestId !== controlRequestId) return;
+          if (action === 'stop') {
+            window._botControlOverride = 'stopped';
+            _setBotButtonState('idle');
+          }
+          else if (action === 'start') {
+            window._botControlOverride = data.state === 'recovering' ? 'recovering' : 'armed';
+            _setBotButtonState(data.state === 'recovering' ? 'recovering' : 'armed');
+          }
         }
       })
       .catch(err => {
-        _setBotButtonState('idle');
+        window._botControlOverride = null;
+        if (requestId === controlRequestId) _setBotButtonState('idle');
         console.error('Control error:', err);
         _showBotError('Network error – check connection');
       });
@@ -90,6 +108,17 @@
       startBtn.disabled   = true;
       startBtn.textContent = '⏳ Starting…';
       startBtn.className   = 'bot-btn start loading';
+      if (stopBtn) stopBtn.disabled = true;
+    } else if (state === 'stopping') {
+      startBtn.disabled   = true;
+      startBtn.textContent = '⏳ Stopping…';
+      startBtn.className   = 'bot-btn start loading';
+      if (stopBtn) stopBtn.disabled = true;
+    } else if (state === 'recovering') {
+      startBtn.disabled   = true;
+      startBtn.textContent = '↻ Recovering…';
+      startBtn.className   = 'bot-btn start loading';
+      if (stopBtn) { stopBtn.disabled = false; stopBtn.className = 'bot-btn stop'; }
     } else if (state === 'armed') {
       startBtn.disabled   = true;
       startBtn.textContent = '● Armed';
