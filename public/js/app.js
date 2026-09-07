@@ -397,6 +397,23 @@ function _syncBotCard(state) {
   const badge = document.getElementById('bot-status-badge');
   if (!badge) return;
 
+  const controlOverride = window._botControlOverride;
+  if (controlOverride === 'stopped') {
+    if (state.active) {
+      // A delayed SSE packet from before a successful Stop must not visually
+      // re-arm the controls. Keep the accepted server response authoritative
+      // until the matching inactive snapshot arrives.
+      state = {
+        ...state,
+        active: false,
+        lifecycleStatus: 'stopped',
+        lifecycleReason: 'Bot stopped by user; waiting for state stream confirmation.'
+      };
+    } else {
+      window._botControlOverride = null;
+    }
+  }
+
   const isVirtual = state.executionMode === 'virtual';
   const lifecycle = state.lifecycleStatus || (!state.active ? 'idle' : 'armed');
   if (state.virtualTrade) {
@@ -405,7 +422,8 @@ function _syncBotCard(state) {
   } else if (state.tradeInProgress) {
     badge.textContent = 'TRADING';
     badge.className   = 'bot-status-badge running';
-  } else if (lifecycle === 'recovering') {
+  } else if (lifecycle === 'recovering' ||
+             ['connecting', 'disconnected', 'recovering'].includes(state.connectionState)) {
     badge.textContent = 'RECOVERING';
     badge.className = 'bot-status-badge recovering';
   } else if (state.active) {
@@ -418,8 +436,14 @@ function _syncBotCard(state) {
 
   // Sync start/stop button visual state via dashboard.js helper
   if (typeof window._setBotButtonState === 'function') {
-    if (state.active) window._setBotButtonState('armed');
-    else              window._setBotButtonState('idle');
+    const nonRunningLifecycle = ['idle', 'stopped', 'paused', 'completed'];
+    if (!state.active || nonRunningLifecycle.includes(lifecycle)) {
+      window._setBotButtonState('idle');
+    } else if (lifecycle === 'recovering' || ['connecting', 'disconnected', 'recovering'].includes(state.connectionState)) {
+      window._setBotButtonState('recovering');
+    } else {
+      window._setBotButtonState('armed');
+    }
   }
 
   _setText('bot-lifecycle-status', lifecycle.toUpperCase());
