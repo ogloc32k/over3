@@ -101,6 +101,16 @@
   overflow-y: auto;
 }
 
+#tab-bots.active {
+  overflow: hidden;
+}
+
+#tab-bots .bots-screen {
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 /* ---- Hide desktop-only elements ---- */
 .app-sidebar,
 .sidebar-toggle-fixed,
