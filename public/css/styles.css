@@ -818,6 +818,8 @@ body.analytics-active .app-main {
   gap: 12px;
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
+  min-width: 0;
   width: 100%;
   max-width: none;
 }
@@ -1115,7 +1117,7 @@ body.analytics-active .app-main {
     flex-direction: column;
     flex: 1;
     min-height: 0;
-    overflow-y: auto;
+    overflow: hidden;
   }
 
   #tab-manual .manual-trade-screen {
