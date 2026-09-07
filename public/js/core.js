@@ -35,7 +35,6 @@
   let sse = null;
   let sseRetryTimer = null;
   let reconnectAttempts = 0;
-  const maxReconnectAttempts = 10;
 
   // ---------- Utility functions ----------
   function formatPrice(symbol, raw) {
@@ -253,17 +252,24 @@
     if (sse) { sse.close(); sse = null; }
     if (sseRetryTimer) { clearTimeout(sseRetryTimer); sseRetryTimer = null; }
     sse = new EventSource('/stream');
-    sse.onopen = function () { console.log('✅ SSE connected'); reconnectAttempts = 0; };
+    sse.onopen = function () {
+      console.log('✅ SSE connected');
+      reconnectAttempts = 0;
+    };
     sse.onerror = function (err) {
       console.warn('⚠️ SSE error:', err);
       if (sse) sse.close();
+      // Do not keep stale running controls visible while the browser has no
+      // authoritative lifecycle stream.
+      if (typeof window._setBotButtonState === 'function') {
+        window._setBotButtonState(globalState?.active ? 'recovering' : 'idle');
+      }
       if (sseRetryTimer) return;
       const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 10000);
       sseRetryTimer = setTimeout(() => {
         sseRetryTimer = null;
         reconnectAttempts++;
-        if (reconnectAttempts <= maxReconnectAttempts) connectSSE();
-        else console.error('❌ SSE max retries reached.');
+        connectSSE();
       }, delay);
     };
     sse.onmessage = function (e) {
