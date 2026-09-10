@@ -16,6 +16,8 @@ class Store extends EventEmitter {
       sessionPnl: 0,
       dailyPnl: 0,
       currentStake: 0.35,
+      martingaleLevel: 0,
+      martingaleNextStake: 0.35,
       locked: false,
       active: false,
       lastTriggerTime: Date.now(),
@@ -82,7 +84,7 @@ class Store extends EventEmitter {
       lifecycleStatus: status,
       lifecycleReason: event.reason,
       lastLifecycleEvent: event,
-      lifecycleHistory: [...(this.state.lifecycleHistory || []), event].slice(-50)
+      lifecycleHistory: [...(this.state.lifecycleHistory || []), event].slice(-20)
     };
     this.emit('stateChanged');
     return event;
@@ -126,7 +128,22 @@ class Store extends EventEmitter {
 
   getStatePayload() {
     const logs = logger.drainLogs();
-    return { state: { ...this.state }, logs };
+    const state = { ...this.state };
+
+    // Slim heavy arrays before broadcasting over SSE. Frontend reads at
+    // most 40 prices (manual chart) and 5 tick directions per symbol.
+    if (state.marketMetrics) {
+      const slim = {};
+      for (const [sym, m] of Object.entries(state.marketMetrics)) {
+        slim[sym] = {
+          ...m,
+          lastPrices: Array.isArray(m.lastPrices) ? m.lastPrices.slice(-40) : m.lastPrices,
+          tickDirections: Array.isArray(m.tickDirections) ? m.tickDirections.slice(-12) : m.tickDirections
+        };
+      }
+      state.marketMetrics = slim;
+    }
+    return { state, logs };
   }
 }
 

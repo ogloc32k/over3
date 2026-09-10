@@ -5,9 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>QUANTCORE // TERMINAL v6.0</title>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <link rel="stylesheet" href="css/styles.css?v=18">
-  <link rel="stylesheet" href="css/styles-mobile.css?v=18" media="(max-width: 768px)">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="css/styles.css?v=19">
+  <link rel="stylesheet" href="css/styles-mobile.css?v=19" media="(max-width: 768px)">
+  <!-- Chart.js pinned to an exact version so the browser can cache it
+       long-term; unpinned /npm/chart.js re-downloads metadata and can
+       silently change under you. defer keeps parsing non-blocking. -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="js/chart-utils.js"></script>
 </head>
 <body>
@@ -265,6 +269,7 @@
                 <div><span class="bfs-label">Execution</span><strong id="bot-execution-mode">VIRTUAL</strong></div>
                 <div><span class="bfs-label">Virtual losses</span><strong id="bot-virtual-streak">0 / 4</strong></div>
                 <div><span class="bfs-label">Paper trades</span><strong id="bot-virtual-count">0</strong></div>
+                <div><span class="bfs-label">Martingale</span><strong id="bot-martingale-status">OFF</strong></div>
               </div>
 
               <!-- Error / warning banner -->
@@ -327,6 +332,44 @@
                     </div>
                     </div>
                     <p class="bsp-virtual-note">Recommended: <strong>4 losses</strong> and <strong>any real trade</strong>. “Win only” can keep risking money after a real loss.</p>
+                  </div>
+                </details>
+
+                <!-- Martingale stake progression -->
+                <details class="bsp-section bsp-virtual">
+                  <summary class="bsp-section-header">
+                    <span class="bsp-section-title">Martingale</span>
+                    <span class="bsp-summary-meta">
+                      <span class="bsp-virtual-tag">Bot trades only</span>
+                      <span class="bsp-disclosure-chevron" aria-hidden="true">⌄</span>
+                    </span>
+                  </summary>
+                  <div class="bsp-section-body">
+                    <p class="bsp-virtual-copy" id="bot-martingale-summary" aria-live="polite">
+                      OFF: Every bot trade uses the base stake.
+                    </p>
+                    <div class="bsp-grid bsp-grid-3">
+                    <div class="bsp-field bsp-toggle-field">
+                      <label class="bsp-label" for="cfg-bot-martingale-enabled">Martingale enabled <span class="bsp-unit">on / off</span></label>
+                      <label class="bsp-toggle">
+                        <input type="checkbox" id="cfg-bot-martingale-enabled" onchange="updateMartingaleSummary(); saveBotConfig()" aria-describedby="bot-martingale-enabled-help">
+                        <span class="bsp-toggle-track"></span>
+                        <span class="bsp-toggle-text">OFF</span>
+                      </label>
+                      <span class="bsp-help" id="bot-martingale-enabled-help">OFF keeps a fixed stake. ON multiplies the stake after each losing bot trade.</span>
+                    </div>
+                    <div class="bsp-field">
+                      <label class="bsp-label" for="cfg-bot-martingale-multiplier">Multiplier <span class="bsp-unit">× per loss</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-martingale-multiplier" min="1.1" max="5" step="0.1" value="2" oninput="updateMartingaleSummary(); saveBotConfig()" aria-describedby="bot-martingale-multiplier-help">
+                      <span class="bsp-help" id="bot-martingale-multiplier-help">How much the stake grows after each losing bot trade (e.g. 2 = double).</span>
+                    </div>
+                    <div class="bsp-field">
+                      <label class="bsp-label" for="cfg-bot-martingale-max-steps">Max steps <span class="bsp-unit">losses in a row</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-martingale-max-steps" min="1" max="10" step="1" value="4" oninput="updateMartingaleSummary(); saveBotConfig()" aria-describedby="bot-martingale-max-steps-help">
+                      <span class="bsp-help" id="bot-martingale-max-steps-help">After this many consecutive losses the stake resets to base. A win also resets.</span>
+                    </div>
+                    </div>
+                    <p class="bsp-virtual-note">A win or reaching the step cap resets the stake to base. Manual trades always use your typed stake and never affect the progression.</p>
                   </div>
                 </details>
 
@@ -547,7 +590,7 @@
   <script src="js/dashboard.js"></script>
   <script src="js/analytics.js"></script>
   <script src="js/logs.js"></script>
-  <script src="js/settings.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/settings.js?v=20"></script>
+  <script src="js/app.js?v=20"></script>
 </body>
 </html>

@@ -166,6 +166,8 @@ All routes are defined in server.js.
 Method	Path	Auth	Description
 GET	/health	None	Returns { status: "ok" }
 GET	/stream	None	SSE stream; pushes { state, logs } on every store change.
+GET	/api/state	None	Returns the current state and buffered audit logs using the same shape as the SSE payload.
+GET	/debug/state	None	Returns compact lifecycle, connection, heartbeat, tick, and last-error diagnostics.
 POST	/api/control	None	Body: { action: "start"|"stop"|"set_mode", mode?: "demo"|"real" }
 POST	/api/trade/manual	None	Body: { symbol, contractType, duration, durationUnit, price, stake? }
 GET	/api/config	None	Returns current configuration object

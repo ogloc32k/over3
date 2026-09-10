@@ -18,10 +18,13 @@
     'cfg-bot-dominance':    'SNIPER_DOMINANCE',
     'cfg-bot-breakout':     'SNIPER_BREAKOUT_BUFFER',
     'cfg-bot-autocorrelation': 'SNIPER_MAX_AUTOCORRELATION',
-    'cfg-bot-virtual-loss-threshold': 'BOT_VIRTUAL_LOSS_THRESHOLD'
+    'cfg-bot-virtual-loss-threshold': 'BOT_VIRTUAL_LOSS_THRESHOLD',
+    'cfg-bot-martingale-multiplier': 'BOT_MARTINGALE_MULTIPLIER',
+    'cfg-bot-martingale-max-steps': 'BOT_MARTINGALE_MAX_STEPS'
   };
   const CHECKBOX_FIELDS = {
-    'cfg-bot-virtual-enabled': 'BOT_VIRTUAL_FILTER_ENABLED'
+    'cfg-bot-virtual-enabled': 'BOT_VIRTUAL_FILTER_ENABLED',
+    'cfg-bot-martingale-enabled': 'BOT_MARTINGALE_ENABLED'
   };
   const STRING_FIELDS = {
     'cfg-bot-virtual-return-mode': 'BOT_VIRTUAL_RETURN_MODE'
@@ -57,9 +60,15 @@
       // Cache max_runs for the runs counter in _syncBotCard
       window._cachedMaxRuns = parseInt(config.BOT_MAX_RUNS) || 0;
       window._cachedVirtualLossThreshold = parseInt(config.BOT_VIRTUAL_LOSS_THRESHOLD) || 4;
+      window._cachedMartingale = {
+        enabled:   config.BOT_MARTINGALE_ENABLED === true,
+        multiplier: parseFloat(config.BOT_MARTINGALE_MULTIPLIER) || 2,
+        maxSteps:  parseInt(config.BOT_MARTINGALE_MAX_STEPS) || 4
+      };
 
       _syncSliderDisplays();
       updateVirtualFilterSummary();
+      updateMartingaleSummary();
       _validateRequired(config);
     } catch(err) {
       console.error('loadBotConfig error:', err);
@@ -210,10 +219,29 @@
     if (toggleText) toggleText.textContent = enabled ? 'ON' : 'OFF';
   };
 
+  window.updateMartingaleSummary = function () {
+    const toggle = document.getElementById('cfg-bot-martingale-enabled');
+    const multEl = document.getElementById('cfg-bot-martingale-multiplier');
+    const stepsEl = document.getElementById('cfg-bot-martingale-max-steps');
+    const summary = document.getElementById('bot-martingale-summary');
+    const toggleText = document.querySelector('#cfg-bot-martingale-enabled ~ .bsp-toggle-text');
+    if (!toggle) return;
+    const enabled = toggle.checked;
+    const mult = parseFloat(multEl?.value) || 2;
+    const steps = Math.max(1, parseInt(stepsEl?.value, 10) || 4);
+    if (toggleText) toggleText.textContent = enabled ? 'ON' : 'OFF';
+    if (summary) {
+      summary.textContent = enabled
+        ? `ON: After each losing bot trade the stake is multiplied by ${mult} (e.g. after ${steps} straight losses the cap is hit and the stake resets to base). A win resets to base immediately.`
+        : 'OFF: Every bot trade uses the base stake.';
+    }
+  };
+
   // Load config when the bot-owned panel mounts
   window.addEventListener('DOMContentLoaded', () => {
     window.loadBotConfig();
     window.updateVirtualFilterSummary();
+    window.updateMartingaleSummary();
   });
 
   console.log('⚙️ settings.js loaded');

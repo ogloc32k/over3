@@ -14,6 +14,16 @@ html, body {
   -webkit-tap-highlight-color: transparent;
   transition: background 0.3s, color 0.3s;
 }
+/* CRITICAL FIX: the shell was designed as a flex column (app-body has
+   flex:1) but body was a plain block, so flex:1 was ignored, .app-body
+   grew past the viewport and was clipped by body{overflow:hidden} with
+   no scrollbar — the "stuck page" bug. Making body a flex column makes
+   .app-body fill exactly the remaining viewport, and each tab page's
+   overflow-y:auto actually scrolls. */
+body {
+  display: flex;
+  flex-direction: column;
+}
 :root {
   --bg-terminal: #0b0e14;
   --bg-panel: #131722;
@@ -58,6 +68,7 @@ body.light {
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border-subtle);
   padding: 4px 14px;
+  flex-shrink: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -175,6 +186,7 @@ body.light {
 .app-body {
   display: flex;
   flex: 1;
+  min-height: 0;
   overflow: hidden;
   position: relative;
   background: var(--bg-terminal);

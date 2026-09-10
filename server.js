@@ -4,7 +4,11 @@ require('dotenv').config();
 const express = require('express');
 const path    = require('path');
 const fs      = require('fs');
-const supabase = require('./services/supabase');
+const realSupabase = require('./services/supabase');
+const fakeSupabase = require('./services/fakeLedger');
+const USE_FAKE_DATA = !process.env.DERIV_APP_ID || !process.env.DERIV_PAT;
+// Fake-data mode: swap Supabase for the in-memory ledger so analytics work without keys.
+const supabase = (USE_FAKE_DATA || !realSupabase) ? fakeSupabase : realSupabase;
 const virtualFilter = require('./engine/virtualFilter');
 const { resetStrategyConfig, PRESERVED_CONFIG_KEYS } = require('./engine/configReset');
 const { STATUS, REASONS, resolvePauseReason, resolveRiskTransition, isStaleLock } = require('./engine/lifecycle');
@@ -19,7 +23,11 @@ const processError = (kind, error) => {
 };
 try { store       = require('./store');           console.log('✅ Store loaded');        } catch(e) { console.error('❌ store.js:', e); process.exit(1); }
 try { logger      = require('./logger');          console.log('✅ Logger loaded');       } catch(e) { console.error('❌ logger.js:', e); process.exit(1); }
-try { derivClient = require('./services/deriv'); console.log('✅ Deriv client loaded'); } catch(e) { console.error('❌ deriv.js:', e); derivClient = null; }
+if (USE_FAKE_DATA) {
+  try { derivClient = require('./services/fakeDeriv'); console.log('✅ FAKE Deriv client loaded (simulated market data, no env keys needed)'); } catch(e) { console.error('❌ fakeDeriv.js:', e); process.exit(1); }
+} else {
+  try { derivClient = require('./services/deriv'); console.log('✅ Deriv client loaded'); } catch(e) { console.error('❌ deriv.js:', e); derivClient = null; }
+}
 
 process.on('uncaughtException', err => processError('UNCAUGHT EXCEPTION', err));
 process.on('unhandledRejection', reason => processError('UNHANDLED REJECTION', reason));
@@ -47,7 +55,10 @@ const DEFAULT_CONFIG = {
   SNIPER_MAX_AUTOCORRELATION: -0.05,
   BOT_VIRTUAL_FILTER_ENABLED: true,
   BOT_VIRTUAL_LOSS_THRESHOLD: 4,
-  BOT_VIRTUAL_RETURN_MODE: 'any'
+  BOT_VIRTUAL_RETURN_MODE: 'any',
+  BOT_MARTINGALE_ENABLED: false,
+  BOT_MARTINGALE_MULTIPLIER: 2.0,
+  BOT_MARTINGALE_MAX_STEPS: 4
 };
 
 function loadConfig() {
@@ -77,6 +88,43 @@ function saveConfig() {
     store.recordError(`Failed to save bot configuration: ${e.message}`);
     return false;
   }
+}
+
+// ============================================================
+// MARTINGALE stake progression (bot trades only)
+// After a losing bot trade the next stake is base x multiplier^step.
+// A win (or hitting the step cap) resets to the base stake.
+// Disabled by default; manual trades never follow the progression.
+// ============================================================
+function martingaleParams() {
+  const cfg = store.config || {};
+  return {
+    enabled:    cfg.BOT_MARTINGALE_ENABLED === true,
+    base:       parseFloat(cfg.BOT_BASE_STAKE) || 0.35,
+    multiplier: parseFloat(cfg.BOT_MARTINGALE_MULTIPLIER) > 1 ? parseFloat(cfg.BOT_MARTINGALE_MULTIPLIER) : 2,
+    maxSteps:   Math.max(1, parseInt(cfg.BOT_MARTINGALE_MAX_STEPS) || 4)
+  };
+}
+
+function martingaleStakeForLevel(mg, level) {
+  const l = Math.min(Math.max(level || 0, 0), mg.maxSteps);
+  return Math.round(mg.base * Math.pow(mg.multiplier, l) * 100) / 100;
+}
+
+// ============================================================
+// PERSISTED ACTIVITY FLAG (bot_state.json) – lets AUTO-RESUME
+// know whether the bot was running before the last restart.
+// ============================================================
+const BOT_STATE_PATH = process.env.BOT_STATE_PATH || path.join(__dirname, 'bot_state.json');
+let wasActiveBeforeRestart = false;
+try {
+  if (fs.existsSync(BOT_STATE_PATH)) {
+    wasActiveBeforeRestart = JSON.parse(fs.readFileSync(BOT_STATE_PATH, 'utf8')).active === true;
+  }
+} catch (_) { /* corrupt state file – treat as inactive */ }
+function saveBotState(active) {
+  try { fs.writeFileSync(BOT_STATE_PATH, JSON.stringify({ active: !!active, at: Date.now() })); }
+  catch (_) { /* non-fatal */ }
 }
 
 loadConfig();
@@ -110,8 +158,15 @@ app.get('/stream', (req, res) => {
   res.write(`data: ${JSON.stringify(initial)}\n\n`);
 
   let closed = false;
+  let dirty = false;
+  let flushTimer = null;
+  // Coalesce bursts of state changes (10 symbols tick up to ~10x/sec)
+  // into at most one payload write per 120ms. Zero perceived lag,
+  // massively less work for server and browser.
   const writeState = () => {
     if (closed || res.writableEnded) return;
+    dirty = false;
+    flushTimer = null;
     try {
       const payload = store.getStatePayload();
       res.write(`data: ${JSON.stringify(payload)}\n\n`);
@@ -123,7 +178,12 @@ app.get('/stream', (req, res) => {
       try { res.end(); } catch (_) {}
     }
   };
-  const onChange = writeState;
+  const onChange = () => {
+    if (closed || res.writableEnded) return;
+    dirty = true;
+    if (flushTimer) return;
+    flushTimer = setTimeout(writeState, 120);
+  };
   const heartbeat = setInterval(() => {
     if (closed || res.writableEnded) return;
     try { res.write(': heartbeat\n\n'); } catch (_) { closed = true; }
@@ -133,6 +193,7 @@ app.get('/stream', (req, res) => {
     closed = true;
     store.removeListener('stateChanged', onChange);
     clearInterval(heartbeat);
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
   });
 });
 
@@ -182,7 +243,9 @@ app.post('/api/control', (req, res) => {
         tradeInProgress: false,
         sessionTradeCount: 0,
         ...virtualFilter.createState(store.config),
-        currentStake: parseFloat(store.config.BOT_BASE_STAKE) || 0.35
+        currentStake: parseFloat(store.config.BOT_BASE_STAKE) || 0.35,
+        martingaleLevel: 0,
+        martingaleNextStake: parseFloat(store.config.BOT_BASE_STAKE) || 0.35
       });
       if (derivClient && derivClient.isConnected()) {
         store.transitionLifecycle(STATUS.ARMED, REASONS.ARMED);
@@ -192,6 +255,7 @@ app.post('/api/control', (req, res) => {
         });
       }
       store.addLog('info', `✅ Bot started in ${store.state.executionMode.toUpperCase()} mode. TP=$${tp.toFixed(2)}, SL=$${sl.toFixed(2)}, max runs=${maxRuns}.`);
+      saveBotState(true);
       res.json({ message: 'Bot started', state: store.state.lifecycleStatus });
 
     } else if (action === 'stop') {
@@ -200,6 +264,7 @@ app.post('/api/control', (req, res) => {
         active: false, locked: false, tradeInProgress: false, virtualTrade: null
       });
       store.addLog('info', '⏹️ Bot stopped by user. Any pending virtual observation was cancelled.');
+      saveBotState(false);
       res.json({ message: 'Bot stopped', state: store.state.lifecycleStatus });
 
     } else if (action === 'set_mode') {
@@ -468,6 +533,65 @@ const server = app.listen(PORT, () => {
       }
     }, 30000);
 
+    // ============================================================
+    // WATCHDOG – make every silent stall LOUD.
+    // The classic mystery-stop causes (stalled tick feed, stuck
+    // RECOVERING, held trade lock) previously happened invisibly.
+    // ============================================================
+    let lastTickWarnAt = 0, recoveringWarnAt = 0, lockWarnAt = 0;
+    setInterval(() => {
+      const now = Date.now();
+      if (!store.state.active) return;
+
+      // 1. Tick feed stalled?
+      const lastTick = store.state.lastTickAt || 0;
+      if (lastTick && now - lastTick > 45000 && now - lastTickWarnAt > 60000) {
+        lastTickWarnAt = now;
+        store.addLog('error', `🚨 Watchdog: no market ticks for ${Math.round((now - lastTick) / 1000)}s — the price feed is stalled, so no new signals can fire. This is a data-feed issue, not a strategy stop.`);
+      }
+
+      // 2. Stuck in RECOVERING?
+      if (store.state.lifecycleStatus === STATUS.RECOVERING && now - recoveringWarnAt > 90000) {
+        recoveringWarnAt = now;
+        store.addLog('warn', `🚨 Watchdog: bot has been RECOVERING for a while. Connection state: ${store.state.connectionState}. Reason: ${store.state.connectionReason || 'unknown'}. The bot stays armed but cannot trade until the connection returns.`);
+      }
+
+      // 3. Trade lock held suspiciously long?
+      if (tradeInProgressSym['global'] && lockTimestamps['global'] && now - lockTimestamps['global'] > 60000 && now - lockWarnAt > 60000) {
+        lockWarnAt = now;
+        store.addLog('warn', `🚨 Watchdog: trade lock has been held for ${Math.round((now - lockTimestamps['global']) / 1000)}s. If no settlement arrives, stale-lock cleanup releases it at 120s and the bot re-arms automatically.`);
+      }
+    }, 20000);
+
+    // ============================================================
+    // AUTO-RESUME after a server restart (opt-in via BOT_AUTO_RESUME;
+    // defaults ON in fake-data mode, OFF for real trading).
+    // ============================================================
+    const AUTO_RESUME = USE_FAKE_DATA
+      ? store.config.BOT_AUTO_RESUME !== false
+      : store.config.BOT_AUTO_RESUME === true;
+    let autoResumed = false;
+    if (AUTO_RESUME) {
+      derivClient.on('connection_state', ({ state }) => {
+        if (autoResumed || state !== 'connected' || !wasActiveBeforeRestart) return;
+        const tp = parseFloat(store.config.BOT_TAKE_PROFIT);
+        const sl = parseFloat(store.config.BOT_STOP_LOSS);
+        const maxRuns = parseInt(store.config.BOT_MAX_RUNS);
+        if (!tp || tp <= 0 || !sl || sl <= 0 || !maxRuns || maxRuns <= 0) return;
+        autoResumed = true;
+        store.transitionLifecycle(STATUS.STARTING, 'Auto-resume: bot was active before the last server restart.', {
+          active: true, locked: false, tradeInProgress: false,
+          sessionTradeCount: 0,
+          ...virtualFilter.createState(store.config),
+          currentStake: parseFloat(store.config.BOT_BASE_STAKE) || 0.35,
+          martingaleLevel: 0,
+          martingaleNextStake: parseFloat(store.config.BOT_BASE_STAKE) || 0.35
+        });
+        transitionArmed('Auto-resume: connection is back; bot re-armed.');
+        store.addLog('warn', `🔁 AUTO-RESUME: the server restarted (deploy/sleep/crash) while the bot was running. Re-arming automatically because BOT_AUTO_RESUME is on. Set BOT_AUTO_RESUME=false to disable.`);
+      });
+    }
+
     // Midnight reset check (every second)
     setInterval(() => {
       const now = Date.now();
@@ -605,7 +729,9 @@ const server = app.listen(PORT, () => {
               return;
             }
 
-            const stake   = signal.stake || store.state.currentStake || 0.35;
+            const mg      = martingaleParams();
+            let   stake   = signal.stake || store.state.currentStake || 0.35;
+            if (mg.enabled) stake = martingaleStakeForLevel(mg, store.state.martingaleLevel || 0);
             const balance = store.state.balance ?? 0;
             if (stake < 0.35) {
               store.addLog('warn', `⛔ Real signal skipped: stake $${stake.toFixed(2)} is below Deriv minimum.`);
@@ -625,7 +751,8 @@ const server = app.listen(PORT, () => {
               tradeInProgress: true,
               locked: true
             });
-            store.addLog('info', `📤 Real signal accepted: ${signal.contractType} ${signal.symbol}, stake $${stake.toFixed(2)}, duration ${signal.duration} ticks.`);
+            const mgNote = mg.enabled && (store.state.martingaleLevel || 0) > 0 ? ` (martingale step ${store.state.martingaleLevel}/${mg.maxSteps})` : '';
+            store.addLog('info', `📤 Real signal accepted: ${signal.contractType} ${signal.symbol}, stake $${stake.toFixed(2)}${mgNote}, duration ${signal.duration} ticks.`);
 
             derivClient.buyContract(signal).then(contractId => {
               if (contractId) {
@@ -674,11 +801,32 @@ const server = app.listen(PORT, () => {
 
       store.updateState({ sessionPnl: newSessionPnl, dailyPnl: newDailyPnl, sessionTradeCount: newTradeCount });
 
-      // Fixed stake only. Never double after a loss: martingale converts an
-      // ordinary losing streak into an account-threatening exposure spike.
+      // Stake progression for the next bot trade. Manual trades never
+      // affect the progression; bot trades follow martingale when enabled.
       const baseStake = parseFloat(store.config?.BOT_BASE_STAKE) || 0.35;
-      store.updateState({ currentStake: baseStake });
-      store.addLog('info', `💵 Fixed stake reset to $${baseStake.toFixed(2)} after settlement.`);
+      const mg        = martingaleParams();
+      const isBotTrade = (trade.bot_name || 'manual') !== 'manual';
+
+      if (!isBotTrade) {
+        // Manual trade settled: leave the bot's stake progression untouched.
+      } else if (!mg.enabled) {
+        store.updateState({ martingaleLevel: 0, currentStake: baseStake, martingaleNextStake: baseStake });
+        store.addLog('info', `💵 Fixed stake reset to $${baseStake.toFixed(2)} after settlement.`);
+      } else if (result === 'WIN') {
+        store.updateState({ martingaleLevel: 0, currentStake: baseStake, martingaleNextStake: baseStake });
+        store.addLog('info', `💵 Martingale: win → stake reset to base $${baseStake.toFixed(2)}.`);
+      } else if (result === 'LOSS') {
+        const level = (store.state.martingaleLevel || 0) + 1;
+        if (level > mg.maxSteps) {
+          store.updateState({ martingaleLevel: 0, currentStake: baseStake, martingaleNextStake: baseStake });
+          store.addLog('warn', `⚠️ Martingale: step cap (${mg.maxSteps}) reached without a win → stake reset to base $${baseStake.toFixed(2)}.`);
+        } else {
+          const next = martingaleStakeForLevel(mg, level);
+          store.updateState({ martingaleLevel: level, currentStake: baseStake, martingaleNextStake: next });
+          store.addLog('info', `📉 Martingale: loss → next bot stake $${next.toFixed(2)} (step ${level}/${mg.maxSteps}, ×${mg.multiplier}).`);
+        }
+      }
+      // BREAKEVEN keeps the current step unchanged.
 
       // A real Sniper trade is followed by paper mode according to the
       // selected policy. The default "any" policy prevents loss chasing.
@@ -711,12 +859,14 @@ const server = app.listen(PORT, () => {
           active: false, botResetTime: resetTime
         });
         store.addLog('info', `🛑 Take Profit reached ($${newDailyPnl.toFixed(2)}). Bot paused until ${new Date(resetTime).toLocaleTimeString()}`);
+        saveBotState(false);
       } else if (riskTransition?.status === STATUS.PAUSED && riskTransition.reason === REASONS.STOP_LOSS) {
         const resetTime = getNextMidnightEAT();
         store.transitionLifecycle(riskTransition.status, riskTransition.reason, {
           active: false, botResetTime: resetTime
         });
         store.addLog('info', `🛑 Stop Loss hit (-$${Math.abs(newDailyPnl).toFixed(2)}). Bot paused until ${new Date(resetTime).toLocaleTimeString()}`);
+        saveBotState(false);
       }
 
       // Max runs check: stop bot if session limit reached
@@ -726,6 +876,7 @@ const server = app.listen(PORT, () => {
           active: false
         });
         store.addLog('info', `🛑 Max runs reached (${newTradeCount}/${maxRuns}). Bot stopped.`);
+        saveBotState(false);
       }
 
       // Supabase insert

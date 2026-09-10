@@ -490,6 +490,22 @@ function _syncBotCard(state) {
   }
   const virtualCountEl = document.getElementById('bot-virtual-count');
   if (virtualCountEl) virtualCountEl.textContent = state.virtualTradeCount || 0;
+
+  const mgEl = document.getElementById('bot-martingale-status');
+  if (mgEl) {
+    const mgCfg = window._cachedMartingale || {};
+    if (!mgCfg.enabled) {
+      mgEl.textContent = 'OFF';
+      mgEl.style.color = '';
+    } else {
+      const level = state.martingaleLevel || 0;
+      const next = state.martingaleNextStake || 0.35;
+      mgEl.textContent = level > 0
+        ? `STEP ${level}/${mgCfg.maxSteps || 4} · NEXT $${Number(next).toFixed(2)}`
+        : `ON · BASE $${Number(next).toFixed(2)}`;
+      mgEl.style.color = level > 0 ? 'var(--orange-warn)' : '';
+    }
+  }
 }
 
 // ============================================================

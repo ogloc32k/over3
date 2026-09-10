@@ -3,9 +3,14 @@
    ============================================================ */
 
 /* ---- Core layout ---- */
+/* With body now a flex column, .app-body flexes to exactly the space
+   left below the header — no hardcoded calc that can miscount the
+   real header height. */
 .app-body {
   flex-direction: column;
-  height: calc(100svh - var(--header-height));
+  flex: 1;
+  min-height: 0;
+  height: auto;
   overflow: hidden;
 }
 .app-header {
