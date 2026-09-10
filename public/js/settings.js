@@ -3,6 +3,60 @@
 // ============================================================
 (function () {
 
+  // ---- Bot market selection (symbol allowlist) ----
+  const SYMBOL_SHORT = {
+    'R_10':'V10','R_25':'V25','R_50':'V50','R_75':'V75','R_100':'V100',
+    '1HZ10V':'V10 (1s)','1HZ25V':'V25 (1s)','1HZ50V':'V50 (1s)',
+    '1HZ75V':'V75 (1s)','1HZ100V':'V100 (1s)'
+  };
+  const TOTAL_MARKETS = Object.keys(SYMBOL_SHORT).length;
+  let _botSymbolsInit = false;
+
+  function normalizeSymbols(raw) {
+    const arr = Array.isArray(raw) ? raw : (typeof raw === 'string' ? raw.split(',') : []);
+    return arr.map(s => String(s).trim()).filter(Boolean);
+  }
+
+  window.getSelectedBotSymbols = function () {
+    return [...document.querySelectorAll('#botSymbolChips .asset-chip.active')].map(c => c.dataset.symbol);
+  };
+
+  window.updateSymbolsSummary = function () {
+    const summary = document.getElementById('bot-symbols-summary');
+    if (!summary) return;
+    const sel = window.getSelectedBotSymbols();
+    if (!sel.length || sel.length === TOTAL_MARKETS) {
+      summary.textContent = `ALL ${TOTAL_MARKETS}: The bot scans every volatility index and trades whichever produces a qualifying signal.`;
+    } else {
+      summary.textContent = `${sel.length}/${TOTAL_MARKETS} SELECTED: The bot only watches ${sel.map(s => SYMBOL_SHORT[s] || s).join(', ')}.`;
+    }
+  };
+
+  function renderBotSymbolChips(selected) {
+    const container = document.getElementById('botSymbolChips');
+    if (!container) return;
+    container.innerHTML = '';
+    const selSet = new Set(selected);
+    const allOn = !selected.length || selected.length === TOTAL_MARKETS;
+    Object.keys(SYMBOL_SHORT).forEach(sym => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'asset-chip' + ((allOn || selSet.has(sym)) ? ' active' : '');
+      chip.dataset.symbol = sym;
+      chip.textContent = SYMBOL_SHORT[sym];
+      chip.setAttribute('aria-pressed', (allOn || selSet.has(sym)) ? 'true' : 'false');
+      chip.onclick = () => {
+        chip.classList.toggle('active');
+        chip.setAttribute('aria-pressed', chip.classList.contains('active') ? 'true' : 'false');
+        window.updateSymbolsSummary();
+        window.saveBotConfig();
+      };
+      container.appendChild(chip);
+    });
+    window.updateSymbolsSummary();
+    _botSymbolsInit = true;
+  }
+
   // Map of HTML input ID → config key
   const BOT_FIELDS = {
     'cfg-bot-duration':     'BOT_DURATION',
@@ -57,6 +111,8 @@
         if (el && config[key] !== undefined && config[key] !== null) el.value = config[key];
       }
 
+      renderBotSymbolChips(normalizeSymbols(config.BOT_SYMBOLS));
+
       // Cache max_runs for the runs counter in _syncBotCard
       window._cachedMaxRuns = parseInt(config.BOT_MAX_RUNS) || 0;
       window._cachedVirtualLossThreshold = parseInt(config.BOT_VIRTUAL_LOSS_THRESHOLD) || 4;
@@ -102,6 +158,12 @@
     for (const [id, key] of Object.entries(STRING_FIELDS)) {
       const el = document.getElementById(id);
       if (el) config[key] = el.value;
+    }
+    if (_botSymbolsInit) {
+      // Empty selection = all markets (explicit empty array on purpose)
+      config.BOT_SYMBOLS = window.getSelectedBotSymbols().filter(
+        s => s !== '' && Object.keys(SYMBOL_SHORT).includes(s)
+      );
     }
 
     try {

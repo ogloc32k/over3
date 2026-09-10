@@ -293,6 +293,24 @@
               <!-- ─── BOT-OWNED SETTINGS PANEL ─── -->
               <div class="bot-settings-panel">
 
+                <!-- Market selection -->
+                <details class="bsp-section bsp-symbols-section" open>
+                  <summary class="bsp-section-header">
+                    <span class="bsp-section-title">Markets</span>
+                    <span class="bsp-summary-meta">
+                      <span class="bsp-virtual-tag">Symbol allowlist</span>
+                      <span class="bsp-disclosure-chevron" aria-hidden="true">⌄</span>
+                    </span>
+                  </summary>
+                  <div class="bsp-section-body">
+                    <p class="bsp-virtual-copy" id="bot-symbols-summary" aria-live="polite">
+                      ALL: The bot scans all 10 volatility indices and trades whichever produces a qualifying signal.
+                    </p>
+                    <div id="botSymbolChips" class="manual-chips" aria-label="Bot markets"></div>
+                    <p class="bsp-help" id="bot-symbols-help">Tap to toggle markets on/off. All on = trade every market; select specific ones to restrict the bot to them. Manual trades are never affected.</p>
+                  </div>
+                </details>
+
                 <!-- Virtual loss filter -->
                 <details class="bsp-section bsp-virtual-section" open>
                   <summary class="bsp-section-header">
@@ -590,7 +608,7 @@
   <script src="js/dashboard.js"></script>
   <script src="js/analytics.js"></script>
   <script src="js/logs.js"></script>
-  <script src="js/settings.js?v=20"></script>
+  <script src="js/settings.js?v=21"></script>
   <script src="js/app.js?v=20"></script>
 </body>
 </html>

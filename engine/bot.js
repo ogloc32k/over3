@@ -15,6 +15,15 @@ function evaluate(symbol, metrics, state, options = {}) {
   if (!state.active) return null;
   if (options.tradeInProgress) return null;
 
+  // ---- Symbol allowlist (empty/missing = all markets) ----
+  const allowRaw = (options.config || {}).BOT_SYMBOLS;
+  const allowlist = Array.isArray(allowRaw)
+    ? allowRaw.map(s => String(s).trim()).filter(Boolean)
+    : (typeof allowRaw === 'string'
+        ? allowRaw.split(',').map(s => s.trim()).filter(Boolean)
+        : []);
+  if (allowlist.length && !allowlist.includes(symbol)) return null;
+
   // Config comes from options (not state — state has no config property)
   const config = options.config || {};
 

@@ -25,6 +25,7 @@ Vanilla-JS frontend, Node/Express backend, Supabase PostgreSQL ledger. Runs in *
 
 ## Features
 
+- **Symbol allowlist** — restrict the bot to specific markets via multi-select chips in Bot Settings (empty selection = all 10 indices).
 - **Live market data** — Deriv volatility indices streamed over WebSocket, proxied to the browser via throttled Server-Sent Events.
 - **Manual trading** — one-click up/down trades with your own stake; never touches bot state or the martingale ladder.
 - **Signal-driven bot** — RSI oversold/overbought + sniper-zone breakout confluence, with a **virtual filter**: the bot first paper-trades a signal and only goes live after a configurable loss-streak threshold is met.
@@ -97,6 +98,7 @@ All editable from the **Bots → Bot Settings** panel (persisted to `bot_config.
 | `BOT_STOP_LOSS` | unset | Session stops when loss ≥ SL (**required to start**) |
 | `BOT_MAX_RUNS` | unset | Max number of real trades per session (**required to start**) |
 | `BOT_COOLDOWN` | `5` | Seconds between trades |
+| `BOT_SYMBOLS` | all 10 | Which markets the bot watches (empty = all; multi-select chips in Bot Settings) |
 | `BOT_RSI_OVERSOLD` | `30` | RSI buy-signal threshold |
 | `BOT_RSI_OVERBOUGHT` | `70` | RSI sell-signal threshold |
 | `SNIPER_ZONE_PCT` | `20` | % of recent range defining the sniper zone |
