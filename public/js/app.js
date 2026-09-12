@@ -677,15 +677,20 @@ function loadBotDailyPnl() {
 // ============================================================
 setInterval(() => {
   const resetTime = window.QuantCore?.getGlobalState()?.botResetTime;
-  const el = document.getElementById('bot-reset-countdown');
-  if (!el) return;
+  const fmt = (remaining) => {
+    const h = Math.floor(remaining / 3600);
+    const m = Math.floor((remaining % 3600) / 60);
+    const s = remaining % 60;
+    return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  };
+  const el   = document.getElementById('bot-reset-countdown');
+  const pill = document.getElementById('qct-paused-countdown');
   if (resetTime) {
     const remaining = Math.max(0, Math.ceil((resetTime - Date.now()) / 1000));
-    const hours = Math.floor(remaining / 3600);
-    const mins = Math.floor((remaining % 3600) / 60);
-    const secs = remaining % 60;
-    el.textContent = `${hours}:${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+    if (el)   el.textContent   = fmt(remaining);
+    if (pill) pill.textContent  = `RESUMES IN ${fmt(remaining)}`;
   } else {
-    el.textContent = '--';
+    if (el)   el.textContent  = '--';
+    if (pill) pill.textContent = '';
   }
 }, 1000);

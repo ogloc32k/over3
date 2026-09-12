@@ -102,9 +102,10 @@
           header.className = 'header-status recovering';
           header.title = safeState.lifecycleReason || safeState.connectionReason || '';
         } else if (lifecycle === 'paused') {
-          header.textContent = '● PAUSED';
+          const resetAt = safeState.botResetTime;
+          header.innerHTML = '● PAUSED' + (resetAt ? ' <span id="qct-paused-countdown" class="cooldown">RESUMES IN --:--:--</span>' : '');
           header.className = 'header-status paused';
-          header.title = safeState.lifecycleReason || '';
+          header.title = (safeState.lifecycleReason || '') + (safeState.resetTimezone ? ' | Resets at midnight ' + safeState.resetTimezone : '');
         } else if (lifecycle === 'completed') {
           header.textContent = '● COMPLETE';
           header.className = 'header-status paused';

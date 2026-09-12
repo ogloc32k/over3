@@ -2,6 +2,14 @@
 
 ## What was fixed
 
+### 9. Daily TP/SL halt: true midnight restart + survive-restarts state (Sept 12 2026)
+- "Midnight" was hardcoded to East Africa Time (UTC+3) = 02:30 IST. Now resets at 00:00 in a configurable timezone: BOT_TIMEZONE env or config key, default Asia/Kolkata.
+- Every restart used to hard-reset the bot to IDLE — losing the TP/SL pause, the countdown, daily P&L and counters. Runtime state (lifecycle, botResetTime, dailyPnl, session/martingale/virtual counters) is now snapshotted to the Supabase bot_store (5s debounce) and restored on boot: a redeploy or Koyeb instance sleep resumes exactly where the bot was.
+- If midnight passes while the server is DOWN, the bot re-arms for a fresh session on boot instead of sitting dead.
+- Running across midnight without a TP/SL pause now rolls the daily P&L window (new tz-day rollover check).
+- Auto-resume after restarts now defaults ON for real trading too (was demo-only); disable with BOT_AUTO_RESUME=false.
+- Dashboard: the PAUSED badge shows a live "RESUMES IN H:MM:SS" countdown to midnight, and pause logs name the timezone. New module engine/midnight.js + 24 unit tests (test/midnight.test.js).
+
 ### 8. Dashboard "RECOVERING" lied about the bot when YOUR network dropped (Sept 12 2026)
 The dashboard's own SSE feed is display-only — the bot keeps trading on the server even when
 your browser/network is offline. But when the browser lost its feed, the UI hijacked the status

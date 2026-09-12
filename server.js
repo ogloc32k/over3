@@ -16,6 +16,9 @@ const { createGate, COOKIE_NAME } = require('./services/auth');
 cloudStore.init(supabase);
 const authGate = process.env.DASHBOARD_PASSWORD ? createGate(process.env.DASHBOARD_PASSWORD) : null;
 const { resetStrategyConfig, PRESERVED_CONFIG_KEYS } = require('./engine/configReset');
+const midnight = require('./engine/midnight');
+// Daily-reset timezone: midnight here = daily session reset. Default IST.
+const RESET_TZ = () => process.env.BOT_TIMEZONE || (store && store.config && store.config.BOT_TIMEZONE) || midnight.DEFAULT_TZ;
 const { STATUS, REASONS, resolvePauseReason, resolveRiskTransition, isStaleLock } = require('./engine/lifecycle');
 
 let store, logger, derivClient;
@@ -611,6 +614,7 @@ app.get('/debug/state', (req, res) => {
     activeAccountId: derivClient?.activeAccountId,
     tradeActive:     isTradeActive(),
     botResetTime:    store.state.botResetTime,
+    resetTimezone:   RESET_TZ(),
     sessionTradeCount: store.state.sessionTradeCount,
     executionMode: store.state.executionMode,
     virtualLossStreak: store.state.virtualLossStreak,
@@ -664,6 +668,31 @@ async function bootCloudSync() {
       saveBotState(true);
       console.log('☁️  Cloud store says the bot was ACTIVE — auto-resume enabled');
     }
+
+    // Restore the runtime snapshot so redeploys / instance sleeps resume
+    // from where the bot was (mid-pause countdown, daily P&L, counters)
+    // instead of hard-resetting to idle.
+    const rt = await cloudStore.get('bot_runtime');
+    if (rt && typeof rt === 'object') {
+      const tz  = RESET_TZ();
+      const act = midnight.resolveRestore(rt, Date.now(), tz);
+      if (act.action === 'paused') {
+        store.updateState(act.patch);
+        store.transitionLifecycle(STATUS.PAUSED, rt.lifecycleReason || 'Restored mid-pause from cloud state.', {
+          active: false, botResetTime: act.patch.botResetTime
+        });
+        console.log(`☁️  Runtime restored: PAUSED for the day (${fmtTz(act.patch.botResetTime)}), countdown resumed`);
+      } else if (act.action === 'resume') {
+        store.updateState({ ...act.patch, tzDayKey: midnight.dayKey(Date.now(), tz) });
+        wasActiveBeforeRestart = true;
+        saveBotState(true);
+        if (store.state.active) store.transitionLifecycle(STATUS.ARMED, 'Restored from cloud state; bot re-armed for the new session.', { active: true, locked: false });
+        console.log('☁️  Runtime restored: bot re-armed for a fresh session');
+      } else if (act.action === 'idle') {
+        store.updateState(act.patch);
+        console.log('☁️  Runtime restored: bot was idle — counters recovered, staying idle');
+      }
+    }
   } catch (e) {
     console.warn(`☁️  Cloud state sync skipped (non-fatal): ${e.message}`);
     console.warn('    If the bot_store table is missing, run the SQL from docs/DEPLOY.md');
@@ -673,6 +702,42 @@ async function bootCloudSync() {
 const server = app.listen(PORT, async () => {
   console.log(`Server listening on port ${server.address().port}`);
   await bootCloudSync();
+  store.updateState({ resetTimezone: RESET_TZ() }); // ships to the dashboard via the state payload
+  logger.info(`🕛 Daily reset timezone: ${RESET_TZ()} (set BOT_TIMEZONE to change). Auto-resume after restarts: ${store.config.BOT_AUTO_RESUME !== false ? 'ON' : 'OFF'}`);
+
+  // RUNTIME SNAPSHOT — persist lifecycle/counters to the cloud store
+  // whenever they change (5s debounce) so a redeploy or instance sleep
+  // resumes from the same point instead of resetting to idle.
+  let runtimeDirty = false, lastSnapshot = '';
+  store.on('stateChanged', () => { runtimeDirty = true; });
+  const snapshotRuntimeState = () => ({
+    active: !!store.state.active,
+    lifecycleStatus: store.state.lifecycleStatus,
+    lifecycleReason: store.state.lifecycleReason,
+    botResetTime: store.state.botResetTime,
+    dailyPnl: store.state.dailyPnl || 0,
+    sessionPnl: store.state.sessionPnl || 0,
+    sessionTradeCount: store.state.sessionTradeCount || 0,
+    virtualWinCount: store.state.virtualWinCount || 0,
+    virtualLossCount: store.state.virtualLossCount || 0,
+    virtualTradeCount: store.state.virtualTradeCount || 0,
+    virtualLossStreak: store.state.virtualLossStreak || 0,
+    executionMode: store.state.executionMode,
+    martingaleLevel: store.state.martingaleLevel || 0,
+    currentStake: store.state.currentStake || 0,
+    martingaleNextStake: store.state.martingaleNextStake || 0,
+    at: Date.now()
+  });
+  setInterval(() => {
+    if (!runtimeDirty || !cloudStore.available) return;
+    runtimeDirty = false;
+    const snap = snapshotRuntimeState();
+    const json = JSON.stringify(snap);
+    if (json === lastSnapshot) return;
+    lastSnapshot = json;
+    cloudStore.set('bot_runtime', snap).catch(err =>
+      console.warn(`☁️ Cloud runtime sync failed: ${err.message}`));
+  }, 5000);
 
   if (derivClient) {
     const indicators = require('./engine/indicators');
@@ -751,9 +816,7 @@ const server = app.listen(PORT, async () => {
     // AUTO-RESUME after a server restart (opt-in via BOT_AUTO_RESUME;
     // defaults ON in fake-data mode, OFF for real trading).
     // ============================================================
-    const AUTO_RESUME = USE_FAKE_DATA
-      ? store.config.BOT_AUTO_RESUME !== false
-      : store.config.BOT_AUTO_RESUME === true;
+    const AUTO_RESUME = store.config.BOT_AUTO_RESUME !== false; // default ON (BOT_AUTO_RESUME=false to disable)
     let autoResumed = false;
     if (AUTO_RESUME) {
       derivClient.on('connection_state', ({ state }) => {
@@ -779,7 +842,11 @@ const server = app.listen(PORT, async () => {
     // Midnight reset check (every second)
     setInterval(() => {
       const now = Date.now();
+      const tz  = RESET_TZ();
+      const dayKeyNow = midnight.dayKey(now, tz);
+
       if (store.state.botResetTime && now >= store.state.botResetTime) {
+        store.updateState({ tzDayKey: dayKeyNow });
         const virtualState = virtualFilter.createState(store.config);
         store.transitionLifecycle(STATUS.ARMED, 'New session window started; bot is armed.', {
           active:       true,
@@ -795,7 +862,16 @@ const server = app.listen(PORT, async () => {
           virtualLossCount: store.state.virtualLossCount || 0,
           virtualTradeCount: store.state.virtualTradeCount || 0
         });
-        store.addLog('info', '🕛 Midnight reset – bot re-enabled');
+        store.addLog('info', `🕛 Midnight reset (${tz}) – bot re-enabled`);
+      } else if (store.state.active && store.state.tzDayKey && dayKeyNow !== store.state.tzDayKey) {
+        // Running across midnight without a TP/SL pause — roll the daily
+        // P&L window so the next day starts fresh.
+        store.transitionLifecycle(STATUS.ARMED, 'New day started; daily P&L window reset; bot re-armed.', {
+          dailyPnl: 0, sessionPnl: 0, sessionTradeCount: 0, tzDayKey: dayKeyNow
+        });
+        store.addLog('info', `🕛 New day (${tz}) – daily P&L reset, bot still armed`);
+      } else if (!store.state.tzDayKey) {
+        store.updateState({ tzDayKey: dayKeyNow });
       }
     }, 1000);
 
@@ -1049,18 +1125,18 @@ const server = app.listen(PORT, async () => {
         maxRuns: parseInt(store.config?.BOT_MAX_RUNS) || 0
       });
       if (riskTransition?.status === STATUS.PAUSED && riskTransition.reason === REASONS.TAKE_PROFIT) {
-        const resetTime = getNextMidnightEAT();
+        const resetTime = getNextMidnight();
         store.transitionLifecycle(riskTransition.status, riskTransition.reason, {
           active: false, botResetTime: resetTime
         });
-        store.addLog('info', `🛑 Take Profit reached ($${newDailyPnl.toFixed(2)}). Bot paused until ${new Date(resetTime).toLocaleTimeString()}`);
+        store.addLog('info', `🛑 Take Profit reached (${newDailyPnl.toFixed(2)}). Bot paused until ${fmtTz(resetTime)} — auto-restarts at midnight (countdown on the dashboard).`);
         saveBotState(false);
       } else if (riskTransition?.status === STATUS.PAUSED && riskTransition.reason === REASONS.STOP_LOSS) {
-        const resetTime = getNextMidnightEAT();
+        const resetTime = getNextMidnight();
         store.transitionLifecycle(riskTransition.status, riskTransition.reason, {
           active: false, botResetTime: resetTime
         });
-        store.addLog('info', `🛑 Stop Loss hit (-$${Math.abs(newDailyPnl).toFixed(2)}). Bot paused until ${new Date(resetTime).toLocaleTimeString()}`);
+        store.addLog('info', `🛑 Stop Loss hit (-${Math.abs(newDailyPnl).toFixed(2)}). Bot paused until ${fmtTz(resetTime)} — auto-restarts at midnight (countdown on the dashboard).`);
         saveBotState(false);
       }
 
@@ -1108,15 +1184,15 @@ const server = app.listen(PORT, async () => {
   }
 });
 
-// Helper: next midnight East Africa Time (UTC+3)
-function getNextMidnightEAT() {
-  const now          = new Date();
-  const eatOffset    = 3 * 60 * 60 * 1000;
-  const eatNow       = new Date(now.getTime() + eatOffset);
-  const nextMidnight = new Date(eatNow);
-  nextMidnight.setUTCHours(21, 0, 0, 0); // 21:00 UTC = 00:00 EAT
-  if (nextMidnight <= now) nextMidnight.setUTCDate(nextMidnight.getUTCDate() + 1);
-  return nextMidnight.getTime();
+// Helper: next midnight in the configured daily-reset timezone.
+// (was hardcoded EAT/UTC+3 — 02:30 for IST users; now BOT_TIMEZONE,
+//  default Asia/Kolkata so "restart at midnight" means YOUR midnight)
+function getNextMidnight() {
+  return midnight.getNextMidnight(RESET_TZ());
+}
+function fmtTz(ts) {
+  const tz = RESET_TZ();
+  return new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(ts)) + ' ' + tz;
 }
 
 process.on('SIGTERM', () => server.close(() => process.exit(0)));
