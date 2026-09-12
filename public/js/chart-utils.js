@@ -37,9 +37,9 @@
     if (total > maxLabels && index % Math.ceil(total / maxLabels) !== 0 && index !== total - 1) return '';
     const date = new Date(timestamp);
     if (timeframe === '1w' || timeframe === '1m' || timeframe === '1y') {
-      return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      return typeof window !== "undefined" && window.fmtTzDay ? window.fmtTzDay(timestamp) : date.toLocaleDateString([], { month: 'short', day: 'numeric' });
     }
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return typeof window !== "undefined" && window.fmtTzHourMin ? window.fmtTzHourMin(timestamp) : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 
   function getEquityScale(points) {

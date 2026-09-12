@@ -706,6 +706,29 @@ const server = app.listen(PORT, async () => {
   store.updateState({ resetTimezone: RESET_TZ() }); // ships to the dashboard via the state payload
   logger.info(`🕛 Daily reset timezone: ${RESET_TZ()} (set BOT_TIMEZONE to change). Auto-resume after restarts: ${store.config.BOT_AUTO_RESUME !== false ? 'ON' : 'OFF'}`);
 
+  // DAILY P&L RECONCILIATION — the in-memory dailyPnl counter starts at 0
+  // on every restart (deploy/sleep/crash), but the trading day doesn't.
+  // Sum the ledger (the authoritative record) from midnight (RESET_TZ)
+  // to now so the bot card, the TP/SL risk checks and the ledger all
+  // agree after any restart.
+  (async () => {
+    try {
+      if (!supabase) return;
+      const start = new Date(midnight.getStartOfDay(RESET_TZ(), Date.now()));
+      const { data: trades, error } = await supabase
+        .from('trading_ledger')
+        .select('pnl')
+        .gte('created_at', start.toISOString());
+      if (error) throw error;
+      const seeded = (trades || []).reduce((s, t) => s + (parseFloat(t.pnl) || 0), 0);
+      const rounded = Math.round(seeded * 100) / 100;
+      store.updateState({ dailyPnl: rounded });
+      logger.info(`📅 Daily P&L reconciled with the ledger after restart: $${rounded.toFixed(2)} so far today (${RESET_TZ()}).`);
+    } catch (err) {
+      logger.warn(`⚠️ Daily P&L ledger reconcile failed (${err.message || err}); keeping the restored counter.`);
+    }
+  })();
+
   // RUNTIME SNAPSHOT — persist lifecycle/counters to the cloud store
   // whenever they change (5s debounce) so a redeploy or instance sleep
   // resumes from the same point instead of resetting to idle.

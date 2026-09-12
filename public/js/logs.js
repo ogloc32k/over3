@@ -22,7 +22,7 @@
       r.className = `log-entry log-${level}`;
       const ts = document.createElement('span');
       ts.className = 'ts';
-      ts.textContent = `[${new Date(log.time).toLocaleTimeString()}]`;
+      ts.textContent = `[${typeof window !== "undefined" && window.fmtTzTime ? window.fmtTzTime(log.time) : new Date(log.time).toLocaleTimeString()}]`;
       const msg = document.createElement('span');
       msg.className = 'msg';
       msg.textContent = log.message || '';

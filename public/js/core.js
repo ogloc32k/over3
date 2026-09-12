@@ -12,6 +12,28 @@
       return resp;
     });
   };
+  // ---------- Timezone-aware time formatting ----------
+  // Every timestamp on the dashboard (logs, heartbeat, chart axes) is
+  // rendered in the bot's configured reset timezone (state.resetTimezone,
+  // default Africa/Nairobi) — never in the browser's local zone — so the
+  // clock, the logs and the charts all tell one consistent story.
+  const _tzFmt = {};
+  function tzFmt(kind) {
+    let tz = 'Africa/Nairobi';
+    try { tz = window.QuantCore?.getGlobalState?.()?.resetTimezone || 'Africa/Nairobi'; } catch (_) {}
+    const key = kind + '|' + tz;
+    if (!_tzFmt[key]) {
+      const opts = { timeZone: tz, hour12: false, hour: '2-digit', minute: '2-digit' };
+      if (kind === 'time') opts.second = '2-digit';
+      if (kind === 'day') { delete opts.hour; delete opts.minute; opts.month = 'short'; opts.day = 'numeric'; }
+      _tzFmt[key] = new Intl.DateTimeFormat('en-GB', opts);
+    }
+    return _tzFmt[key];
+  }
+  window.fmtTzTime    = (ms) => tzFmt('time').format(new Date(ms));
+  window.fmtTzHourMin = (ms) => tzFmt('hm').format(new Date(ms));
+  window.fmtTzDay     = (ms) => tzFmt('day').format(new Date(ms));
+
   // ---------- Constants ----------
   const MARKETS_CFG = {
     'R_10': 'Volatility 10 Index',
@@ -291,7 +313,7 @@
       banner.classList.add('visible');
       banner.innerHTML = '⚠️ Dashboard live feed lost — the bot keeps trading on the server. '
         + 'Reconnecting… <span class="fb-last">Last update: '
-        + new Date(streamLostAt).toLocaleTimeString() + '</span>';
+        + (typeof window !== "undefined" && window.fmtTzTime ? window.fmtTzTime(streamLostAt) : new Date(streamLostAt).toLocaleTimeString()) + '</span>';
     } else {
       banner.classList.remove('visible');
     }

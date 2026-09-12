@@ -51,7 +51,6 @@ function switchTab(tabId) {
     if (typeof window.scrollLogsToBottom === 'function') window.scrollLogsToBottom();
   }
   if (tabId === 'tab-bots') {
-    if (typeof loadBotDailyPnl === 'function') loadBotDailyPnl();
     if (typeof window.loadBotConfig === 'function') window.loadBotConfig();
   }
 
@@ -132,7 +131,7 @@ document.addEventListener('DOMContentLoaded', function () {
   function updateClock() {
     try {
       const now = new Date();
-      const options = { timeZone: 'Africa/Nairobi' };
+      const options = { timeZone: (window.QuantCore?.getGlobalState?.()?.resetTimezone) || 'Africa/Nairobi' };
       const timeStr = now.toLocaleTimeString('en-US', { ...options, hour12: false });
       const dateStr = now.toLocaleDateString('en-US', { ...options, month: 'short', day: '2-digit' });
       const clockEl = document.getElementById('clock-display');
@@ -452,7 +451,7 @@ function _syncBotCard(state) {
   _setText('bot-lifecycle-reason', state.lifecycleReason || 'No lifecycle reason available.');
   const connection = state.connectionState || 'disconnected';
   _setText('bot-connection-status', connection.toUpperCase());
-  const heartbeat = state.lastHeartbeatAt ? new Date(state.lastHeartbeatAt).toLocaleTimeString() : 'No heartbeat yet';
+  const heartbeat = state.lastHeartbeatAt ? (typeof window !== "undefined" && window.fmtTzTime ? window.fmtTzTime(state.lastHeartbeatAt) : new Date(state.lastHeartbeatAt).toLocaleTimeString()) : 'No heartbeat yet';
   _setText('bot-heartbeat', connection === 'connected' ? `Last heartbeat ${heartbeat}` : `${state.connectionReason || 'Connection unavailable'}`);
 
   const pnl = v => '$' + Number(v || 0).toFixed(2);
@@ -655,31 +654,11 @@ function setHomeTf(btn, mode) {
 window.setHomeTf = setHomeTf;
 
 // ============================================================
-// BOT DAILY P&L – fetch from Supabase and display on bot card
+// BOT DAILY P&L — written solely by the SSE state handler above
+// (state.dailyPnl). The server seeds that counter from the trading
+// ledger at boot, so there is exactly ONE writer for the tile —
+// no more competing fetch vs. stream values.
 // ============================================================
-// Sequence guard: only the latest fetch may write the tile (prevents a
-// stale slow response from overwriting a newer one — the old blinking bug).
-let botDailyPnlSeq = 0;
-function loadBotDailyPnl() {
-  const account = window.QuantCore?.getGlobalState()?.tradingMode || 'demo';
-  const seq = ++botDailyPnlSeq;
-  // "Daily P&L" = the trading day (midnight -> now, server tz-aware
-  // 'today' mode), NOT a rolling 24h window — matches state.dailyPnl.
-  fetch(`/api/ledger/aggregated?mode=today&account=${account}`)
-    .then(r => r.json())
-    .then(data => {
-      if (seq !== botDailyPnlSeq) return; // superseded by a newer fetch
-      const dp = document.getElementById('bot-daily-pnl');
-      if (dp) {
-        const pnl = data.totalProfit || 0;
-        // identical formatting to the SSE state writer ($X.XX) so the tile
-        // never visually flickers when the two sources alternate
-        dp.textContent = '$' + Number(pnl).toFixed(2);
-        dp.style.color = pnl >= 0 ? 'var(--green-profit)' : 'var(--red-loss)';
-      }
-    })
-    .catch(err => console.error('Failed to load bot daily P&L:', err));
-}
 
 // ============================================================
 // BOT RESET COUNTDOWN

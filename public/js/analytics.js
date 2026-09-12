@@ -99,9 +99,9 @@
   function formatEquityLabel(timestamp, timeframe) {
     const date = new Date(timestamp);
     if (timeframe === '24h' || timeframe === 'session' || timeframe === 'custom') {
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return typeof window !== "undefined" && window.fmtTzHourMin ? window.fmtTzHourMin(timestamp) : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
-    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    return typeof window !== "undefined" && window.fmtTzDay ? window.fmtTzDay(timestamp) : date.toLocaleDateString([], { month: 'short', day: 'numeric' });
   }
 
   // --- UPDATED: dynamic green/red colors ---
