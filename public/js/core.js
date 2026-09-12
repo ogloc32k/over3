@@ -97,7 +97,7 @@
       if (header) {
         const nowTime = Date.now();
         const lifecycle = safeState.lifecycleStatus || (active ? 'armed' : 'idle');
-        if (lifecycle === 'recovering' || safeState.connectionState === 'recovering' || safeState.connectionState === 'disconnected' && active) {
+        if (lifecycle === 'recovering' || (active && (safeState.connectionState === 'recovering' || safeState.connectionState === 'disconnected'))) {
           header.textContent = '● RECOVERING';
           header.className = 'header-status recovering';
           header.title = safeState.lifecycleReason || safeState.connectionReason || '';
@@ -257,6 +257,58 @@
     }
   }
 
+  // ---------- Dashboard feed health ----------
+  // The SSE stream only powers the DISPLAY. If it drops (your network, a tunnel,
+  // a suspended phone), the bot on the server keeps trading — this banner makes
+  // that explicit instead of hijacking the bot badge with a wrong "RECOVERING".
+  let streamDown = false;
+  let streamLostAt = 0;
+  function ensureBanner() {
+    let el = document.getElementById('feed-banner');
+    if (el) return el;
+    const style = document.createElement('style');
+    style.textContent = `
+      #feed-banner{position:fixed;top:0;left:0;right:0;z-index:9999;display:none;
+        padding:8px 16px;text-align:center;font-size:13px;font-weight:600;
+        background:#b45309;color:#fff;box-shadow:0 1px 6px rgba(0,0,0,.35);
+        pointer-events:none;}
+      #feed-banner.visible{display:block}
+      #feed-banner .fb-last{opacity:.85;font-weight:400}`;
+    document.head.appendChild(style);
+    el = document.createElement('div');
+    el.id = 'feed-banner';
+    document.body.appendChild(el);
+    return el;
+  }
+  function markStream(up) {
+    if (up === !streamDown) return; // no state change
+    const wasDown = streamDown;
+    streamDown = !up;
+    const banner = ensureBanner();
+    if (!up) {
+      if (!wasDown) streamLostAt = Date.now();
+      banner.classList.add('visible');
+      banner.innerHTML = '⚠️ Dashboard live feed lost — the bot keeps trading on the server. '
+        + 'Reconnecting… <span class="fb-last">Last update: '
+        + new Date(streamLostAt).toLocaleTimeString() + '</span>';
+    } else {
+      banner.classList.remove('visible');
+    }
+    const header = document.getElementById('header-status');
+    if (header && up && wasDown && typeof window._renderHeaderStatus === 'function') {
+      // Force a re-render from the (now fresh) snapshot.
+      window._renderHeaderStatus();
+    }
+  }
+  // Reconnect instantly when the tab becomes visible again (mobile browsers
+  // suspend JS timers in the background, which strands the retry loop).
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && (streamDown || !sse)) {
+      reconnectAttempts = 0;
+      connectSSE();
+    }
+  });
+
   // ---------- SSE ----------
   function connectSSE() {
     if (sse) { sse.close(); sse = null; }
@@ -265,14 +317,17 @@
     sse.onopen = function () {
       console.log('✅ SSE connected');
       reconnectAttempts = 0;
+      markStream(true);
     };
     sse.onerror = function (err) {
       console.warn('⚠️ SSE error:', err);
       if (sse) sse.close();
-      // Do not keep stale running controls visible while the browser has no
-      // authoritative lifecycle stream.
+      // Show the feed-lost banner instead of guessing the bot's state. The
+      // bot badge keeps the last known SERVER state; controls stay disabled
+      // while we have no authoritative stream.
+      markStream(false);
       if (typeof window._setBotButtonState === 'function') {
-        window._setBotButtonState(globalState?.active ? 'recovering' : 'idle');
+        window._setBotButtonState('recovering');
       }
       if (sseRetryTimer) return;
       const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 10000);
@@ -284,6 +339,7 @@
     };
     sse.onmessage = function (e) {
       try {
+        markStream(true);
         const data = JSON.parse(e.data);
         if (data.event === 'analytics_delta') {
           eventBus.emit('analytics_delta', data.data);
@@ -322,6 +378,11 @@
   }
 
   // ---------- Public API ----------
+  window._renderHeaderStatus = function () {
+    lastRenderTime = 0; // bypass the 250ms throttle
+    renderUI(globalState);
+  };
+
   window.QuantCore = {
     getCurrentFocus: () => currentFocus,
     getGlobalState: () => globalState,

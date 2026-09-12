@@ -2,6 +2,20 @@
 
 ## What was fixed
 
+### 8. Dashboard "RECOVERING" lied about the bot when YOUR network dropped (Sept 12 2026)
+The dashboard's own SSE feed is display-only — the bot keeps trading on the server even when
+your browser/network is offline. But when the browser lost its feed, the UI hijacked the status
+badge to "RECOVERING", making it look like the bot itself was stuck.
+- New amber banner: "Dashboard live feed lost — the bot keeps trading on the server. Reconnecting…
+  Last update: HH:MM:SS" with the exact time data was last fresh. Never blocks clicks
+  (pointer-events: none).
+- The status header now keeps the last known REAL server state during a feed outage, and only
+  shows RECOVERING for genuine server-side Deriv disconnects while the bot is active.
+- Tab wake-up (mobile/phone lock) triggers an instant SSE reconnect instead of waiting for the
+  backoff timer.
+- Verified with a real browser test: server killed under an open dashboard -> banner + honest
+  badge; server back -> banner auto-clears. Full test suite: 24/24 pass.
+
 ### 7. Martingale stake was never applied to actual trades (Sept 12 2026) — CRITICAL
 The bot computed the martingale stake for logging and balance checks, but `buyContract(signal)`
 was called with the engine signal whose stake is always the BASE stake — so every martingale step

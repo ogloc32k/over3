@@ -422,8 +422,10 @@ function _syncBotCard(state) {
   } else if (state.tradeInProgress) {
     badge.textContent = 'TRADING';
     badge.className   = 'bot-status-badge running';
-  } else if (lifecycle === 'recovering' ||
-             ['connecting', 'disconnected', 'recovering'].includes(state.connectionState)) {
+  } else if ((state.active || state.tradeInProgress) &&
+             (lifecycle === 'recovering' ||
+              ['connecting', 'disconnected', 'recovering'].includes(state.connectionState))) {
+    // Real server-side Deriv disconnect while the bot is running.
     badge.textContent = 'RECOVERING';
     badge.className = 'bot-status-badge recovering';
   } else if (state.active) {
