@@ -515,11 +515,12 @@ app.get('/api/ledger/aggregated', async (req, res) => {
     const now = new Date();
     let start, end;
 
-    const modeMap = { 'year': '1y', 'week': '1w', 'month': '1m', '24h': '24h', 'session': 'session' };
+    const modeMap = { 'year': '1y', 'week': '1w', 'month': '1m', '24h': '24h', 'session': 'session', 'today': 'today' };
     const cleanMode = modeMap[mode] || mode;
 
     switch (cleanMode) {
       case '24h':    start = new Date(now.getTime() - 24*60*60*1000); break;
+      case 'today':  start = new Date(midnight.getStartOfDay(RESET_TZ(), Date.now())); break; // trading day: midnight → now (tz-aware)
       case '1w':     start = new Date(now.getTime() - 7*24*60*60*1000); break;
       case '1m':     start = new Date(now.getTime() - 30*24*60*60*1000); break;
       case '1y':     start = new Date(now.getTime() - 365*24*60*60*1000); break;

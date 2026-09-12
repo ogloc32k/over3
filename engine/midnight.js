@@ -43,6 +43,20 @@ function getNextMidnight(tz = DEFAULT_TZ, now = Date.now()) {
   return hi;
 }
 
+// First instant of the CURRENT calendar day in the given timezone
+// (00:00 wall time today — the trading day's start). Binary search
+// backwards over the past 48h for the wall-date boundary (±1s).
+function getStartOfDay(tz = DEFAULT_TZ, now = Date.now()) {
+  const fmt = dayFormatter(tz);
+  const nowKey = fmt.format(new Date(now));
+  let lo = now - 48 * 3600 * 1000, hi = now; // lo is guaranteed an earlier wall date
+  while (hi - lo > 1000) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (fmt.format(new Date(mid)) !== nowKey) lo = mid; else hi = mid;
+  }
+  return hi;
+}
+
 // ------------------------------------------------------------
 // BOOT-TIME RESTORE — decide what to do with a saved snapshot
 // ------------------------------------------------------------
@@ -116,4 +130,7 @@ function resolveRestore(rt = {}, now = Date.now(), tz = DEFAULT_TZ) {
   return { action: 'idle', patch: { ...counters, active: false, tradeInProgress: false, botResetTime: null } };
 }
 
-module.exports = { DEFAULT_TZ, dayKey, getNextMidnight, resolveRestore, COUNTER_KEYS };
+module.exports = {
+  DEFAULT_TZ, dayKey, getNextMidnight, getStartOfDay,
+  resolveRestore, pickCounters, COUNTER_KEYS
+};

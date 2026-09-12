@@ -657,15 +657,24 @@ window.setHomeTf = setHomeTf;
 // ============================================================
 // BOT DAILY P&L – fetch from Supabase and display on bot card
 // ============================================================
+// Sequence guard: only the latest fetch may write the tile (prevents a
+// stale slow response from overwriting a newer one — the old blinking bug).
+let botDailyPnlSeq = 0;
 function loadBotDailyPnl() {
   const account = window.QuantCore?.getGlobalState()?.tradingMode || 'demo';
-  fetch(`/api/ledger/aggregated?mode=24h&account=${account}`)
+  const seq = ++botDailyPnlSeq;
+  // "Daily P&L" = the trading day (midnight -> now, server tz-aware
+  // 'today' mode), NOT a rolling 24h window — matches state.dailyPnl.
+  fetch(`/api/ledger/aggregated?mode=today&account=${account}`)
     .then(r => r.json())
     .then(data => {
+      if (seq !== botDailyPnlSeq) return; // superseded by a newer fetch
       const dp = document.getElementById('bot-daily-pnl');
       if (dp) {
         const pnl = data.totalProfit || 0;
-        dp.textContent = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2);
+        // identical formatting to the SSE state writer ($X.XX) so the tile
+        // never visually flickers when the two sources alternate
+        dp.textContent = '$' + Number(pnl).toFixed(2);
         dp.style.color = pnl >= 0 ? 'var(--green-profit)' : 'var(--red-loss)';
       }
     })

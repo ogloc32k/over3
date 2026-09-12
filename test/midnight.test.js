@@ -1,6 +1,6 @@
 // test/midnight.test.js
 // Timezone-aware midnight math + boot-restore decision logic.
-const { DEFAULT_TZ, dayKey, getNextMidnight, resolveRestore } = require('../engine/midnight');
+const { DEFAULT_TZ, dayKey, getNextMidnight, getStartOfDay, resolveRestore } = require('../engine/midnight');
 
 let passed = 0, failed = 0;
 function check(name, cond, extra = '') {
@@ -78,6 +78,24 @@ const eatMid = getNextMidnight(undefined, NOW); // default tz
 const eatUTC = new Date(eatMid).toISOString();
 check('DEFAULT tz is Africa/Nairobi (00:00 EAT = 21:00 UTC)', /T21:00:00/.test(eatUTC), 'got ' + eatUTC);
 check('DEFAULT tz midnight in the future', eatMid > NOW);
+
+
+// --- getStartOfDay: start of the CURRENT trading day ---
+const sodEAT = getStartOfDay('Africa/Nairobi', NOW); // NOW = 2026-09-12T10:00Z = 13:00 EAT
+check('startOfDay EAT: today 00:00 EAT = 2026-09-11T21:00Z',
+  new Date(sodEAT).toISOString().startsWith('2026-09-11T21:00'), new Date(sodEAT).toISOString());
+check('startOfDay EAT: is in the past', sodEAT <= NOW);
+check('startOfDay EAT: within 24h', NOW - sodEAT <= 24*3600*1000);
+// just after EAT midnight → same day start
+const early = new Date('2026-09-12T21:30:00Z').getTime(); // 00:30 EAT Sept 13
+const sodEarly = getStartOfDay('Africa/Nairobi', early);
+check('startOfDay EAT: right after midnight rolls to new day',
+  new Date(sodEarly).toISOString().startsWith('2026-09-12T21:00'), new Date(sodEarly).toISOString());
+// UTC sanity
+const sodUTC = getStartOfDay('UTC', NOW);
+check('startOfDay UTC: today 00:00 UTC', new Date(sodUTC).toISOString().startsWith('2026-09-12T00:00'));
+// default tz is EAT
+check('startOfDay default tz = EAT', getStartOfDay(undefined, NOW) === sodEAT);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
