@@ -1,0 +1,21 @@
+# Render blueprint — deploy QuantCore Terminal from the GitHub repo.
+# Create a new "Blueprint" service on render.com, pick this repo,
+# and Render reads this file. Secret values are entered in the
+# dashboard (sync: false) — they are NEVER stored in the repo.
+services:
+  - type: web
+    name: quantcore-terminal
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DERIV_APP_ID
+        sync: false
+      - key: DERIV_PAT
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: DASHBOARD_PASSWORD
+        sync: false

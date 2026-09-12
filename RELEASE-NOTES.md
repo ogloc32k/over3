@@ -2,6 +2,18 @@
 
 ## What was fixed
 
+### 6. Trade duration units + Deriv range enforcement (Sept 12 2026)
+The old default (70 ticks) was **invalid on Deriv** — real accounts only allow ticks 1–10.
+- New `services/duration.js`: single source of truth for duration rules. Fallback ranges:
+  ticks 1–10 · seconds 15–60 · minutes 1–60.
+- Real Deriv client now fetches each symbol's **live** limits via `contracts_for` after
+  authorize; all clamping (bot signals, manual trades, saved config) prefers the live ranges.
+- Bot Settings has a unit selector (ticks/seconds/minutes) with live range hints.
+- Legacy configs self-heal on boot: invalid durations are clamped and persisted.
+- Demo mode settles seconds/minutes contracts after the correct elapsed time
+  (R_* ticks every 2s, 1HZ every 1s); virtual filter observation converts units too.
+- Manual trades enforce the same limits.
+
 ### 1. Scroll bug (content cut off, only "fixed" by resizing the window)
 **Root cause:** `body` had `min-height: 100vh` but no flex layout, so `.app-body { flex: 1 }`
 was ignored. Tab pages sized themselves to content height, overflowed the viewport,

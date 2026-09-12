@@ -444,9 +444,16 @@
 
                     <!-- Trade Duration -->
                     <div class="bsp-field">
-                      <label class="bsp-label" for="cfg-bot-duration">Trade Duration <span class="bsp-unit">ticks</span></label>
-                      <input class="bsp-input" type="number" id="cfg-bot-duration" min="1" step="1" value="70" oninput="saveBotConfig()" aria-describedby="bot-duration-help">
-                      <span class="bsp-help" id="bot-duration-help">How long each contract stays open before its result is settled.</span>
+                      <label class="bsp-label" for="cfg-bot-duration">Trade Duration <span class="bsp-unit" id="cfg-bot-duration-range">ticks 1–10</span></label>
+                      <div style="display:flex; gap:6px; align-items:center;">
+                        <input class="bsp-input" type="number" id="cfg-bot-duration" min="1" step="1" value="5" oninput="saveBotConfig()" aria-describedby="bot-duration-help" style="flex:1;">
+                        <select class="bsp-input" id="cfg-bot-duration-unit" onchange="onDurationUnitChange()" oninput="saveBotConfig()" aria-label="Duration unit" style="width:110px;">
+                          <option value="t" selected>Ticks</option>
+                          <option value="s">Seconds</option>
+                          <option value="m">Minutes</option>
+                        </select>
+                      </div>
+                      <span class="bsp-help" id="bot-duration-help">Contract length. Deriv limits: ticks 1–10 · seconds 15–60 · minutes 1–60. Values are clamped to the live ranges fetched from Deriv.</span>
                     </div>
 
                     <!-- Base Stake -->
@@ -604,11 +611,11 @@
     </main>
   </div>
 
-  <script src="js/core.js"></script>
+  <script src="js/core.js?v=21"></script>
   <script src="js/dashboard.js"></script>
   <script src="js/analytics.js"></script>
   <script src="js/logs.js"></script>
-  <script src="js/settings.js?v=21"></script>
+  <script src="js/settings.js?v=22"></script>
   <script src="js/app.js?v=20"></script>
 </body>
 </html>

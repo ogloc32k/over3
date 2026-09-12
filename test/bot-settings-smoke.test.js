@@ -23,8 +23,8 @@ test('Settings is removed as a navigation destination', () => {
 });
 
 test('bot settings expose three accessible disclosures and retain field mappings', () => {
-  assert.equal((html.match(/<details class="bsp-section/g) || []).length, 3);
-  assert.equal((html.match(/<summary class="bsp-section-header">/g) || []).length, 3);
+  assert.equal((html.match(/<details class="bsp-section/g) || []).length, 5);
+  assert.equal((html.match(/<summary class="bsp-section-header">/g) || []).length, 5);
   assert.match(html, /<details class="bsp-section bsp-virtual-section" open>/);
   assert.match(html, /<details class="bsp-section bsp-required" open>/);
   assert.match(html, /<details class="bsp-section bsp-strategy-section">/);
@@ -53,7 +53,8 @@ test('desktop bot layout uses available width and mobile layout stacks', () => {
 });
 
 const DEFAULT_CONFIG = {
-  BOT_DURATION: 70,
+  BOT_DURATION: 5,
+  BOT_DURATION_UNIT: 't',
   BOT_BASE_STAKE: 0.35,
   BOT_TAKE_PROFIT: null,
   BOT_STOP_LOSS: null,
@@ -211,7 +212,7 @@ function requestJson(port, method, requestPath, payload) {
 async function startRealServer(configPath) {
   const child = spawn(process.execPath, [path.join(root, 'server.js')], {
     cwd: root,
-    env: { ...process.env, BOT_CONFIG_PATH: configPath, PORT: '0' },
+    env: { ...process.env, BOT_CONFIG_PATH: configPath, FAKE_CLOUD_PATH: configPath + '.cloud', PORT: '0' },
     stdio: ['ignore', 'pipe', 'pipe']
   });
   let output = '';
@@ -260,7 +261,7 @@ async function openBotsScreen(page, viewportWidth) {
 
 async function assertKeyboardDisclosures(page) {
   const sections = page.locator('.bot-settings-panel details');
-  assert.equal(await sections.count(), 3);
+  assert.equal(await sections.count(), 5);
 
   for (let index = 0; index < await sections.count(); index += 1) {
     const section = sections.nth(index);
@@ -385,7 +386,11 @@ test('browser smoke covers bot settings at desktop and mobile sizes', async t =>
   const port = await smokeServer.listen();
   let browser;
   try {
-    browser = await chromium.launch({ headless: true });
+    const chromePath = '/root/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome';
+    browser = await chromium.launch({
+      headless: true,
+      executablePath: require('node:fs').existsSync(chromePath) ? chromePath : undefined
+    });
   } catch (error) {
     await smokeServer.close();
     throw error;
@@ -432,6 +437,10 @@ test('bot safety settings persist across a real server restart', async t => {
     BOT_TAKE_PROFIT: 18.75,
     BOT_STOP_LOSS: 6.25,
     BOT_MAX_RUNS: 42,
+    BOT_MARTINGALE_ENABLED: false,
+    BOT_MARTINGALE_MULTIPLIER: 2,
+    BOT_MARTINGALE_MAX_STEPS: 4,
+    BOT_SYMBOLS: [],
     BOT_VIRTUAL_FILTER_ENABLED: false,
     BOT_VIRTUAL_LOSS_THRESHOLD: 9,
     BOT_VIRTUAL_RETURN_MODE: 'loss'

@@ -81,7 +81,31 @@
     'cfg-bot-martingale-enabled': 'BOT_MARTINGALE_ENABLED'
   };
   const STRING_FIELDS = {
-    'cfg-bot-virtual-return-mode': 'BOT_VIRTUAL_RETURN_MODE'
+    'cfg-bot-virtual-return-mode': 'BOT_VIRTUAL_RETURN_MODE',
+    'cfg-bot-duration-unit':       'BOT_DURATION_UNIT'
+  };
+
+  // Deriv fallback duration ranges per unit (live limits are enforced server-side).
+  const DURATION_RANGES = { t: [1, 10], s: [15, 60], m: [1, 60] };
+  const DURATION_LABELS = { t: 'ticks', s: 'seconds', m: 'minutes' };
+
+  window.onDurationUnitChange = function () {
+    const unitSel = document.getElementById('cfg-bot-duration-unit');
+    const input   = document.getElementById('cfg-bot-duration');
+    if (!unitSel || !input) return;
+    const unit  = DURATION_RANGES[unitSel.value] ? unitSel.value : 't';
+    const range = DURATION_RANGES[unit];
+    input.min = range[0];
+    input.max = range[1];
+    if (input.value !== '' && input.value !== null) {
+      let v = parseInt(input.value);
+      if (isNaN(v)) v = range[0];
+      v = Math.min(range[1], Math.max(range[0], v));
+      input.value = v;
+    }
+    const label = document.getElementById('cfg-bot-duration-range');
+    if (label) label.textContent = `${DURATION_LABELS[unit]} ${range[0]}–${range[1]}`;
+    saveBotConfig();
   };
 
   window.loadBotConfig = async function () {
@@ -109,6 +133,13 @@
       for (const [id, key] of Object.entries(STRING_FIELDS)) {
         const el = document.getElementById(id);
         if (el && config[key] !== undefined && config[key] !== null) el.value = config[key];
+      }
+
+      // Sync duration unit selector + range hint with loaded config.
+      const unitSel = document.getElementById('cfg-bot-duration-unit');
+      if (unitSel) {
+        unitSel.value = ['t','s','m'].includes(config.BOT_DURATION_UNIT) ? config.BOT_DURATION_UNIT : 't';
+        window.onDurationUnitChange();
       }
 
       renderBotSymbolChips(normalizeSymbols(config.BOT_SYMBOLS));

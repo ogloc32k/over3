@@ -162,7 +162,7 @@ class FakeDerivClient {
         contract_type: c.contractType,
         stake: c.stake,
         duration_ticks: c.durationTicks,
-        duration_unit: 't',
+        duration_unit: c.durationUnit || 't',
         bot_name: c.botName || 'manual',
         contract_id: id,
         entry_price: c.entryPrice,
@@ -187,13 +187,22 @@ class FakeDerivClient {
     const contractId = this._nextContractId++;
     const stake = Number(params.stake) || 0;
 
+    // Convert the configured duration into simulated feed ticks so that
+    // seconds/minutes contracts settle after the right elapsed time.
+    const durationUnit = ['t','s','m'].includes(params.durationUnit) ? params.durationUnit : 't';
+    const qty = parseInt(params.duration) || 1;
+    let ticks = qty;
+    if (durationUnit === 's') ticks = Math.max(1, Math.ceil(qty * 1000 / cfg.interval));
+    if (durationUnit === 'm') ticks = Math.max(1, Math.ceil(qty * 60000 / cfg.interval));
+
     this._openContracts[contractId] = {
       symbol: params.symbol,
       contractType: params.contractType,
       entryPrice,
       stake,
-      durationTicks: parseInt(params.duration) || 1,
-      remaining: parseInt(params.duration) || 1,
+      durationTicks: ticks,
+      remaining: ticks,
+      durationUnit,
       botName: params.bot_name || 'manual',
       accountDemo: this.isDemo
     };

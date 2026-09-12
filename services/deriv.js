@@ -288,6 +288,7 @@ class DerivClient {
       this._emit('authorized', { loginid: this.accountId });
       this._subscribeTicks();
       this.send({ balance: 1, subscribe: 1 });
+      this._fetchDurationRanges();
     });
 
     this.ws.on('message', (data) => {
@@ -402,8 +403,44 @@ class DerivClient {
         case 'balance': this._emit('balance', msg.balance); break;
         case 'proposal': this._emit('proposal', msg); break;
         case 'buy': this._emit('buy', msg); break;
+        case 'contracts_for': this._emit('contracts_for', msg); break;
         case 'history': this._emit('history', msg.history); break;
       }
+    }
+  }
+
+  /**
+   * Fetch each symbol's real duration limits from Deriv (contracts_for).
+   * Result is emitted as 'duration_ranges' → { symbol: { t:[min,max], s:[...], m:[...] } }.
+   * Failures are non-fatal: callers fall back to documented ranges.
+   */
+  async _fetchDurationRanges() {
+    if (this._rangesFetchedAt && Date.now() - this._rangesFetchedAt < 3600000) return;
+    const symbols = ['R_10','R_25','R_50','R_75','R_100','1HZ10V','1HZ25V','1HZ50V','1HZ75V','1HZ100V'];
+    const ranges = {};
+    for (const symbol of symbols) {
+      try {
+        const res = await this._sendAndWait('contracts_for', { contracts_for: symbol });
+        const perUnit = {};
+        for (const contract of (res.contracts_for && res.contracts_for.available) || []) {
+          if (contract.contract_type !== 'CALL' && contract.contract_type !== 'PUT') continue;
+          const unit = contract.duration_unit;
+          const min = parseInt(contract.min_duration, 10);
+          const max = parseInt(contract.max_duration, 10);
+          if (!['t','s','m'].includes(unit)) continue;
+          if (!Number.isFinite(min) || !Number.isFinite(max)) continue;
+          const prev = perUnit[unit];
+          perUnit[unit] = prev ? [Math.min(prev[0], min), Math.max(prev[1], max)] : [min, max];
+        }
+        if (Object.keys(perUnit).length) ranges[symbol] = perUnit;
+      } catch (err) {
+        this._log('warn', `⚠️ Could not fetch duration ranges for ${symbol}: ${err.message}`);
+      }
+    }
+    this._rangesFetchedAt = Date.now();
+    if (Object.keys(ranges).length) {
+      this._log('info', `📏 Live duration ranges loaded for ${Object.keys(ranges).length} symbols.`);
+      this._emit('duration_ranges', { ranges });
     }
   }
 

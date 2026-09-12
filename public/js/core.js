@@ -2,6 +2,16 @@
 // core.js – Shared state, SSE, rendering engine, utilities
 // ============================================================
 (function () {
+  // Global: if the session expires (401 from any API call), bounce to login.
+  const _origFetch = window.fetch;
+  window.fetch = function (...args) {
+    return _origFetch.apply(this, args).then(resp => {
+      if (resp.status === 401 && !window.location.pathname.startsWith('/login')) {
+        window.location.href = '/login';
+      }
+      return resp;
+    });
+  };
   // ---------- Constants ----------
   const MARKETS_CFG = {
     'R_10': 'Volatility 10 Index',

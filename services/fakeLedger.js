@@ -62,9 +62,39 @@ function makeQuery(rows) {
   return q;
 }
 
+// bot_store mirror for demo mode — file-backed so config/state
+// survive demo restarts, mirroring real Supabase behaviour.
+const fs   = require('fs');
+const path = require('path');
+const KV_PATH = process.env.FAKE_CLOUD_PATH || path.join(__dirname, '..', 'fake_cloud_store.json');
+const KV = new Map();
+try { Object.entries(JSON.parse(fs.readFileSync(KV_PATH, 'utf8'))).forEach(([k, v]) => KV.set(k, v)); }
+catch (_) { /* first boot */ }
+function kvPersist() { try { fs.writeFileSync(KV_PATH, JSON.stringify(Object.fromEntries(KV))); } catch (_) {} }
+
 const fakeSupabase = {
   __FAKE__: true,
   from(table) {
+    if (table === 'bot_store') {
+      return {
+        select() {
+          const eq = {
+            eq(field, value) {
+              return {
+                maybeSingle: async () => ({ data: KV.has(value) ? { value: KV.get(value) } : null, error: null })
+              };
+            }
+          };
+          return eq;
+        },
+        upsert(rec) {
+          const row = Array.isArray(rec) ? rec[0] : rec;
+          KV.set(row.key, row.value);
+          kvPersist();
+          return Promise.resolve({ error: null });
+        }
+      };
+    }
     if (table !== 'trading_ledger') {
       return { select: () => makeQuery([]), insert: async () => ({ error: null }) };
     }

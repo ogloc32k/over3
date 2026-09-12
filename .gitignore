@@ -1,0 +1,6 @@
+node_modules/
+.env
+bot_config.json
+bot_state.json
+fake_cloud_store.json
+npm-debug.log*

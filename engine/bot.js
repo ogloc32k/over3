@@ -1,5 +1,7 @@
 // engine/bot.js – Sniper Confluence Strategy (Production)
 // Config is read from options.config (passed from server.js)
+'use strict';
+const durationUtil = require('../services/duration');
 
 /**
  * Evaluate a single symbol for a trading signal.
@@ -55,7 +57,8 @@ function evaluate(symbol, metrics, state, options = {}) {
   const rsiOverbought = parseInt(config.BOT_RSI_OVERBOUGHT) || 70;
 
   // ---- Duration & stake ----
-  const duration = parseInt(config.BOT_DURATION) || 70;
+  const duration = parseInt(config.BOT_DURATION) || 5;
+  const durationUnit = durationUtil.normalizeUnit(config.BOT_DURATION_UNIT);
   const stake    = state.currentStake || (parseFloat(config.BOT_BASE_STAKE) || 0.35);
 
   // ---- Dynamic sniper variables ----
@@ -92,7 +95,7 @@ function evaluate(symbol, metrics, state, options = {}) {
     if (metrics.support !== null && price < metrics.support * bottomBreaker) {
       return null;
     }
-    return { symbol, contractType: 'CALL', duration, durationUnit: 't', stake, bot_name: 'sniper-bot' };
+    return { symbol, contractType: 'CALL', duration, durationUnit, stake, bot_name: 'sniper-bot' };
   }
 
   // ────────────────────────────────────────────────────────────
@@ -111,7 +114,7 @@ function evaluate(symbol, metrics, state, options = {}) {
     if (metrics.resistance !== null && price > metrics.resistance * topBreaker) {
       return null;
     }
-    return { symbol, contractType: 'PUT', duration, durationUnit: 't', stake, bot_name: 'sniper-bot' };
+    return { symbol, contractType: 'PUT', duration, durationUnit, stake, bot_name: 'sniper-bot' };
   }
 
   return null; // No confluence

@@ -10,6 +10,11 @@ const USE_FAKE_DATA = !process.env.DERIV_APP_ID || !process.env.DERIV_PAT;
 // Fake-data mode: swap Supabase for the in-memory ledger so analytics work without keys.
 const supabase = (USE_FAKE_DATA || !realSupabase) ? fakeSupabase : realSupabase;
 const virtualFilter = require('./engine/virtualFilter');
+const durationUtil = require('./services/duration');
+const cloudStore = require('./services/cloudStore');
+const { createGate, COOKIE_NAME } = require('./services/auth');
+cloudStore.init(supabase);
+const authGate = process.env.DASHBOARD_PASSWORD ? createGate(process.env.DASHBOARD_PASSWORD) : null;
 const { resetStrategyConfig, PRESERVED_CONFIG_KEYS } = require('./engine/configReset');
 const { STATUS, REASONS, resolvePauseReason, resolveRiskTransition, isStaleLock } = require('./engine/lifecycle');
 
@@ -37,10 +42,28 @@ if (derivClient) derivClient.setStore(store);
 // ============================================================
 // PERSISTENT CONFIG  (bot_config.json next to server.js)
 // ============================================================
+
+// Per-symbol live duration limits fetched from Deriv via contracts_for.
+// Empty until the real client connects; fallbacks used otherwise.
+let liveDurationRanges = {};
+
+// Normalize a saved config's duration settings; returns true if clamped.
+function normalizeConfigDuration(scope) {
+  const unit = durationUtil.normalizeUnit(store.config.BOT_DURATION_UNIT);
+  const range = durationUtil.rangeFor(null, null, unit);
+  const original = parseInt(store.config.BOT_DURATION);
+  const clamped = durationUtil.clampDuration(store.config.BOT_DURATION, unit, null, 'R_100');
+  let changed = false;
+  if (store.config.BOT_DURATION_UNIT !== unit) { store.config.BOT_DURATION_UNIT = unit; changed = true; }
+  if (original !== clamped.duration) { store.config.BOT_DURATION = clamped.duration; changed = true; }
+  if (changed && scope) store.addLog('warn', `⚖️ ${scope}: trade duration normalized to ${clamped.duration} ${durationUtil.UNIT_LABELS[unit]} (valid ${range.min}–${range.max}).`);
+  return changed;
+}
 const CONFIG_PATH = process.env.BOT_CONFIG_PATH || path.join(__dirname, 'bot_config.json');
 
 const DEFAULT_CONFIG = {
-  BOT_DURATION:           70,
+  BOT_DURATION:           5,
+  BOT_DURATION_UNIT:     't',
   BOT_BASE_STAKE:         0.35,
   BOT_TAKE_PROFIT:        null,
   BOT_STOP_LOSS:          null,
@@ -79,11 +102,16 @@ function loadConfig() {
   }
 }
 
-function saveConfig() {
+function saveConfig(pushCloud = true) {
   try {
     const temporaryPath = `${CONFIG_PATH}.${process.pid}.tmp`;
     fs.writeFileSync(temporaryPath, `${JSON.stringify(store.config, null, 2)}\n`, 'utf8');
     fs.renameSync(temporaryPath, CONFIG_PATH);
+    if (pushCloud && cloudStore.available) {
+      cloudStore.set('bot_config', store.config).catch(err =>
+        store.addLog('warn', `☁️ Cloud config sync failed: ${err.message}`)
+      );
+    }
     return true;
   } catch(e) {
     store.recordError(`Failed to save bot configuration: ${e.message}`);
@@ -126,9 +154,16 @@ try {
 function saveBotState(active) {
   try { fs.writeFileSync(BOT_STATE_PATH, JSON.stringify({ active: !!active, at: Date.now() })); }
   catch (_) { /* non-fatal */ }
+  if (cloudStore.available) {
+    cloudStore.set('bot_active', { active: !!active, at: Date.now() }).catch(err =>
+      console.warn(`☁️ Cloud state sync failed: ${err.message}`)
+    );
+  }
 }
 
 loadConfig();
+// Self-heal legacy configs (e.g. the old invalid 70-tick default) and persist.
+if (normalizeConfigDuration('Loaded config')) saveConfig(false);
 store.transitionLifecycle(STATUS.IDLE, REASONS.SERVER_RESTART, {
   active: false,
   locked: false,
@@ -142,6 +177,113 @@ logger.info(`⚙️ Bot configuration loaded. Virtual filter: ${virtualFilter.is
 const app = express();
 app.use(express.json());
 app.use((req, res, next) => { console.log(`📡 ${req.method} ${req.url}`); next(); });
+
+// ============================================================
+// AUTH — password gate (active only when DASHBOARD_PASSWORD is set)
+// One login per browser for 30 days; changing the password
+// invalidates all existing cookies instantly.
+// ============================================================
+function parseCookies(header = '') {
+  const out = {};
+  String(header).split(';').forEach(part => {
+    const i = part.indexOf('=');
+    if (i > -1) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+  });
+  return out;
+}
+
+function loginPageHTML(error = '') {
+  const msg = error || 'Enter password to access the terminal';
+  const errStyle = error ? 'color:#ff5f56;' : 'color:var(--mut);';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QuantCore Terminal — Login</title>
+<style>
+  :root { --mut:#8a929e; --bg:#0b0e12; --card:#12161d; --line:#232a35; --acc:#4ee1a0; --err:#ff5f56; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:#e6e9ee; font-family:'SF Mono','Fira Code',Consolas,monospace;
+         min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:38px 34px;
+          width:100%; max-width:400px; }
+  .logo { font-size:15px; letter-spacing:3px; color:var(--acc); margin-bottom:4px; }
+  .sub  { font-size:11px; color:var(--mut); letter-spacing:2px; margin-bottom:28px; }
+  p.msg { font-size:12px; margin-bottom:14px; ${errStyle} letter-spacing:0.5px; }
+  input { width:100%; background:#0b0e12; border:1px solid var(--line); border-radius:6px;
+          color:#e6e9ee; padding:13px 14px; font:inherit; font-size:14px; outline:none; }
+  input:focus { border-color:var(--acc); }
+  button { width:100%; margin-top:14px; padding:13px; font:inherit; font-size:13px; letter-spacing:2px;
+           background:var(--acc); border:none; border-radius:6px; color:#06281a; font-weight:700;
+           cursor:pointer; }
+  button:hover { filter:brightness(1.08); }
+  .foot { margin-top:22px; font-size:10px; color:var(--mut); text-align:center; letter-spacing:1px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">QUANTCORE // TERMINAL</div>
+    <div class="sub">RESTRICTED ACCESS</div>
+    <p class="msg">${msg}</p>
+    <form method="POST" action="/login">
+      <input type="password" name="password" placeholder="password" autofocus autocomplete="current-password" required>
+      <button type="submit">AUTHENTICATE</button>
+    </form>
+    <div class="foot">SESSION LASTS 30 DAYS PER BROWSER</div>
+  </div>
+</body>
+</html>`;
+}
+
+if (authGate) {
+  console.log('🔒 Dashboard auth: ON (password gate active)');
+  app.set('trust proxy', 1);
+  const authAttempts = new Map(); // ip → { count, lockedUntil }
+
+  app.use((req, res, next) => {
+    const ip  = req.ip || 'unknown';
+    const att = authAttempts.get(ip);
+    if (att && att.lockedUntil > Date.now()) {
+      return res.status(429).type('text').send('Too many attempts. Try again in a minute.');
+    }
+    if (req.path === '/health' || req.path === '/login') return next();
+    const token = parseCookies(req.headers.cookie)[COOKIE_NAME];
+    if (token && authGate.validCookie(token)) return next();
+    if (req.path.startsWith('/api/') || req.path.startsWith('/stream') || req.path.startsWith('/debug')) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+    return res.redirect('/login');
+  });
+
+  app.get('/login', (req, res) => {
+    const token = parseCookies(req.headers.cookie)[COOKIE_NAME];
+    if (token && authGate.validCookie(token)) return res.redirect('/');
+    return res.type('html').send(loginPageHTML());
+  });
+
+  app.post('/login', (req, res) => {
+    const ip = req.ip || 'unknown';
+    if (authGate.check(req.body && req.body.password)) {
+      authAttempts.delete(ip);
+      const secure = req.secure ? '; Secure' : '';
+      res.setHeader('Set-Cookie', `${COOKIE_NAME}=${authGate.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60*60*24*30}${secure}`);
+      return res.redirect('/');
+    }
+    let att = authAttempts.get(ip) || { count: 0, lockedUntil: 0 };
+    att.count += 1;
+    if (att.count >= 10) { att.lockedUntil = Date.now() + 60000; att.count = 0; }
+    authAttempts.set(ip, att);
+    res.setHeader('Retry-After', '60');
+    return res.status(401).type('html').send(loginPageHTML('ACCESS DENIED — wrong password'));
+  });
+
+  app.post('/logout', (req, res) => {
+    res.setHeader('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+    return res.redirect('/login');
+  });
+}
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ============================================================
@@ -289,10 +431,19 @@ app.post('/api/trade/manual', async (req, res) => {
     const stake   = parseFloat(req.body.stake) || store.state.currentStake || 0.35;
     const balance = store.state.balance ?? 0;
 
+    // Enforce Deriv's duration limits on manual trades too.
+    const norm = durationUtil.clampDuration(
+      req.body.duration || 5,
+      req.body.durationUnit || 't',
+      liveDurationRanges,
+      req.body.symbol
+    );
+    if (norm.clamped) store.addLog('warn', `⚖️ Manual trade duration clamped to ${norm.duration} ${durationUtil.UNIT_LABELS[norm.unit]} (valid ${norm.min}–${norm.max}).`);
+
     if (stake < 0.35)    return res.json({ error: 'Minimum stake is $0.35' });
     if (stake > balance) return res.json({ error: `Stake cannot exceed balance of $${balance.toFixed(2)}` });
 
-    const contractId = await derivClient.buyContract({ ...req.body, stake });
+    const contractId = await derivClient.buyContract({ ...req.body, stake, duration: norm.duration, durationUnit: norm.unit });
     if (!contractId) return res.json({ error: 'Trade execution failed on Deriv side' });
 
     tradeInProgressSym['global'] = true;
@@ -314,6 +465,7 @@ app.get('/api/config', (req, res) => res.json(store.config || {}));
 app.post('/api/config', (req, res) => {
   try {
     store.config = { ...store.config, ...req.body };
+    normalizeConfigDuration('Saved config');
     if (!saveConfig()) return res.status(500).json({ error: 'Could not persist bot configuration' });
     store.emit('configChanged');
     store.addLog('info', `⚙️ Bot configuration updated. Virtual filter: ${virtualFilter.isEnabled(store.config) ? 'ON' : 'OFF'}; threshold: ${virtualFilter.lossThreshold(store.config)}; return policy: ${virtualFilter.returnMode(store.config)}.`);
@@ -492,8 +644,34 @@ app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.ht
 // START SERVER & DERIV
 // ============================================================
 const PORT   = process.env.PORT || 3000;
-const server = app.listen(PORT, () => {
+
+// Pull config + active flag from the cloud store BEFORE the Deriv wiring
+// attaches, so auto-resume sees the correct pre-restart state.
+async function bootCloudSync() {
+  if (!cloudStore.available) return;
+  try {
+    const cfg = await cloudStore.get('bot_config');
+    if (cfg && typeof cfg === 'object' && Object.keys(cfg).length) {
+      store.config = { ...DEFAULT_CONFIG, ...cfg };
+      normalizeConfigDuration('Cloud config'); // clamp legacy values (e.g. old 70-tick default)
+      saveConfig(false); // local file mirrors the cloud copy
+      console.log('☁️  Config restored from cloud store');
+    }
+    const st = await cloudStore.get('bot_active');
+    if (st && st.active === true && !wasActiveBeforeRestart) {
+      wasActiveBeforeRestart = true;
+      saveBotState(true);
+      console.log('☁️  Cloud store says the bot was ACTIVE — auto-resume enabled');
+    }
+  } catch (e) {
+    console.warn(`☁️  Cloud state sync skipped (non-fatal): ${e.message}`);
+    console.warn('    If the bot_store table is missing, run the SQL from docs/DEPLOY.md');
+  }
+}
+
+const server = app.listen(PORT, async () => {
   console.log(`Server listening on port ${server.address().port}`);
+  await bootCloudSync();
 
   if (derivClient) {
     const indicators = require('./engine/indicators');
@@ -524,6 +702,10 @@ const server = app.listen(PORT, () => {
       }
     });
     derivClient.on('heartbeat', ({ at }) => store.updateState({ lastHeartbeatAt: at }));
+    derivClient.on('duration_ranges', ({ ranges }) => {
+      liveDurationRanges = ranges;
+      store.addLog('info', `📏 Live Deriv duration limits applied for ${Object.keys(ranges).length} symbols.`);
+    });
 
     // Auto-cleanup stuck locks with a bounded timeout.
     setInterval(() => {
@@ -717,8 +899,17 @@ const server = app.listen(PORT, () => {
           });
 
           if (signal) {
+            // Enforce Deriv's duration limits (live ranges when available).
+            const norm = durationUtil.clampDuration(signal.duration, signal.durationUnit, liveDurationRanges, signal.symbol);
+            if (norm.clamped) {
+              store.addLog('warn', `⚖️ Trade duration ${signal.duration} out of range ${norm.min}–${norm.max}; clamped to ${norm.duration} ${durationUtil.UNIT_LABELS[norm.unit]}.`);
+            }
+            signal.duration = norm.duration;
+            signal.durationUnit = norm.unit;
+
             if (store.state.executionMode === 'virtual') {
-              const paperTrade = virtualFilter.createTrade(signal, computed.price);
+              const obsTicks = durationUtil.durationToTicks(signal.duration, signal.durationUnit, signal.symbol);
+              const paperTrade = virtualFilter.createTrade({ ...signal, duration: obsTicks }, computed.price);
               tradeInProgressSym['global'] = true;
               lockTimestamps['global'] = Date.now();
               store.transitionLifecycle(STATUS.TRADING, `Virtual signal accepted for ${signal.symbol}; observing the configured duration.`, {
@@ -726,7 +917,7 @@ const server = app.listen(PORT, () => {
                 tradeInProgress: true,
                 locked: true
               });
-              store.addLog('info', `🧪 Virtual signal: ${signal.contractType} ${signal.symbol}; observing ${signal.duration} ticks.`);
+              store.addLog('info', `🧪 Virtual signal: ${signal.contractType} ${signal.symbol}; observing ${signal.duration} ${durationUtil.UNIT_LABELS[signal.durationUnit]} (~${obsTicks} ticks).`);
               return;
             }
 

@@ -25,7 +25,6 @@ Vanilla-JS frontend, Node/Express backend, Supabase PostgreSQL ledger. Runs in *
 
 ## Features
 
-- **Symbol allowlist** — restrict the bot to specific markets via multi-select chips in Bot Settings (empty selection = all 10 indices).
 - **Live market data** — Deriv volatility indices streamed over WebSocket, proxied to the browser via throttled Server-Sent Events.
 - **Manual trading** — one-click up/down trades with your own stake; never touches bot state or the martingale ladder.
 - **Signal-driven bot** — RSI oversold/overbought + sniper-zone breakout confluence, with a **virtual filter**: the bot first paper-trades a signal and only goes live after a configurable loss-streak threshold is met.
@@ -92,14 +91,13 @@ All editable from the **Bots → Bot Settings** panel (persisted to `bot_config.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `BOT_DURATION` | `70` | Trade duration in ticks |
+| `BOT_DURATION` | `5` | Trade duration (quantity; unit is `BOT_DURATION_UNIT`) |
 | `BOT_BASE_STAKE` | `$0.35` | Starting stake |
 | `BOT_TAKE_PROFIT` | unset | Session stops when profit ≥ TP (**required to start**) |
 | `BOT_STOP_LOSS` | unset | Session stops when loss ≥ SL (**required to start**) |
 | `BOT_MAX_RUNS` | unset | Max number of real trades per session (**required to start**) |
 | `BOT_COOLDOWN` | `5` | Seconds between trades |
-| `BOT_SYMBOLS` | all 10 | Which markets the bot watches (empty = all; multi-select chips in Bot Settings) |
-| `BOT_RSI_OVERSOLD` | `30` | RSI buy-signal threshold |
+| `BOT_DURATION_UNIT` | `t` | Duration unit: `t` ticks (1–10) · `s` seconds (15–60) · `m` minutes (1–60). Clamped to live per-symbol limits fetched from Deriv via `contracts_for` |
 | `BOT_RSI_OVERBOUGHT` | `70` | RSI sell-signal threshold |
 | `SNIPER_ZONE_PCT` | `20` | % of recent range defining the sniper zone |
 | `SNIPER_TICKS` | `2` | Consecutive zone-touch ticks required |
@@ -142,7 +140,7 @@ signal (RSI + sniper zone confluence)
 virtual filter ON?  ──no──►  real trade
         │ yes
         ▼
-paper-trade the signal for BOT_DURATION ticks
+paper-trade the signal for BOT_DURATION (ticks/seconds/minutes — virtual observation settles after the equivalent number of feed ticks)
         │
         ├─ wins / under threshold ──► keep observing (stay virtual)
         └─ N consecutive virtual losses ──► go live with real trade
