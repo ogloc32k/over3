@@ -83,6 +83,7 @@ const DEFAULT_CONFIG = {
   BOT_VIRTUAL_FILTER_ENABLED: true,
   BOT_VIRTUAL_LOSS_THRESHOLD: 4,
   BOT_VIRTUAL_RETURN_MODE: 'any',
+  BOT_VIRTUAL_ARMED_TTL: 60,   // minutes an armed asset stays real before the hunt restarts on paper
   BOT_MARTINGALE_ENABLED: false,
   BOT_MARTINGALE_MULTIPLIER: 2.0,
   BOT_MARTINGALE_MAX_STEPS: 4
@@ -390,6 +391,8 @@ app.post('/api/control', (req, res) => {
         tradeInProgress: false,
         sessionTradeCount: 0,
         ...virtualFilter.createState(store.config),
+        virtualLossStreaks: {},   // a deliberate Start always begins a fresh hunt
+        armedAssets: {},
         currentStake: parseFloat(store.config.BOT_BASE_STAKE) || 0.35,
         martingaleLevel: 0,
         martingaleNextStake: parseFloat(store.config.BOT_BASE_STAKE) || 0.35
@@ -746,6 +749,8 @@ const server = app.listen(PORT, async () => {
     virtualLossCount: store.state.virtualLossCount || 0,
     virtualTradeCount: store.state.virtualTradeCount || 0,
     virtualLossStreak: store.state.virtualLossStreak || 0,
+    virtualLossStreaks: store.state.virtualLossStreaks || {},
+    armedAssets: store.state.armedAssets || {},
     executionMode: store.state.executionMode,
     martingaleLevel: store.state.martingaleLevel || 0,
     currentStake: store.state.currentStake || 0,
@@ -853,7 +858,24 @@ const server = app.listen(PORT, async () => {
         store.transitionLifecycle(STATUS.STARTING, 'Auto-resume: bot was active before the last server restart.', {
           active: true, locked: false, tradeInProgress: false,
           sessionTradeCount: 0,
-          ...virtualFilter.createState(store.config),
+          // PRESERVE the hunt progression the runtime snapshot restored
+          // (per-asset streaks + armed assets): a restart is an infra
+          // event, not a market signal. Only an in-flight paper
+          // observation is dropped — its ticks died with the process.
+          ...(virtualFilter.isEnabled(store.config)
+            ? (() => {
+                const armed = virtualFilter.pruneArmed(store.state.armedAssets || {});
+                if (store.state.executionMode === 'real' && !Object.keys(armed).length) {
+                  store.addLog('warn', '🔁 AUTO-RESUME: real mode came from a pre-update snapshot with no per-asset record — restarting the paper hunt (safest).');
+                }
+                return {
+                  virtualTrade: null,
+                  armedAssets: armed,
+                  virtualLossStreaks: store.state.virtualLossStreaks || {},
+                  executionMode: Object.keys(armed).length > 0 ? 'real' : 'virtual'
+                };
+              })()
+            : { ...virtualFilter.createState(store.config), armedAssets: {}, virtualLossStreaks: {} }),
           currentStake: parseFloat(store.config.BOT_BASE_STAKE) || 0.35,
           martingaleLevel: 0,
           martingaleNextStake: parseFloat(store.config.BOT_BASE_STAKE) || 0.35
@@ -869,6 +891,16 @@ const server = app.listen(PORT, async () => {
       const tz  = RESET_TZ();
       const dayKeyNow = midnight.dayKey(now, tz);
 
+      // Expire stale arming entries (TTL) so the badge never shows an
+      // expired asset as REAL.
+      const prunedArmed = virtualFilter.pruneArmed(store.state.armedAssets || {});
+      if (Object.keys(prunedArmed).length !== Object.keys(store.state.armedAssets || {}).length) {
+        store.updateState({
+          armedAssets: prunedArmed,
+          executionMode: Object.keys(prunedArmed).length > 0 ? 'real' : 'virtual'
+        });
+      }
+
       if (store.state.botResetTime && now >= store.state.botResetTime) {
         store.updateState({ tzDayKey: dayKeyNow });
         const virtualState = virtualFilter.createState(store.config);
@@ -880,6 +912,8 @@ const server = app.listen(PORT, async () => {
           sessionTradeCount: 0,
           tradeInProgress: false,
           ...virtualState,
+          virtualLossStreaks: {},   // fresh hunt each trading day
+          armedAssets: {},
           // Keep the paper-trade history visible across an automatic session
           // reset. A deliberate new Start still creates a fresh run.
           virtualWinCount: store.state.virtualWinCount || 0,
@@ -891,9 +925,11 @@ const server = app.listen(PORT, async () => {
         // Running across midnight without a TP/SL pause — roll the daily
         // P&L window so the next day starts fresh.
         store.transitionLifecycle(STATUS.ARMED, 'New day started; daily P&L window reset; bot re-armed.', {
-          dailyPnl: 0, sessionPnl: 0, sessionTradeCount: 0, tzDayKey: dayKeyNow
+          dailyPnl: 0, sessionPnl: 0, sessionTradeCount: 0, tzDayKey: dayKeyNow,
+          virtualLossStreaks: {}, armedAssets: {},
+          executionMode: virtualFilter.isEnabled(store.config) ? 'virtual' : 'real'
         });
-        store.addLog('info', `🕛 New day (${tz}) – daily P&L reset, bot still armed`);
+        store.addLog('info', `🕛 New day (${tz}) – daily P&L reset, hunt restarted, bot still armed`);
       } else if (!store.state.tzDayKey) {
         store.updateState({ tzDayKey: dayKeyNow });
       }
@@ -907,7 +943,9 @@ const server = app.listen(PORT, async () => {
       if (store.state.active && !store.state.virtualTrade && !isTradeActive()) {
         store.updateState({
           executionMode: virtualFilter.isEnabled(store.config) ? 'virtual' : 'real',
-          virtualLossStreak: 0
+          virtualLossStreak: 0,
+          virtualLossStreaks: {},
+          armedAssets: {}
         });
       }
     });
@@ -963,23 +1001,37 @@ const server = app.listen(PORT, async () => {
           }
 
           const isWin = paperResult.result === 'WIN';
-          const nextLossStreak = isWin
-            ? 0
-            : (store.state.virtualLossStreak || 0) + 1;
+          // Per-asset streaks: only THIS market's paper losses arm THIS
+          // market. Other markets keep hunting independently.
+          const streaks = { ...(store.state.virtualLossStreaks || {}) };
+          streaks[symbol] = isWin ? 0 : (streaks[symbol] || 0) + 1;
+
+          const threshold = virtualFilter.lossThreshold(store.config);
+          const ttlMin    = Math.max(1, parseInt(store.config.BOT_VIRTUAL_ARMED_TTL) || 60);
+          const armedHit  = !isWin && streaks[symbol] >= threshold;
+
+          let armed = virtualFilter.pruneArmed(store.state.armedAssets || {});
+          if (armedHit) {
+            // Arming consumes the evidence: fresh streak for this asset.
+            streaks[symbol] = 0;
+            armed = virtualFilter.armAsset(armed, symbol, store.config);
+          }
+
           const nextVirtualState = {
             virtualTrade: null,
             virtualTradeCount: (store.state.virtualTradeCount || 0) + 1,
-            virtualLossStreak: nextLossStreak,
+            virtualLossStreak: streaks[symbol],
+            virtualLossStreaks: streaks,
+            armedAssets: armed,
+            executionMode: Object.keys(armed).length > 0 ? 'real' : 'virtual',
             virtualWinCount: (store.state.virtualWinCount || 0) + (isWin ? 1 : 0),
             virtualLossCount: (store.state.virtualLossCount || 0) + (isWin ? 0 : 1)
           };
 
-          const threshold = virtualFilter.lossThreshold(store.config);
-          if (!isWin && nextLossStreak >= threshold) {
-            nextVirtualState.executionMode = 'real';
-            store.addLog('warn', `🧪 Virtual LOSS: ${paperTrade.contractType} ${symbol} (${paperResult.entryPrice} → ${paperResult.exitPrice}); loss streak ${nextLossStreak}/${threshold}. Next qualifying signal may be REAL.`);
+          if (armedHit) {
+            store.addLog('warn', `🧪 Virtual LOSS: ${paperTrade.contractType} ${symbol} (${paperResult.entryPrice} → ${paperResult.exitPrice}); ${symbol} hit ${threshold} losses — ARMED for the next real signal on ${symbol} only (expires in ${ttlMin} min).`);
           } else {
-            store.addLog('info', `🧪 Virtual ${paperResult.result}: ${paperTrade.contractType} ${symbol} (${paperResult.entryPrice} → ${paperResult.exitPrice}); loss streak ${nextLossStreak}/${threshold}.`);
+            store.addLog('info', `🧪 Virtual ${paperResult.result}: ${paperTrade.contractType} ${symbol} (${paperResult.entryPrice} → ${paperResult.exitPrice}); ${symbol} streak ${streaks[symbol]}/${threshold}.`);
           }
 
            releaseTradeLock();
@@ -1008,7 +1060,10 @@ const server = app.listen(PORT, async () => {
             signal.duration = norm.duration;
             signal.durationUnit = norm.unit;
 
-            if (store.state.executionMode === 'virtual') {
+            // Per-asset gate: only the market that EARNED the arming
+            // (banked its paper losses) may fire real. Every other market
+            // keeps hunting on paper — including across restarts.
+            if (!virtualFilter.isArmed(store.state.armedAssets || {}, symbol, store.config)) {
               const obsTicks = durationUtil.durationToTicks(signal.duration, signal.durationUnit, signal.symbol);
               const paperTrade = virtualFilter.createTrade({ ...signal, duration: obsTicks }, computed.price);
               tradeInProgressSym['global'] = true;
@@ -1125,16 +1180,31 @@ const server = app.listen(PORT, async () => {
 
       // A real Sniper trade is followed by paper mode according to the
       // selected policy. The default "any" policy prevents loss chasing.
-      if (trade.bot_name === 'sniper-bot' &&
-          store.state.executionMode === 'real' &&
-          virtualFilter.isEnabled(store.config) &&
-          virtualFilter.shouldReturnToVirtual(result, store.config)) {
-        store.updateState({
-          executionMode: 'virtual',
-          virtualTrade: null,
-          virtualLossStreak: 0
-        });
-        store.addLog('info', `🔁 Real ${result}; returning to virtual mode (${virtualFilter.returnMode(store.config)} policy).`);
+      if (trade.bot_name === 'sniper-bot' && virtualFilter.isEnabled(store.config)) {
+        // Per-asset: only the market that fired the real trade is
+        // affected; other markets keep their own hunt untouched.
+        const armedNow = virtualFilter.pruneArmed(store.state.armedAssets || {});
+        const settledSym = trade.symbol || '?';
+        if (armedNow[settledSym]) {
+          if (virtualFilter.shouldReturnToVirtual(result, store.config)) {
+            const streaks = { ...(store.state.virtualLossStreaks || {}) };
+            streaks[settledSym] = 0;
+            const armed = virtualFilter.disarmAsset(armedNow, settledSym);
+            store.updateState({
+              executionMode: Object.keys(armed).length > 0 ? 'real' : 'virtual',
+              virtualTrade: null,
+              virtualLossStreak: streaks[settledSym],
+              virtualLossStreaks: streaks,
+              armedAssets: armed
+            });
+            store.addLog('info', `🔁 Real ${result} on ${settledSym}; ${settledSym} back to paper (${virtualFilter.returnMode(store.config)} policy).`);
+          } else {
+            // Policy keeps this asset real — refresh the arming window so
+            // it cannot expire mid-run.
+            store.updateState({ armedAssets: virtualFilter.armAsset(armedNow, settledSym, store.config) });
+            store.addLog('info', `🔁 Real ${result} on ${settledSym}; policy keeps ${settledSym} in real mode — arming window refreshed.`);
+          }
+        }
       }
 
       // Take Profit / Stop Loss based on daily P&L

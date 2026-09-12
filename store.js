@@ -30,6 +30,8 @@ class Store extends EventEmitter {
       executionMode: 'virtual',
       virtualTrade: null,
       virtualLossStreak: 0,
+      virtualLossStreaks: {},   // per-asset: { [symbol]: consecutive paper losses }
+      armedAssets: {},          // per-asset real-mode: { [symbol]: armed-until epoch ms }
       virtualWinCount: 0,
       virtualLossCount: 0,
       virtualTradeCount: 0,

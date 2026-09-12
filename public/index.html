@@ -338,6 +338,9 @@
                       <label class="bsp-label" for="cfg-bot-virtual-loss-threshold">Virtual losses before real <span class="bsp-unit">consecutive losses</span></label>
                       <input class="bsp-input" type="number" id="cfg-bot-virtual-loss-threshold" min="1" max="20" step="1" value="4" oninput="updateVirtualFilterSummary(); saveBotConfig()" aria-describedby="bot-virtual-loss-help">
                       <span class="bsp-help" id="bot-virtual-loss-help">How many paper losses must occur before one real trade is allowed.</span>
+                      <label class="bsp-label" for="cfg-bot-virtual-armed-ttl">Armed expiry <span class="bsp-unit">minutes</span></label>
+                      <input class="bsp-input" type="number" id="cfg-bot-virtual-armed-ttl" min="1" max="1440" step="1" value="60" oninput="updateVirtualFilterSummary(); saveBotConfig()" aria-describedby="bot-virtual-armed-help">
+                      <span class="bsp-help" id="bot-virtual-armed-help">Once a market's paper losses arm it for real trading, it stays armed only this long before its hunt restarts on paper. Stale evidence never risks money.</span>
                     </div>
                     <div class="bsp-field">
                       <label class="bsp-label" for="cfg-bot-virtual-return-mode">Return to virtual after <span class="bsp-unit">real result</span></label>

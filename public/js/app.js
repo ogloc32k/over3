@@ -479,14 +479,18 @@ function _syncBotCard(state) {
 
   const modeEl = document.getElementById('bot-execution-mode');
   if (modeEl) {
-    modeEl.textContent = state.active ? (isVirtual ? 'VIRTUAL' : 'REAL') : 'IDLE';
+    const armedList = Object.keys(state.armedAssets || {});
+    const realLabel = armedList.length ? 'REAL · ' + armedList.join(', ') : 'REAL';
+    modeEl.textContent = state.active ? (isVirtual ? 'VIRTUAL' : realLabel) : 'IDLE';
     modeEl.className = state.active && isVirtual ? 'virtual-mode' : (state.active ? 'real-mode' : '');
   }
   const streakEl = document.getElementById('bot-virtual-streak');
   if (streakEl) {
     const threshold = window._cachedVirtualLossThreshold || 4;
-    streakEl.textContent = (state.virtualLossStreak || 0) + ' / ' + threshold;
-    streakEl.style.color = (state.virtualLossStreak || 0) >= threshold
+    const streaksMap = state.virtualLossStreaks || {};
+    const maxStreak = Object.keys(streaksMap).reduce((m, k) => Math.max(m, streaksMap[k] || 0), 0);
+    streakEl.textContent = maxStreak + ' / ' + threshold;
+    streakEl.style.color = maxStreak >= threshold
       ? 'var(--green-profit)' : '';
   }
   const virtualCountEl = document.getElementById('bot-virtual-count');

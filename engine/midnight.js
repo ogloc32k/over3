@@ -65,6 +65,7 @@ function getStartOfDay(tz = DEFAULT_TZ, now = Date.now()) {
 const COUNTER_KEYS = [
   'dailyPnl', 'sessionPnl', 'sessionTradeCount',
   'virtualWinCount', 'virtualLossCount', 'virtualTradeCount', 'virtualLossStreak',
+  'virtualLossStreaks', 'armedAssets',
   'executionMode', 'martingaleLevel', 'currentStake', 'martingaleNextStake'
 ];
 
@@ -119,7 +120,9 @@ function resolveRestore(rt = {}, now = Date.now(), tz = DEFAULT_TZ) {
               dailyPnl: 0, sessionPnl: 0, sessionTradeCount: 0,
               virtualWinCount: rt.virtualWinCount || 0,
               virtualLossCount: rt.virtualLossCount || 0,
-              virtualTradeCount: rt.virtualTradeCount || 0
+              virtualTradeCount: rt.virtualTradeCount || 0,
+              virtualLossStreaks: {},  // fresh hunt each trading day
+              armedAssets: {}
             }
           : counters)
       }

@@ -71,6 +71,44 @@ function shouldReturnToVirtual(result, config = {}) {
   return mode === 'any' || mode === result.toLowerCase();
 }
 
+
+// ------------------------------------------------------------
+// PER-ASSET ARMING (paper-loss streaks are banked per market).
+// Only the asset that produced the streak may fire the earned
+// real trade, and the arming expires so stale evidence never
+// risks money (BOT_VIRTUAL_ARMED_TTL minutes, default 60).
+// ------------------------------------------------------------
+function armedTtlMs(config = {}) {
+  const minutes = Math.max(1, parseInt(config.BOT_VIRTUAL_ARMED_TTL) || 60);
+  return minutes * 60 * 1000;
+}
+
+// Drop expired entries: { symbol: armed-until epoch ms }
+function pruneArmed(armed, now = Date.now()) {
+  const out = {};
+  for (const [symbol, expiresAt] of Object.entries(armed || {})) {
+    if (Number(expiresAt) > now) out[symbol] = Number(expiresAt);
+  }
+  return out;
+}
+
+// May a signal on `symbol` fire a real trade right now?
+function isArmed(armed, symbol, config = {}, now = Date.now()) {
+  if (!isEnabled(config)) return true; // filter off → all entries real
+  const expiresAt = (armed || {})[symbol];
+  return Number(expiresAt) > now;
+}
+
+function armAsset(armed, symbol, config = {}, now = Date.now()) {
+  return { ...pruneArmed(armed, now), [symbol]: now + armedTtlMs(config) };
+}
+
+function disarmAsset(armed, symbol) {
+  const out = { ...(armed || {}) };
+  delete out[symbol];
+  return out;
+}
+
 module.exports = {
   isEnabled,
   createState,
@@ -78,5 +116,6 @@ module.exports = {
   advanceTrade,
   lossThreshold,
   returnMode,
-  shouldReturnToVirtual
+  shouldReturnToVirtual,
+  armedTtlMs, pruneArmed, isArmed, armAsset, disarmAsset
 };

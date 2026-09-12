@@ -443,7 +443,8 @@ test('bot safety settings persist across a real server restart', async t => {
     BOT_SYMBOLS: [],
     BOT_VIRTUAL_FILTER_ENABLED: false,
     BOT_VIRTUAL_LOSS_THRESHOLD: 9,
-    BOT_VIRTUAL_RETURN_MODE: 'loss'
+    BOT_VIRTUAL_RETURN_MODE: 'loss',
+    BOT_VIRTUAL_ARMED_TTL: 60
   };
   let firstServer;
   let secondServer;

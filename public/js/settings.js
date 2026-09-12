@@ -73,6 +73,7 @@
     'cfg-bot-breakout':     'SNIPER_BREAKOUT_BUFFER',
     'cfg-bot-autocorrelation': 'SNIPER_MAX_AUTOCORRELATION',
     'cfg-bot-virtual-loss-threshold': 'BOT_VIRTUAL_LOSS_THRESHOLD',
+    'cfg-bot-virtual-armed-ttl': 'BOT_VIRTUAL_ARMED_TTL',
     'cfg-bot-martingale-multiplier': 'BOT_MARTINGALE_MULTIPLIER',
     'cfg-bot-martingale-max-steps': 'BOT_MARTINGALE_MAX_STEPS'
   };
