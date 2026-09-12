@@ -1186,7 +1186,7 @@ const server = app.listen(PORT, async () => {
 
 // Helper: next midnight in the configured daily-reset timezone.
 // (was hardcoded EAT/UTC+3 — 02:30 for IST users; now BOT_TIMEZONE,
-//  default Asia/Kolkata so "restart at midnight" means YOUR midnight)
+//  default Africa/Nairobi = East Africa Time so "restart at midnight" means YOUR midnight)
 function getNextMidnight() {
   return midnight.getNextMidnight(RESET_TZ());
 }

@@ -1,15 +1,16 @@
 // engine/midnight.js
 // ============================================================
 // Timezone-aware "midnight" math for the daily session reset.
-// The old implementation hardcoded East Africa Time (UTC+3),
-// which is 02:30 in India — the reset now fires at 00:00 in a
-// configurable IANA timezone (default Asia/Kolkata).
+// Midnight here = daily session reset. Configurable IANA timezone
+// (BOT_TIMEZONE env or config key); default East Africa Time.
 //
 // Also hosts resolveRestore(): the pure decision logic used at
 // boot to bring the bot back to where it was before a restart.
 // ============================================================
 
-const DEFAULT_TZ = 'Asia/Kolkata';
+// Alex is on East Africa Time (UTC+3, no DST) — VPN egress points at
+// India, so never guess the tz from IP; keep this explicit.
+const DEFAULT_TZ = 'Africa/Nairobi';
 
 const _dayFmtCache = new Map();
 function dayFormatter(tz) {

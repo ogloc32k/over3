@@ -72,5 +72,12 @@ check('idle: stays inactive', idleRes.patch.active === false);
 const vcRes = resolveRestore({ at: dayAgo, active: true, botResetTime: future, virtualWinCount: 9, virtualLossCount: 4, virtualTradeCount: 13 }, future + 1000);
 check('virtual counters preserved across session reset', vcRes.patch.virtualTradeCount === 13 && vcRes.patch.virtualWinCount === 9);
 
+
+// --- DEFAULT timezone is East Africa Time (Africa/Nairobi, UTC+3) ---
+const eatMid = getNextMidnight(undefined, NOW); // default tz
+const eatUTC = new Date(eatMid).toISOString();
+check('DEFAULT tz is Africa/Nairobi (00:00 EAT = 21:00 UTC)', /T21:00:00/.test(eatUTC), 'got ' + eatUTC);
+check('DEFAULT tz midnight in the future', eatMid > NOW);
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
