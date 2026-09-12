@@ -717,10 +717,10 @@ const server = app.listen(PORT, async () => {
       const start = new Date(midnight.getStartOfDay(RESET_TZ(), Date.now()));
       const { data: trades, error } = await supabase
         .from('trading_ledger')
-        .select('pnl')
+        .select('profit_loss')
         .gte('created_at', start.toISOString());
       if (error) throw error;
-      const seeded = (trades || []).reduce((s, t) => s + (parseFloat(t.pnl) || 0), 0);
+      const seeded = (trades || []).reduce((s, t) => s + (parseFloat(t.profit_loss) || 0), 0);
       const rounded = Math.round(seeded * 100) / 100;
       store.updateState({ dailyPnl: rounded });
       logger.info(`📅 Daily P&L reconciled with the ledger after restart: $${rounded.toFixed(2)} so far today (${RESET_TZ()}).`);
