@@ -946,7 +946,9 @@ const server = app.listen(PORT, async () => {
             const mgNote = mg.enabled && (store.state.martingaleLevel || 0) > 0 ? ` (martingale step ${store.state.martingaleLevel}/${mg.maxSteps})` : '';
             store.addLog('info', `📤 Real signal accepted: ${signal.contractType} ${signal.symbol}, stake $${stake.toFixed(2)}${mgNote}, duration ${signal.duration} ticks.`);
 
-            derivClient.buyContract(signal).then(contractId => {
+            // CRITICAL: inject the resolved stake (including martingale raises) into the
+            // buy request — signal.stake only carries the base stake from the engine.
+            derivClient.buyContract({ ...signal, stake }).then(contractId => {
               if (contractId) {
                 store.addLog('info', `🤖 Bot trade: ${signal.contractType} ${signal.symbol}`);
               } else {

@@ -2,6 +2,15 @@
 
 ## What was fixed
 
+### 7. Martingale stake was never applied to actual trades (Sept 12 2026) — CRITICAL
+The bot computed the martingale stake for logging and balance checks, but `buyContract(signal)`
+was called with the engine signal whose stake is always the BASE stake — so every martingale step
+actually bought a base-stake contract ($0.35) while the UI/log claimed $0.70. Affected demo AND
+real Deriv (proposal `amount` used `params.stake`), and the ledger recorded the wrong profit.
+**Fix:** the resolved stake (including martingale raises) is now injected into the buy request.
+Verified end-to-end: loss -> step 1 -> next real trade bought @$0.70 and settled WIN $0.67
+(0.70 x 0.952 payout), ledger record correct, win resets to base.
+
 ### 6. Trade duration units + Deriv range enforcement (Sept 12 2026)
 The old default (70 ticks) was **invalid on Deriv** — real accounts only allow ticks 1–10.
 - New `services/duration.js`: single source of truth for duration rules. Fallback ranges:
