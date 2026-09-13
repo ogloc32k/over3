@@ -479,8 +479,9 @@ function _syncBotCard(state) {
 
   const modeEl = document.getElementById('bot-execution-mode');
   if (modeEl) {
-    const armedList = Object.keys(state.armedAssets || {});
-    const realLabel = armedList.length ? 'REAL · ' + armedList.join(', ') : 'REAL';
+    const armedMap = state.armedAssets || {};
+    const armedList = Object.keys(armedMap).filter(s => s !== '*');
+    const realLabel = armedMap['*'] || !armedList.length ? 'REAL' : 'REAL · ' + armedList.join(', ');
     modeEl.textContent = state.active ? (isVirtual ? 'VIRTUAL' : realLabel) : 'IDLE';
     modeEl.className = state.active && isVirtual ? 'virtual-mode' : (state.active ? 'real-mode' : '');
   }

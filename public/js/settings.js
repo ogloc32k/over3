@@ -79,6 +79,7 @@
   };
   const CHECKBOX_FIELDS = {
     'cfg-bot-virtual-enabled': 'BOT_VIRTUAL_FILTER_ENABLED',
+    'cfg-bot-virtual-per-asset': 'BOT_VIRTUAL_PER_ASSET',
     'cfg-bot-martingale-enabled': 'BOT_MARTINGALE_ENABLED'
   };
   const STRING_FIELDS = {

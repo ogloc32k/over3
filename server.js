@@ -84,6 +84,7 @@ const DEFAULT_CONFIG = {
   BOT_VIRTUAL_LOSS_THRESHOLD: 4,
   BOT_VIRTUAL_RETURN_MODE: 'any',
   BOT_VIRTUAL_ARMED_TTL: 60,   // minutes an armed asset stays real before the hunt restarts on paper
+  BOT_VIRTUAL_PER_ASSET: false, // OFF: one shared streak across markets, any market may fire the earned real trade
   BOT_MARTINGALE_ENABLED: false,
   BOT_MARTINGALE_MULTIPLIER: 2.0,
   BOT_MARTINGALE_MAX_STEPS: 4
@@ -1001,10 +1002,12 @@ const server = app.listen(PORT, async () => {
           }
 
           const isWin = paperResult.result === 'WIN';
-          // Per-asset streaks: only THIS market's paper losses arm THIS
-          // market. Other markets keep hunting independently.
+          // Bank the streak. Global mode (default): every market's paper
+          // losses share ONE streak. Per-asset mode: each market banks
+          // its own.
+          const bankSym = virtualFilter.streakKey(symbol, store.config);
           const streaks = { ...(store.state.virtualLossStreaks || {}) };
-          streaks[symbol] = isWin ? 0 : (streaks[symbol] || 0) + 1;
+          streaks[bankSym] = isWin ? 0 : (streaks[bankSym] || 0) + 1;
 
           const threshold = virtualFilter.lossThreshold(store.config);
           const ttlMin    = Math.max(1, parseInt(store.config.BOT_VIRTUAL_ARMED_TTL) || 60);
@@ -1012,15 +1015,15 @@ const server = app.listen(PORT, async () => {
 
           let armed = virtualFilter.pruneArmed(store.state.armedAssets || {});
           if (armedHit) {
-            // Arming consumes the evidence: fresh streak for this asset.
-            streaks[symbol] = 0;
-            armed = virtualFilter.armAsset(armed, symbol, store.config);
+            // Arming consumes the evidence: fresh streak.
+            streaks[bankSym] = 0;
+            armed = virtualFilter.armAsset(armed, bankSym, store.config);
           }
 
           const nextVirtualState = {
             virtualTrade: null,
             virtualTradeCount: (store.state.virtualTradeCount || 0) + 1,
-            virtualLossStreak: streaks[symbol],
+            virtualLossStreak: streaks[bankSym],
             virtualLossStreaks: streaks,
             armedAssets: armed,
             executionMode: Object.keys(armed).length > 0 ? 'real' : 'virtual',
@@ -1029,9 +1032,9 @@ const server = app.listen(PORT, async () => {
           };
 
           if (armedHit) {
-            store.addLog('warn', `🧪 Virtual LOSS: ${paperTrade.contractType} ${symbol} (${paperResult.entryPrice} → ${paperResult.exitPrice}); ${symbol} hit ${threshold} losses — ARMED for the next real signal on ${symbol} only (expires in ${ttlMin} min).`);
+            store.addLog('warn', `🧪 Virtual LOSS: ${paperTrade.contractType} ${symbol} (${paperResult.entryPrice} → ${paperResult.exitPrice}); hit ${threshold} losses — ARMED for the next real signal${virtualFilter.perAssetEnabled(store.config) ? ' on ' + symbol + ' only' : ''} (expires in ${ttlMin} min).`);
           } else {
-            store.addLog('info', `🧪 Virtual ${paperResult.result}: ${paperTrade.contractType} ${symbol} (${paperResult.entryPrice} → ${paperResult.exitPrice}); ${symbol} streak ${streaks[symbol]}/${threshold}.`);
+            store.addLog('info', `🧪 Virtual ${paperResult.result}: ${paperTrade.contractType} ${symbol} (${paperResult.entryPrice} → ${paperResult.exitPrice}); streak ${streaks[bankSym]}/${threshold}.`);
           }
 
            releaseTradeLock();
@@ -1060,10 +1063,12 @@ const server = app.listen(PORT, async () => {
             signal.duration = norm.duration;
             signal.durationUnit = norm.unit;
 
-            // Per-asset gate: only the market that EARNED the arming
-            // (banked its paper losses) may fire real. Every other market
-            // keeps hunting on paper — including across restarts.
-            if (!virtualFilter.isArmed(store.state.armedAssets || {}, symbol, store.config)) {
+            // Real-trade gate. Global mode (default): one shared streak
+            // — any market's paper losses count and any market may fire
+            // the earned real trade (original behaviour). Per-asset mode:
+            // only the market that banked the losses may fire real.
+            const gateSym = virtualFilter.streakKey(symbol, store.config);
+            if (!virtualFilter.isArmed(store.state.armedAssets || {}, gateSym, store.config)) {
               const obsTicks = durationUtil.durationToTicks(signal.duration, signal.durationUnit, signal.symbol);
               const paperTrade = virtualFilter.createTrade({ ...signal, duration: obsTicks }, computed.price);
               tradeInProgressSym['global'] = true;
@@ -1184,7 +1189,8 @@ const server = app.listen(PORT, async () => {
         // Per-asset: only the market that fired the real trade is
         // affected; other markets keep their own hunt untouched.
         const armedNow = virtualFilter.pruneArmed(store.state.armedAssets || {});
-        const settledSym = trade.symbol || '?';
+        const settledSym = virtualFilter.streakKey(trade.symbol || '?', store.config);
+        const settledLabel = trade.symbol || '?';
         if (armedNow[settledSym]) {
           if (virtualFilter.shouldReturnToVirtual(result, store.config)) {
             const streaks = { ...(store.state.virtualLossStreaks || {}) };
@@ -1197,12 +1203,12 @@ const server = app.listen(PORT, async () => {
               virtualLossStreaks: streaks,
               armedAssets: armed
             });
-            store.addLog('info', `🔁 Real ${result} on ${settledSym}; ${settledSym} back to paper (${virtualFilter.returnMode(store.config)} policy).`);
+            store.addLog('info', `🔁 Real ${result} on ${settledLabel}; ${settledLabel} back to paper (${virtualFilter.returnMode(store.config)} policy).`);
           } else {
             // Policy keeps this asset real — refresh the arming window so
             // it cannot expire mid-run.
             store.updateState({ armedAssets: virtualFilter.armAsset(armedNow, settledSym, store.config) });
-            store.addLog('info', `🔁 Real ${result} on ${settledSym}; policy keeps ${settledSym} in real mode — arming window refreshed.`);
+            store.addLog('info', `🔁 Real ${result} on ${settledLabel}; policy keeps it in real mode — arming window refreshed.`);
           }
         }
       }

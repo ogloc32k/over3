@@ -66,3 +66,20 @@ test('restart across midnight clears the hunt (fresh day)', () => {
   assert.deepStrictEqual(act.patch.virtualLossStreaks, {});
   assert.deepStrictEqual(act.patch.armedAssets, {});
 });
+
+test('global mode (default): shared streak key, any market may fire real', () => {
+  const g = { ...CFG, BOT_VIRTUAL_PER_ASSET: false };
+  assert.equal(vf.perAssetEnabled(g), false);
+  assert.equal(vf.streakKey('R_10', g), '*');
+  assert.equal(vf.streakKey('R_25', g), '*');       // every market banks together
+  const armed = vf.armAsset({}, vf.streakKey('R_10', g), g);
+  assert.equal(vf.isArmed(armed, vf.streakKey('R_25', g), g), true);  // any market passes the gate
+});
+
+test('per-asset mode (opt-in): markets bank separately', () => {
+  const p = { ...CFG, BOT_VIRTUAL_PER_ASSET: true };
+  assert.equal(vf.streakKey('R_10', p), 'R_10');
+  const armed = vf.armAsset({}, 'R_10', p);
+  assert.equal(vf.isArmed(armed, 'R_10', p), true);
+  assert.equal(vf.isArmed(armed, 'R_25', p), false); // other markets stay on paper
+});

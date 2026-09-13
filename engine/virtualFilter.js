@@ -109,6 +109,21 @@ function disarmAsset(armed, symbol) {
   return out;
 }
 
+// ------------------------------------------------------------
+// GLOBAL vs PER-ASSET MODE (BOT_VIRTUAL_PER_ASSET, default OFF).
+// Global mode banks every market on the '*' key: one shared
+// streak, and any market may fire the earned real trade — the
+// original behaviour. Per-asset mode banks each market separately
+// and only that market can fire real.
+// ------------------------------------------------------------
+function perAssetEnabled(config = {}) {
+  return config.BOT_VIRTUAL_PER_ASSET === true;
+}
+
+function streakKey(symbol, config = {}) {
+  return perAssetEnabled(config) ? symbol : '*';
+}
+
 module.exports = {
   isEnabled,
   createState,
@@ -117,5 +132,6 @@ module.exports = {
   lossThreshold,
   returnMode,
   shouldReturnToVirtual,
-  armedTtlMs, pruneArmed, isArmed, armAsset, disarmAsset
+  armedTtlMs, pruneArmed, isArmed, armAsset, disarmAsset,
+  perAssetEnabled, streakKey
 };
