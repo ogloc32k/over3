@@ -1037,39 +1037,36 @@ const server = app.listen(PORT, async () => {
           }
 
           const isWin = paperResult.result === 'WIN';
-          // Bank the streak. Global mode (default): every market's paper
-          // losses share ONE streak. Per-asset mode: each market banks
-          // its own.
-          const bankSym = virtualFilter.streakKey(symbol, store.config);
-          const streaks = { ...(store.state.virtualLossStreaks || {}) };
-          streaks[bankSym] = isWin ? 0 : (streaks[bankSym] || 0) + 1;
-
-          const threshold = virtualFilter.lossThreshold(store.config);
-          const ttlMin    = Math.max(1, parseInt(store.config.BOT_VIRTUAL_ARMED_TTL) || 60);
-          const armedHit  = !isWin && streaks[symbol] >= threshold;
-
-          let armed = virtualFilter.pruneArmed(store.state.armedAssets || {});
-          if (armedHit) {
-            // Arming consumes the evidence: fresh streak.
-            streaks[bankSym] = 0;
-            armed = virtualFilter.armAsset(armed, bankSym, store.config);
-          }
+          // Bank the streak via the pure, unit-tested helper.
+          // Global mode (default): every market's paper losses share ONE
+          // streak under '*'. Per-asset mode: each market banks its own.
+          const ttlMin = Math.max(1, parseInt(store.config.BOT_VIRTUAL_ARMED_TTL) || 60);
+          const bank   = virtualFilter.bankPaperResult({
+            symbol,
+            isWin,
+            streaks: store.state.virtualLossStreaks || {},
+            armed:   store.state.armedAssets || {},
+            config:  store.config
+          });
 
           const nextVirtualState = {
             virtualTrade: null,
             virtualTradeCount: (store.state.virtualTradeCount || 0) + 1,
-            virtualLossStreak: streaks[bankSym],
-            virtualLossStreaks: streaks,
-            armedAssets: armed,
-            executionMode: Object.keys(armed).length > 0 ? 'real' : 'virtual',
+            virtualLossStreak: bank.streak,
+            virtualLossStreaks: bank.streaks,
+            armedAssets: bank.armed,
+            executionMode: Object.keys(bank.armed).length > 0 ? 'real' : 'virtual',
             virtualWinCount: (store.state.virtualWinCount || 0) + (isWin ? 1 : 0),
             virtualLossCount: (store.state.virtualLossCount || 0) + (isWin ? 0 : 1)
           };
 
-          if (armedHit) {
-            store.addLog('warn', `🧪 Virtual LOSS: ${paperTrade.contractType} ${symbol} (${paperResult.entryPrice} → ${paperResult.exitPrice}); hit ${threshold} losses — ARMED for the next real signal${virtualFilter.perAssetEnabled(store.config) ? ' on ' + symbol + ' only' : ''} (expires in ${ttlMin} min).`);
+          if (bank.armedHit) {
+            const scope = virtualFilter.perAssetEnabled(store.config)
+              ? ` on ${symbol} only (expires in ${ttlMin} min)`
+              : ' — armed until the real trade settles';
+            store.addLog('warn', `🧪 Virtual LOSS: ${paperTrade.contractType} ${symbol} (${paperResult.entryPrice} → ${paperResult.exitPrice}); hit ${bank.threshold} losses — ARMED for the next real signal${scope}.`);
           } else {
-            store.addLog('info', `🧪 Virtual ${paperResult.result}: ${paperTrade.contractType} ${symbol} (${paperResult.entryPrice} → ${paperResult.exitPrice}); streak ${streaks[bankSym]}/${threshold}.`);
+            store.addLog('info', `🧪 Virtual ${paperResult.result}: ${paperTrade.contractType} ${symbol} (${paperResult.entryPrice} → ${paperResult.exitPrice}); streak ${bank.streak}/${bank.threshold}.`);
           }
 
            releaseTradeLock();

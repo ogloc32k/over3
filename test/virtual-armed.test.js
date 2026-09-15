@@ -88,3 +88,62 @@ test('per-asset mode (opt-in): markets bank separately', () => {
   assert.equal(vf.isArmed(armed, 'R_10', p), true);
   assert.equal(vf.isArmed(armed, 'R_25', p), false); // other markets stay on paper
 });
+
+// ============================================================
+// bankPaperResult: banking a settled paper trade (pure logic)
+// ============================================================
+test('bankPaperResult: global mode arms on the SHARED streak (regression — never armed inline)', () => {
+  // Two paper losses on DIFFERENT markets must arm in global mode.
+  // The old inline server code checked streaks[symbol] while the
+  // global streak lives under '*' — armedHit was always false.
+  const now = Date.now();
+  const G2 = { ...CFG, BOT_VIRTUAL_LOSS_THRESHOLD: 2 };
+  let bank = vf.bankPaperResult({ symbol: 'R_75', isWin: false, streaks: {}, armed: {}, config: G2, now });
+  assert.equal(bank.armedHit, false);
+  assert.equal(bank.streak, 1);
+  assert.equal(bank.streaks['*'], 1);
+
+  bank = vf.bankPaperResult({ symbol: 'R_100', isWin: false, streaks: bank.streaks, armed: bank.armed, config: G2, now: now + 1000 });
+  assert.equal(bank.armedHit, true);
+  assert.equal(bank.streak, 0);            // arming consumed the evidence
+  assert.equal(bank.streaks['*'], 0);
+  assert.ok(bank.armed['*'] > now + 1000); // armed under the global key
+});
+
+test('bankPaperResult: global arming has no TTL wait', () => {
+  const now = Date.now();
+  let bank = { streaks: {}, armed: {} };
+  for (let i = 0; i < 4; i++) {
+    bank = vf.bankPaperResult({ symbol: 'R_10', isWin: false, streaks: bank.streaks, armed: bank.armed, config: CFG, now: now + i });
+  }
+  assert.equal(bank.armedHit, true);
+  // a day later the global arming is still alive — armed until the trade settles
+  assert.equal(vf.isArmed(bank.armed, '*', CFG, now + 24 * 3600 * 1000), true);
+});
+
+test('bankPaperResult: win resets the shared streak, no arming', () => {
+  const now = Date.now();
+  let bank = vf.bankPaperResult({ symbol: 'R_75', isWin: false, streaks: {}, armed: {}, config: CFG, now });
+  bank = vf.bankPaperResult({ symbol: 'R_100', isWin: true, streaks: bank.streaks, armed: bank.armed, config: CFG, now: now + 1000 });
+  assert.equal(bank.armedHit, false);
+  assert.equal(bank.streak, 0);
+  assert.equal(bank.streaks['*'], 0);
+});
+
+test('bankPaperResult: per-asset mode arms only after the SAME market hits threshold', () => {
+  const now = Date.now();
+  const P = { ...CFG, BOT_VIRTUAL_PER_ASSET: true };
+  // R_75 loses once, R_100 loses once: neither reached 4 alone.
+  let bank = vf.bankPaperResult({ symbol: 'R_75',  isWin: false, streaks: {}, armed: {}, config: P, now });
+  bank = vf.bankPaperResult({ symbol: 'R_100', isWin: false, streaks: bank.streaks, armed: bank.armed, config: P, now: now + 1000 });
+  assert.equal(bank.armedHit, false);
+  assert.equal(bank.streaks['R_75'], 1);
+  assert.equal(bank.streaks['R_100'], 1);
+  // R_75 loses 3 more times -> armed for R_75 only.
+  for (let i = 0; i < 3; i++) {
+    bank = vf.bankPaperResult({ symbol: 'R_75', isWin: false, streaks: bank.streaks, armed: bank.armed, config: P, now: now + (i + 2) * 1000 });
+  }
+  assert.equal(bank.armedHit, true);
+  assert.ok(bank.armed['R_75'] > now);
+  assert.equal(bank.armed['R_100'], undefined);
+});

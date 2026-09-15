@@ -99,6 +99,29 @@ function isArmed(armed, symbol, config = {}, now = Date.now()) {
   return Number(expiresAt) > now;
 }
 
+// Banks a settled paper trade and decides whether the hunt arms for a
+// real trade. Pure and unit-tested — the server handler only logs and
+// applies the result. Global mode banks under '*' (shared streak);
+// per-asset mode under the symbol.
+// Regression note: the inline server code armed when streaks[symbol]
+// crossed the threshold — in global mode the streak lives under '*',
+// so the hunt NEVER armed. All keying goes through streakKey() here.
+function bankPaperResult({ symbol, isWin, streaks = {}, armed = {}, config = {}, now = Date.now() }) {
+  const bankSym   = streakKey(symbol, config);
+  const next      = { ...streaks };
+  next[bankSym]   = isWin ? 0 : (next[bankSym] || 0) + 1;
+  const threshold = lossThreshold(config);
+  const armedHit  = !isWin && next[bankSym] >= threshold;
+
+  let bank = pruneArmed(armed, now);
+  if (armedHit) {
+    // Arming consumes the evidence: fresh streak.
+    next[bankSym] = 0;
+    bank = armAsset(bank, bankSym, config, now);
+  }
+  return { streaks: next, armed: bank, armedHit, threshold, streak: next[bankSym] };
+}
+
 function armAsset(armed, symbol, config = {}, now = Date.now()) {
   // Global mode (per-market off): arming lasts until the real trade
   // settles — no expiry wait, the original behaviour. Per-asset mode:
@@ -134,6 +157,7 @@ module.exports = {
   createState,
   createTrade,
   advanceTrade,
+  bankPaperResult,
   lossThreshold,
   returnMode,
   shouldReturnToVirtual,
