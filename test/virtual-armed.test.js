@@ -13,9 +13,10 @@ test('armedTtlMs: default 60 minutes, configurable', () => {
   assert.equal(vf.armedTtlMs({ BOT_VIRTUAL_ARMED_TTL: '15' }), 15 * 60 * 1000);
 });
 
-test('arm/prune/isArmed: expiry window honored', () => {
+test('arm/prune/isArmed: expiry window honored (per-asset mode)', () => {
   const now = Date.now();
-  const armed = vf.armAsset({}, 'R_10', CFG, now);
+  const P = { ...CFG, BOT_VIRTUAL_PER_ASSET: true };
+  const armed = vf.armAsset({}, 'R_10', P, now);
   assert.equal(armed['R_10'], now + 60 * 60 * 1000);
   assert.equal(vf.isArmed(armed, 'R_10', CFG, now + 59 * 60 * 1000), true);
   assert.equal(vf.isArmed(armed, 'R_10', CFG, now + 61 * 60 * 1000), false);
@@ -24,8 +25,9 @@ test('arm/prune/isArmed: expiry window honored', () => {
 
 test('per-asset isolation: other markets untouched', () => {
   const now = Date.now();
-  let armed = vf.armAsset({}, 'R_10', CFG, now);
-  armed = vf.armAsset(armed, 'R_25', CFG, now);
+  const P = { ...CFG, BOT_VIRTUAL_PER_ASSET: true };
+  let armed = vf.armAsset({}, 'R_10', P, now);
+  armed = vf.armAsset(armed, 'R_25', P, now);
   assert.equal(vf.isArmed(armed, 'R_25', CFG, now), true);
   const after = vf.disarmAsset(armed, 'R_10');
   assert.equal(vf.isArmed(after, 'R_10', CFG, now), false);
@@ -68,12 +70,15 @@ test('restart across midnight clears the hunt (fresh day)', () => {
 });
 
 test('global mode (default): shared streak key, any market may fire real', () => {
+  const now = Date.now();
   const g = { ...CFG, BOT_VIRTUAL_PER_ASSET: false };
   assert.equal(vf.perAssetEnabled(g), false);
   assert.equal(vf.streakKey('R_10', g), '*');
   assert.equal(vf.streakKey('R_25', g), '*');       // every market banks together
   const armed = vf.armAsset({}, vf.streakKey('R_10', g), g);
   assert.equal(vf.isArmed(armed, vf.streakKey('R_25', g), g), true);  // any market passes the gate
+  // Global arming does not expire: no wait, armed until the trade settles.
+  assert.equal(vf.isArmed(armed, '*', g, now + 24 * 3600 * 1000), true);
 });
 
 test('per-asset mode (opt-in): markets bank separately', () => {

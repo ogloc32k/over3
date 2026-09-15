@@ -470,12 +470,39 @@ app.post('/api/trade/manual', async (req, res) => {
 // ============================================================
 app.get('/api/config', (req, res) => res.json(store.config || {}));
 
+// Tolerant equality: inputs post strings ("2"), config stores numbers.
+function configValueEqual(a, b) {
+  if (a === b) return true;
+  const aObj = a && typeof a === 'object';
+  const bObj = b && typeof b === 'object';
+  if (Array.isArray(a) || Array.isArray(b) || (aObj && bObj)) {
+    try { return JSON.stringify(a) === JSON.stringify(b); } catch (_) { return false; }
+  }
+  return String(a) === String(b);
+}
+
 app.post('/api/config', (req, res) => {
   try {
-    store.config = { ...store.config, ...req.body };
+    // Ignore no-op saves (the dashboard used to round-trip the form on
+    // every tab open): identical values must not spam the log or fire
+    // configChanged, which resets hunt progression while running.
+    const incoming = req.body || {};
+    let effective = false;
+    for (const [k, v] of Object.entries(incoming)) {
+      if (!Object.prototype.hasOwnProperty.call(store.config, k) ||
+          !configValueEqual(store.config[k], v)) { effective = true; break; }
+    }
+    if (!effective) return res.json({ success: true, unchanged: true });
+
+    const prevFilter   = store.config.BOT_VIRTUAL_FILTER_ENABLED;
+    const prevPerAsset = store.config.BOT_VIRTUAL_PER_ASSET;
+    store.config = { ...store.config, ...incoming };
     normalizeConfigDuration('Saved config');
     if (!saveConfig()) return res.status(500).json({ error: 'Could not persist bot configuration' });
-    store.emit('configChanged');
+    store.emit('configChanged', {
+      filterToggled:   !configValueEqual(prevFilter,   store.config.BOT_VIRTUAL_FILTER_ENABLED),
+      perAssetToggled: !configValueEqual(prevPerAsset, store.config.BOT_VIRTUAL_PER_ASSET)
+    });
     store.addLog('info', `⚙️ Bot configuration updated. Virtual filter: ${virtualFilter.isEnabled(store.config) ? 'ON' : 'OFF'}; threshold: ${virtualFilter.lossThreshold(store.config)}; return policy: ${virtualFilter.returnMode(store.config)}.`);
     res.json({ success: true });
   } catch(err) { res.json({ error: err.message }); }
@@ -936,12 +963,13 @@ const server = app.listen(PORT, async () => {
       }
     }, 1000);
 
-    store.on('configChanged', () => {
+    store.on('configChanged', (info) => {
       store.tickBuffer.setMaxSize(store.config.ANALYSIS_WINDOW || 500);
-      // Make a live toggle safe and deterministic. Enabling the filter while
-      // armed always returns to paper mode; disabling it explicitly allows
-      // real entries after any current paper trade is finished.
-      if (store.state.active && !store.state.virtualTrade && !isTradeActive()) {
+      // Only genuine semantic toggles (filter on/off, per-market on/off)
+      // reset the hunt. Ordinary setting tweaks must NOT wipe the earned
+      // streak/armed progression — and no-op saves never reach here.
+      const toggled = info && (info.filterToggled || info.perAssetToggled);
+      if (toggled && store.state.active && !store.state.virtualTrade && !isTradeActive()) {
         store.updateState({
           executionMode: virtualFilter.isEnabled(store.config) ? 'virtual' : 'real',
           virtualLossStreak: 0,

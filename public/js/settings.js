@@ -91,7 +91,10 @@
   const DURATION_RANGES = { t: [1, 10], s: [15, 60], m: [1, 60] };
   const DURATION_LABELS = { t: 'ticks', s: 'seconds', m: 'minutes' };
 
-  window.onDurationUnitChange = function () {
+  // Applies the duration-range UI WITHOUT saving. Loading the config
+  // must never save it back — that caused phantom "configuration
+  // updated" logs and needless configChanged events on every tab open.
+  function _applyDurationRange() {
     const unitSel = document.getElementById('cfg-bot-duration-unit');
     const input   = document.getElementById('cfg-bot-duration');
     if (!unitSel || !input) return;
@@ -107,7 +110,11 @@
     }
     const label = document.getElementById('cfg-bot-duration-range');
     if (label) label.textContent = `${DURATION_LABELS[unit]} ${range[0]}–${range[1]}`;
-    saveBotConfig();
+  }
+
+  window.onDurationUnitChange = function () {
+    _applyDurationRange();
+    saveBotConfig(); // a real user change does save
   };
 
   window.loadBotConfig = async function () {
@@ -141,7 +148,7 @@
       const unitSel = document.getElementById('cfg-bot-duration-unit');
       if (unitSel) {
         unitSel.value = ['t','s','m'].includes(config.BOT_DURATION_UNIT) ? config.BOT_DURATION_UNIT : 't';
-        window.onDurationUnitChange();
+        _applyDurationRange(); // load must not save back
       }
 
       renderBotSymbolChips(normalizeSymbols(config.BOT_SYMBOLS));

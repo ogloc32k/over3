@@ -100,7 +100,12 @@ function isArmed(armed, symbol, config = {}, now = Date.now()) {
 }
 
 function armAsset(armed, symbol, config = {}, now = Date.now()) {
-  return { ...pruneArmed(armed, now), [symbol]: now + armedTtlMs(config) };
+  // Global mode (per-market off): arming lasts until the real trade
+  // settles — no expiry wait, the original behaviour. Per-asset mode:
+  // the armed window expires after the TTL so stale evidence never
+  // risks money.
+  const ttl = perAssetEnabled(config) ? armedTtlMs(config) : 365 * 24 * 60 * 60 * 1000;
+  return { ...pruneArmed(armed, now), [symbol]: now + ttl };
 }
 
 function disarmAsset(armed, symbol) {
