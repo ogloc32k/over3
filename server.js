@@ -10,6 +10,7 @@ const USE_FAKE_DATA = !process.env.DERIV_APP_ID || !process.env.DERIV_PAT;
 // Fake-data mode: swap Supabase for the in-memory ledger so analytics work without keys.
 const supabase = (USE_FAKE_DATA || !realSupabase) ? fakeSupabase : realSupabase;
 const virtualFilter = require('./engine/virtualFilter');
+const { equityDrawdown } = require('./engine/drawdown');
 const durationUtil = require('./services/duration');
 const cloudStore = require('./services/cloudStore');
 const { createGate, COOKIE_NAME } = require('./services/auth');
@@ -611,25 +612,14 @@ app.get('/api/ledger/aggregated', async (req, res) => {
     }
 
     // --- Max drawdown against REAL account equity ---
-    // The old math measured the dip against the cumulative-P&L curve,
-    // which starts at $0 — so a few cents of early profit made the
-    // percentage explode (e.g. peak +$0.28, trough -$3.60 -> -1385%).
-    // Seed the curve with the balance implied at the window start
-    // (current balance minus the window's total P&L) so the stat is a
-    // true percentage of account equity and can never exceed 100%.
-    // Approximation: uses the active account's balance (deposits and
-    // non-bot activity would skew the seed; none exist in practice).
-    const startEquity = Math.max(0, (store.state.balance || 0) - totalProfit);
-    let seedPeak = startEquity, seedEq = startEquity;
-    let maxDrawdown = 0, maxDrawdownAbs = 0;
-    for (const t of trades) {
-      seedEq += parseFloat(t.profit_loss) || 0;
-      if (seedEq > seedPeak) seedPeak = seedEq;
-      const ddAbs = seedPeak - seedEq;
-      if (ddAbs > maxDrawdownAbs) maxDrawdownAbs = ddAbs;
-      const ddPct = seedPeak > 0 ? (ddAbs / seedPeak) * 100 : 0;
-      if (ddPct > maxDrawdown) maxDrawdown = ddPct;
-    }
+    // balance_after anchors (when the ledger column exists) make the
+    // stat withdrawal-proof: external cash movements between trades are
+    // level shifts, never losses. Legacy rows fall back to seeding
+    // from the live balance. See engine/drawdown.js.
+    const dd = equityDrawdown(trades, { liveBalance: store.state.balance || 0 });
+    const maxDrawdown = dd.maxDrawdownPct;
+    const maxDrawdownAbs = dd.maxDrawdownAbs;
+    const startEquity = dd.startEquity;
 
     const total        = trades.length;
     const strikeRate   = total > 0 ? (wins / total) * 100 : 0;
@@ -817,6 +807,7 @@ const server = app.listen(PORT, async () => {
     const bot        = require('./engine/bot');
 
     let lastTradeCloseTime = 0;
+    let balanceAfterWarned = false; // one-time hint that balance_after is missing
     let lastProposalTime   = 0;
 
     const transitionArmed = (reason = REASONS.ARMED) => {
@@ -1311,11 +1302,22 @@ const server = app.listen(PORT, async () => {
           exit_price:     trade.exit_price  ? parseFloat(trade.exit_price)  : null,
           duration_ticks: parseInt(trade.duration_ticks) || 0,
           bot_name:       trade.bot_name || 'manual',
-          account
+          account,
+          balance_after:  parseFloat(store.state.balance) || null
         };
         if (!supabase) throw new Error('Supabase is not configured; trade was not persisted.');
         const { error } = await supabase.from('trading_ledger').insert(record);
-        if (error) {
+        if (error && /balance_after/i.test(`${error.message || ''} ${error.code || ''} ${error.details || ''}`)) {
+          // Ledger predates the balance_after column: retry without it.
+          const legacy = { ...record }; delete legacy.balance_after;
+          const retry = await supabase.from('trading_ledger').insert(legacy);
+          if (retry.error) {
+            store.recordError(`Failed to persist settled trade: ${retry.error.message || retry.error}`);
+          } else if (!balanceAfterWarned) {
+            balanceAfterWarned = true;
+            store.addLog('warn', '📊 Ledger lacks the balance_after column — drawdown analytics approximate. Fix in Supabase SQL: alter table trading_ledger add column if not exists balance_after numeric;');
+          }
+        } else if (error) {
           store.recordError(`Failed to persist settled trade: ${error.message || error}`);
         }
         else console.log('✅ Trade recorded:', record.asset, profit, 'account:', account);

@@ -29,6 +29,19 @@ create policy "bot store full access" on bot_store for all
   using (true) with check (true);
 ```
 
+Optional but recommended (withdrawal-proof max-drawdown analytics):
+
+```sql
+alter table trading_ledger
+  add column if not exists balance_after numeric;
+```
+
+Records the account balance after each settled trade. Without it the
+drawdown stat is seeded from the live balance and deposits/withdrawals
+skew it; with it, cash movements are detected and excluded from the
+drawdown. The app degrades gracefully until the column exists.
+
+
 ## 2. Deploy on Render (blueprint)
 
 1. render.com → **New → Blueprint** → pick the `over3` GitHub repo.
