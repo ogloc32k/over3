@@ -149,7 +149,11 @@
       document.getElementById('meta-profit').textContent = (profit >= 0 ? '+$' : '-$') + Math.abs(profit).toFixed(2);
       document.getElementById('meta-strike').innerHTML = `${(data.strikeRate||0).toFixed(1)}% <small style="display:block;font-size:8px;color:#787b86;">${total} trades total</small>`;
       document.getElementById('meta-pf').textContent = typeof data.profitFactor === 'number' ? data.profitFactor.toFixed(2) : data.profitFactor;
-      document.getElementById('meta-dd').textContent = `-${(data.maxDrawdown||0).toFixed(2)}%`;
+      const ddAbs = Math.max(0, data.maxDrawdownAbs || 0);
+      const ddPct = Math.max(0, data.maxDrawdown || 0);
+      document.getElementById('meta-dd').textContent = ddPct > 0
+        ? `-$${ddAbs.toFixed(2)} (-${ddPct.toFixed(2)}%)`
+        : `-$${ddAbs.toFixed(2)}`;
       document.getElementById('meta-avg-win-loss').textContent = `$${(data.avgWin||0).toFixed(2)} / $${(data.avgLoss||0).toFixed(2)}`;
       document.getElementById('meta-max-consec').textContent = `W:${data.maxWinStreak||0} / L:${Math.abs(data.maxLossStreak||0)}`;
       document.getElementById('meta-avg-duration').textContent = `${((data.totalDuration||0)/(total||1)).toFixed(0)}s`;

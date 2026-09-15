@@ -533,7 +533,7 @@ app.post('/api/config/reset', (req, res) => {
 function emptyAnalytics() {
   return {
     totalProfit: 0, tradeCount: 0, winCount: 0, lossCount: 0,
-    grossProfit: 0, grossLoss: 0, maxDrawdown: 0, totalDuration: 0,
+    grossProfit: 0, grossLoss: 0, maxDrawdown: 0, maxDrawdownAbs: 0, startEquity: 0, totalDuration: 0,
     avgWin: 0, avgLoss: 0, strikeRate: 0, profitFactor: 0,
     maxWinStreak: 0, maxLossStreak: 0,
     assetContributions: [], equityData: []
@@ -584,7 +584,7 @@ app.get('/api/ledger/aggregated', async (req, res) => {
     let wins = 0, losses = 0, sumWin = 0, sumLoss = 0, sumDuration = 0;
     const assetMap = {};
     const equityCurve = [];
-    let runningEquity = 0, peakEquity = 0, maxDrawdown = 0;
+    let runningEquity = 0;
     let currentStreak = 0, maxWinStreak = 0, maxLossStreak = 0;
 
     for (const t of trades) {
@@ -599,11 +599,6 @@ app.get('/api/ledger/aggregated', async (req, res) => {
 
       runningEquity += pnl;
       equityCurve.push({ timestamp: t.created_at, equity: runningEquity });
-      if (runningEquity > peakEquity) peakEquity = runningEquity;
-      if (peakEquity > 0) {
-        const dd = ((peakEquity - runningEquity) / peakEquity) * 100;
-        if (dd > maxDrawdown) maxDrawdown = dd;
-      }
 
       // Streak tracking
       if (pnl > 0) {
@@ -615,6 +610,27 @@ app.get('/api/ledger/aggregated', async (req, res) => {
       if (currentStreak < maxLossStreak) maxLossStreak = currentStreak;
     }
 
+    // --- Max drawdown against REAL account equity ---
+    // The old math measured the dip against the cumulative-P&L curve,
+    // which starts at $0 — so a few cents of early profit made the
+    // percentage explode (e.g. peak +$0.28, trough -$3.60 -> -1385%).
+    // Seed the curve with the balance implied at the window start
+    // (current balance minus the window's total P&L) so the stat is a
+    // true percentage of account equity and can never exceed 100%.
+    // Approximation: uses the active account's balance (deposits and
+    // non-bot activity would skew the seed; none exist in practice).
+    const startEquity = Math.max(0, (store.state.balance || 0) - totalProfit);
+    let seedPeak = startEquity, seedEq = startEquity;
+    let maxDrawdown = 0, maxDrawdownAbs = 0;
+    for (const t of trades) {
+      seedEq += parseFloat(t.profit_loss) || 0;
+      if (seedEq > seedPeak) seedPeak = seedEq;
+      const ddAbs = seedPeak - seedEq;
+      if (ddAbs > maxDrawdownAbs) maxDrawdownAbs = ddAbs;
+      const ddPct = seedPeak > 0 ? (ddAbs / seedPeak) * 100 : 0;
+      if (ddPct > maxDrawdown) maxDrawdown = ddPct;
+    }
+
     const total        = trades.length;
     const strikeRate   = total > 0 ? (wins / total) * 100 : 0;
     const profitFactor = grossLoss === 0 ? (grossProfit > 0 ? grossProfit : 0) : grossProfit / grossLoss;
@@ -624,7 +640,7 @@ app.get('/api/ledger/aggregated', async (req, res) => {
 
     res.json({
       totalProfit, tradeCount: total, winCount: wins, lossCount: losses,
-      grossProfit, grossLoss, maxDrawdown, totalDuration: sumDuration,
+      grossProfit, grossLoss, maxDrawdown, maxDrawdownAbs, startEquity, totalDuration: sumDuration,
       avgWin, avgLoss, strikeRate, profitFactor,
       maxWinStreak, maxLossStreak: Math.abs(maxLossStreak),
       assetContributions, equityData: equityCurve
