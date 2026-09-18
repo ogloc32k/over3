@@ -2,6 +2,15 @@
 // analytics.js – Charts, metrics, timeframe presets
 // ============================================================
 (function () {
+  // Theme-aware chart axis text: reads the live CSS variable so charts
+  // adapt when the light/dark toggle flips (scriptable option, re-evaluated
+  // on every redraw). Falls back for tests/no-DOM environments.
+  function axisTextColor() {
+    try {
+      const v = window.getComputedStyle(document.body).getPropertyValue('--text-secondary').trim();
+      return v || '#787b86';
+    } catch (_) { return '#787b86'; }
+  }
   let assetBarChart = null;
   let equityChartInstance = null;
   let currentAnalyticsData = null;
@@ -50,7 +59,7 @@
           plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (context) { return (context.parsed.x >= 0 ? '+' : '') + '$' + context.parsed.x.toFixed(2); } } } },
           scales: {
             x: { grid: { display: isMobile ? false : true }, ticks: { display: isMobile ? false : true, callback: function (v) { return (v >= 0 ? '+' : '') + '$' + v.toFixed(2); } } },
-            y: { grid: { display: false }, ticks: { font: { size: isMobile ? 8 : 9 }, color: '#d1d5db' }, afterFit: function (scale) { if (window.innerWidth < 768) scale.width = 70; else scale.width = 120; } }
+            y: { grid: { display: false }, ticks: { font: { size: isMobile ? 8 : 9 }, color: () => axisTextColor() }, afterFit: function (scale) { if (window.innerWidth < 768) scale.width = 70; else scale.width = 120; } }
           }
         },
         plugins: [barValueLabelPlugin]
@@ -65,7 +74,7 @@
           plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (context) { return 'Balance: ' + (context.parsed.y >= 0 ? '+$' : '-$') + Math.abs(context.parsed.y).toFixed(2); } } } },
           scales: {
             x: { type: 'category', grid: { display: false }, ticks: { font: { size: 7 }, maxTicksLimit: window.innerWidth < 768 ? 5 : 20, maxRotation: 0, autoSkip: true, color: '#9ca3af' } },
-            y: { grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { font: { size: 7 }, color: '#9ca3af', callback: function (v) { return (v >= 0 ? '+' : '-') + '$' + Math.abs(v).toFixed(2); } } }
+            y: { grid: { color: 'rgba(128,128,128,0.15)' }, ticks: { font: { size: 7 }, color: () => axisTextColor(), callback: function (v) { return (v >= 0 ? '+' : '-') + '$' + Math.abs(v).toFixed(2); } } }
           }
         }
       });
@@ -147,7 +156,7 @@
       const wins = data.winCount || 0;
       const losses = data.lossCount || 0;
       document.getElementById('meta-profit').textContent = (profit >= 0 ? '+$' : '-$') + Math.abs(profit).toFixed(2);
-      document.getElementById('meta-strike').innerHTML = `${(data.strikeRate||0).toFixed(1)}% <small style="display:block;font-size:8px;color:#787b86;">${total} trades total</small>`;
+      document.getElementById('meta-strike').innerHTML = `${(data.strikeRate||0).toFixed(1)}% <small style="display:block;font-size:8px;color:var(--text-secondary);">${total} trades total</small>`;
       document.getElementById('meta-pf').textContent = typeof data.profitFactor === 'number' ? data.profitFactor.toFixed(2) : data.profitFactor;
       const ddAbs = Math.max(0, data.maxDrawdownAbs || 0);
       const ddPct = Math.max(0, data.maxDrawdown || 0);

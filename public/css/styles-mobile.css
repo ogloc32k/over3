@@ -505,8 +505,8 @@
   padding: 14px 12px;
   background: transparent !important;
   border: none !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
-  color: #d1d5db !important;
+  border-bottom: 1px solid var(--border-subtle) !important;
+  color: var(--text-primary) !important;
   font-size: 15px;
   font-weight: 500;
   text-align: left;
@@ -517,8 +517,8 @@
 
 .drawer-nav-item:hover,
 .drawer-nav-item:active {
-  background-color: #1a2130 !important;
-  color: #ffffff !important;
+  background-color: var(--bg-surface) !important;
+  color: var(--text-primary) !important;
 }
 
 .drawer-nav-item .dnav-icon {
@@ -527,7 +527,7 @@
 
 .drawer-divider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--border-subtle);
   margin: 12px 0;
 }
 
@@ -540,8 +540,8 @@
   padding: 14px 12px;
   background: transparent !important;
   border: none !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
-  color: #d1d5db !important;
+  border-bottom: 1px solid var(--border-subtle) !important;
+  color: var(--text-primary) !important;
   font-size: 15px;
   font-weight: 500;
   text-align: left;
@@ -552,8 +552,8 @@
 
 .btn-swap-drawer:hover,
 .btn-swap-drawer:active {
-  background-color: #1a2130 !important;
-  color: #ffffff !important;
+  background-color: var(--bg-surface) !important;
+  color: var(--text-primary) !important;
 }
 
 /* ---- Fix 2: Close button (✕) in top‑right corner ---- */
@@ -563,7 +563,7 @@
   right: 16px;
   background: transparent !important;
   border: none !important;
-  color: #8a8d93;
+  color: var(--text-secondary);
   font-size: 22px;
   line-height: 1;
   cursor: pointer;
@@ -572,7 +572,7 @@
 }
 
 .drawer-close:hover {
-  color: #ffffff;
+  color: var(--text-primary);
 }
 
 .drawer-header {

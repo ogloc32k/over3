@@ -50,7 +50,7 @@ body.light {
   --border-subtle: #cbd5e1;
   --text-primary: #0f172a;
   --text-secondary: #475569;
-  --text-muted: #94a3b8;
+  --text-muted: #64748b;   /* darkened: #94a3b8 was ~2.1:1 on light cards */
   --green-profit: #059669;
   --red-loss: #dc2626;
   --orange-warn: #d97706;
