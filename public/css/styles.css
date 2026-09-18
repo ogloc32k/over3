@@ -881,7 +881,7 @@ body.analytics-active .app-main {
 
 .bot-filter-status {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: 1fr 1fr 1.4fr;
   gap: 8px;
 }
 .bot-filter-status > div {
@@ -904,7 +904,9 @@ body.analytics-active .app-main {
 .bot-filter-status strong {
   color: var(--text-primary);
   font: 700 12px 'Consolas', monospace;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: right;
 }
 .bot-stats {
   display: grid;
