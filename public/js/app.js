@@ -566,8 +566,17 @@ function renderMobileHomeCharts(data) {
             x: {
               type: 'linear', min: 0, max: Math.max(1, model.points.length - 1),
               grid: { display: false }, ticks: {
+                // Stride-cap the date labels ourselves: with few trades every
+                // point wants a label and "17 Sept"/"18 Sept" overlap on a
+                // narrow phone chart. Chart.js autoSkip does not measure
+                // custom-callback label widths, so we thin deterministically.
                 maxTicksLimit: 6, autoSkip: true, maxRotation: 0,
-                callback: value => model.labels[Math.round(value)] || ''
+                callback: value => {
+                  const i = Math.round(value);
+                  const maxTf = window.innerWidth < 768 ? 3 : 6;
+                  const step = Math.max(1, Math.ceil(model.points.length / maxTf));
+                  return i % step === 0 ? (model.labels[i] || '') : '';
+                }
               }
             },
             y: {
@@ -592,6 +601,11 @@ function renderMobileHomeCharts(data) {
     const assets = Array.isArray(data?.assetContributions) ? data.assetContributions.filter(a => Number.isFinite(Number(a.pnl))) : [];
     const hasAssets = assets.length > 0;
     if (hasAssets && chartAvailable) {
+      // The y-axis prints one label per asset; a fixed 120px container crams
+      // 10 markets into 12px rows and the labels pile on top of each other.
+      // Grow the container with the asset count instead.
+      const wrap = assetCtx.parentElement;
+      if (wrap) wrap.style.height = Math.min(420, Math.max(80, 26 + assets.length * 18)) + 'px';
       const labels = assets.map(a => window.QuantCore?.getAssetLabel(a.name, true) || a.name);
       const values = assets.map(a => Number(a.pnl));
       const maxAbs = Math.max(0.05, ...values.map(value => Math.abs(value)));

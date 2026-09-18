@@ -73,7 +73,7 @@
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (context) { return 'Balance: ' + (context.parsed.y >= 0 ? '+$' : '-$') + Math.abs(context.parsed.y).toFixed(2); } } } },
           scales: {
-            x: { type: 'category', grid: { display: false }, ticks: { font: { size: 7 }, maxTicksLimit: window.innerWidth < 768 ? 5 : 20, maxRotation: 0, autoSkip: true, color: '#9ca3af' } },
+            x: { type: 'category', grid: { display: false }, ticks: { font: { size: 7 }, maxTicksLimit: window.innerWidth < 768 ? 5 : 20, maxRotation: 0, autoSkip: true, color: () => axisTextColor() } },
             y: { grid: { color: 'rgba(128,128,128,0.15)' }, ticks: { font: { size: 7 }, color: () => axisTextColor(), callback: function (v) { return (v >= 0 ? '+' : '-') + '$' + Math.abs(v).toFixed(2); } } }
           }
         }
